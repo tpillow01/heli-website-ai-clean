@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tynan Equipment AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Logo Bar -->
+    <div class="logo-bar">
+      <img src="{{ url_for('static', filename='tynan.png.png') }}" alt="Tynan Logo" class="logo-img">
+      <div class="header-title">Tynan Equipment AI</div>
+      <img src="{{ url_for('static', filename='heli.png.png') }}" alt="Heli Logo" class="logo-img">
+    </div>
+
+    <!-- Chat Box (starts empty now) -->
+    <div id="chat-box"></div>
+
+    <!-- Input Form -->
+    <form class="input-form" id="chat-form">
+      <textarea id="user-input" rows="3" placeholder="Describe the customer's needs..."></textarea>
+      <button type="submit">Send</button>
+    </form>
+
+    <div class="footer">Powered by Tynan Equipment AI</div>
+  </div>
+
+  <script>
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('user-input');
+    const chatBox = document.getElementById('chat-box');
+
+    function formatLabels(text) {
+      return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
+        '<span class="section-label">$1</span>');
+    }
+
+    function renderAIResponse(aiReply) {
+      const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
+      let html = '<div class="message ai">';
+      paragraphs.forEach(p => {
+        let formatted = formatLabels(p);
+        if (formatted.trim().startsWith('-')) {
+          html += `<div class="subpoint">${formatted}</div>`;
+        } else if (formatted.includes('section-label')) {
+          html += `<div>${formatted}</div>`;
+        } else {
+          html += `<div class="final-note">${formatted}</div>`;
+        }
+      });
+      html += '</div>';
+      chatBox.innerHTML += html;
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+
+      chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
+      input.value = '';
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          renderAIResponse(data.response);
+        } else {
+          chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
+        }
+      } catch (error) {
+        chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
+      }
+
+      chatBox.scrollTop = chatBox.scrollHeight;
+    });
+  </script>
+</body>
+</html>
