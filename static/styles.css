@@ -30,8 +30,17 @@ body {
 }
 
 .logo-wrapper {
-    flex: 1;
-    text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 90px; /* Same as .logo-img height */
+}
+
+.logo-img {
+  height: 90px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
 .logo-img {
