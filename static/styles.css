@@ -30,24 +30,17 @@ body {
 }
 
 .logo-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 90px; /* Same as .logo-img height */
-}
-
-.logo-img {
-  height: 90px;
-  width: auto;
-  object-fit: contain;
-  display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 90px;
 }
 
 .logo-img {
     height: 90px;
     width: auto;
     object-fit: contain;
-    display: inline-block;
+    display: block;
 }
 
 .header-title {
@@ -56,7 +49,7 @@ body {
     font-size: 36px;
     font-weight: bold;
     text-align: center;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
     letter-spacing: 1.5px;
     padding: 10px;
 }
@@ -64,14 +57,14 @@ body {
 /* Chat Box */
 #chat-box {
     background-color: #ffffff;
-    border: 3px solid #ff0000;
+    border: 5px solid #000000;
+    box-shadow: 0 0 0 3px #cc0000; /* Red outer border */
     border-radius: 8px;
     padding: 20px;
     height: 60vh;
     max-height: 600px;
     overflow-y: auto;
     margin-bottom: 15px;
-    box-shadow: 0 0 15px rgba(0,0,0,0.5);
     color: #000000;
     font-size: 18px;
     line-height: 1.8;
@@ -149,7 +142,7 @@ textarea {
 }
 
 textarea:focus {
-    border-color: #ff0000;
+    border-color: #cc0000;
     outline: none;
 }
 
@@ -168,6 +161,7 @@ button:hover {
     background-color: #ffcccc;
 }
 
+/* Scroll to bottom button */
 #scroll-btn {
     position: fixed;
     bottom: 25px;
@@ -179,7 +173,7 @@ button:hover {
     border-radius: 50px;
     font-weight: bold;
     font-size: 16px;
-    box-shadow: 0 0 12px rgba(0,0,0,0.3);
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
     display: none;
     z-index: 999;
 }
@@ -207,7 +201,8 @@ button:hover {
         height: 50vh;
     }
 
-    textarea, button {
+    textarea,
+    button {
         font-size: 16px;
     }
 
