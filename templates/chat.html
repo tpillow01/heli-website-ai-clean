@@ -10,12 +10,16 @@
   <div class="chat-container">
     <!-- Logo Bar -->
     <div class="logo-bar">
-      <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img">
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img">
+      </div>
       <div class="header-title">Tynan Equipment AI</div>
-      <img src="{{ url_for('static', filename='heli.png.png') }}" alt="Heli Logo" class="logo-img">
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img">
+      </div>
     </div>
 
-    <!-- Chat Box (starts empty now) -->
+    <!-- Chat Box -->
     <div id="chat-box"></div>
 
     <!-- Input Form -->
