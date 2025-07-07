@@ -7,6 +7,7 @@ with open("models.json", "r", encoding="utf-8") as f:
 print(f"✅ Loaded {len(models_data)} models from JSON")
 
 
+# Convert weight from kg/tons to lbs
 def convert_to_lbs(capacity_raw):
     text = str(capacity_raw).lower().strip()
 
@@ -32,6 +33,7 @@ def convert_to_lbs(capacity_raw):
         return f"{val:,} lbs"
 
 
+# Convert mm to ft/in
 def mm_to_feet_inches(mm_value):
     try:
         mm = float(mm_value)
@@ -41,6 +43,16 @@ def mm_to_feet_inches(mm_value):
         return f"{feet} ft {inches} in"
     except:
         return str(mm_value)
+
+
+# Convert meters to feet
+def m_to_feet(m_value):
+    try:
+        meters = float(m_value)
+        feet = round(meters * 3.28084, 1)
+        return f"{feet} ft (converted from {meters} m)"
+    except:
+        return str(m_value)
 
 
 def filter_models(user_input, models_list=None):
@@ -78,6 +90,14 @@ def generate_forklift_context(user_input, models=None):
     if models:
         context_lines = ["Here are a few matching Heli models:"]
         for m in models:
+            # Handle lift height (could be in mm or meters)
+            lift_raw = m.get('LiftHeight_mm', 'N/A')
+            lift_str = str(lift_raw).lower()
+            if "m" in lift_str and "mm" not in lift_str:
+                lift_display = m_to_feet(lift_raw)
+            else:
+                lift_display = mm_to_feet_inches(lift_raw)
+
             context_lines += [
                 "<span class=\"section-label\">Model:</span>",
                 f"- {m.get('Model', 'N/A')}",
@@ -93,7 +113,7 @@ def generate_forklift_context(user_input, models=None):
                 f"- Height: {mm_to_feet_inches(m.get('Height_mm', 'N/A'))}",
                 f"- Width: {mm_to_feet_inches(m.get('Width_mm', 'N/A'))}",
                 f"- Length: {mm_to_feet_inches(m.get('Length_mm', 'N/A'))}",
-                f"- Max Lift Height: {mm_to_feet_inches(m.get('LiftHeight_mm', 'N/A'))}",
+                f"- Max Lift Height: {lift_display}",
 
                 "<span class=\"section-label\">Features:</span>",
                 f"- {m.get('Features', 'N/A')}",
