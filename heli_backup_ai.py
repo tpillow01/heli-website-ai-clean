@@ -24,7 +24,7 @@ print(f"✅ Loaded {len(model_data)} models from JSON")
 # Store conversation history
 conversation_history = []
 
-# Helper: fuzzy match company name
+# Fuzzy match company name
 def find_account_by_name(name):
     names = [acct.get("Account Name", "") for acct in account_data]
     match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
@@ -32,7 +32,7 @@ def find_account_by_name(name):
         return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
 
-# Helper: filter models based on customer info
+# Filter models based on customer info
 def filter_models_for_account(account):
     industry = account.get("Industry", "").lower()
     truck_types = account.get("Truck Types at Location", "").lower()
@@ -45,12 +45,12 @@ def filter_models_for_account(account):
             filtered.append(model)
     return filtered
 
-# Helper: format models into prompt-friendly blocks
+# Format preview blocks
 def format_models(models):
     if not models:
         return "- No suitable model matches found."
     blocks = ""
-    for m in models[:2]:  # ✅ Limit to 2 to avoid token overload
+    for m in models[:2]:
         blocks += (
             "<span class=\"section-label\">Suggested Model:</span>\n"
             f"- Model: {m.get('Model')}\n"
@@ -90,23 +90,22 @@ Customer Profile:
 {model_blocks}
 """
     else:
-        model_blocks = format_models(model_data)  # Show general models
+        filtered_models = model_data
+        model_blocks = format_models(model_data)
         extra_context = (
             "No customer data was found. Proceeding with general forklift recommendations.\n\n"
             + model_blocks
         )
 
-    # Inject extra context + user prompt
+    # Append models to prompt
     user_question = extra_context + "\n\n" + user_question
-    filtered_context = generate_forklift_context(user_question)
+    filtered_context = generate_forklift_context(user_question, models=filtered_models)
 
-    # ✅ Trim chat history to prevent token overload
     if len(conversation_history) > 2:
         conversation_history.pop(0)
 
     conversation_history.append({"role": "user", "content": user_question})
 
-    # System prompt
     system_prompt = {
         "role": "system",
         "content": (

@@ -7,7 +7,7 @@ with open("models.json", "r", encoding="utf-8") as f:
 print(f"✅ Loaded {len(models_data)} models from JSON")
 
 
-# Convert weight from kg/tons to lbs
+# Convert kg/tons to lbs
 def convert_to_lbs(capacity_raw):
     text = str(capacity_raw).lower().strip()
     if not text or text in ["n/a", "na", "none"]:
@@ -44,7 +44,7 @@ def mm_to_feet_inches(mm_value):
         return str(mm_value)
 
 
-# Convert meters (with units) to feet
+# Convert meters to ft (if stored as "3m" or "3.5 m")
 def m_to_feet(m_value):
     try:
         text = str(m_value).lower()
@@ -83,7 +83,7 @@ def filter_models(user_input, models_list=None):
         filtered = [m for m in filtered if capacity_ok(m.get("Capacity", 0))]
 
     print(f"📌 Filtered models: {filtered}")
-    return filtered[:3]
+    return filtered[:3]  # Limit to 3
 
 
 def generate_forklift_context(user_input, models=None):
@@ -95,6 +95,8 @@ def generate_forklift_context(user_input, models=None):
         for m in models:
             lift_raw = m.get('LiftHeight_mm', 'N/A')
             lift_str = str(lift_raw).lower()
+
+            # Check if it's a meter value, otherwise treat as mm
             if "m" in lift_str and "mm" not in lift_str:
                 lift_display = m_to_feet(lift_raw)
             else:
