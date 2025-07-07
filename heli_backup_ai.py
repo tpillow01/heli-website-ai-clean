@@ -1,16 +1,59 @@
 import os
+import json
+import difflib
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
 
-# Load API key from environment variable
+# Load API key
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
-# Store conversation history
+# Load customer data
+with open("accounts.json", "r", encoding="utf-8") as f:
+    account_data = json.load(f)
+print(f"✅ Loaded {len(account_data)} accounts from JSON")
+
+# Load model data
+with open("models.json", "r", encoding="utf-8") as f:
+    model_data = json.load(f)
+print(f"✅ Loaded {len(model_data)} models from JSON")
+
 conversation_history = []
+
+# Fuzzy match company name
+def find_account_by_name(name):
+    names = [acct.get("Account Name", "") for acct in account_data]
+    match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
+    if match:
+        return next(acct for acct in account_data if acct["Account Name"] == match[0])
+    return None
+
+# Filter models by industry or truck types
+def filter_models_for_account(account):
+    industry = account.get("Industry", "").lower()
+    truck_types = account.get("Truck Types at Location", "").lower()
+
+    filtered = []
+    for model in model_data:
+        model_type = model.get("Type", "").lower()
+        if industry in model_type or any(tt.strip() in model_type for tt in truck_types.split(";")):
+            filtered.append(model)
+    return filtered or model_data  # fallback if nothing matches
+
+# Format account info
+def format_account_context(account):
+    return f"""
+Customer Profile:
+- Account: {account.get("Account Name")}
+- Industry: {account.get("Industry")}
+- Fleet Size: {account.get("Total Company Fleet Size")}
+- Truck Types: {account.get("Truck Types at Location")}
+- Competitors: {account.get("Primary Competitor")}, {account.get("Secondary Competitor")}, {account.get("Tertiary Competitor")}
+- Timeframe: {account.get("Timeframe of Next Purchase")}
+"""
 
 @app.route('/')
 def home():
@@ -24,14 +67,23 @@ def chat():
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'})
 
-    filtered_context = generate_forklift_context(user_question)
+    account = find_account_by_name(user_question)
 
-    if len(conversation_history) > 10:
+    if account:
+        filtered_models = filter_models_for_account(account)
+        account_context = format_account_context(account)
+        model_context = generate_forklift_context(user_question, models=filtered_models)
+        extra_context = f"{account_context}\n\n{model_context}"
+    else:
+        model_context = generate_forklift_context(user_question, models=model_data)
+        extra_context = "No customer data was found. Proceeding with general forklift recommendations.\n\n" + model_context
+
+    # Update conversation history
+    if len(conversation_history) > 5:
         conversation_history.pop(0)
-
     conversation_history.append({"role": "user", "content": user_question})
 
-    # System prompt (always first)
+    # System prompt
     system_prompt = {
         "role": "system",
         "content": (
@@ -43,7 +95,7 @@ def chat():
             "At the end, include:\n"
             "- Sales Pitch Techniques: 1–2 persuasive points.\n"
             "- Common Objections: 1–2 common concerns and how to address them.\n\n"
-            "Example:\n"
+            "<span class=\"section-label\">Example:</span>\n"
             "<span class=\"section-label\">Model:</span>\n"
             "- Heli H2000 Series 5-7T\n"
             "- Designed for heavy-duty applications\n\n"
@@ -56,7 +108,7 @@ def chat():
             "<span class=\"section-label\">Common Objections:</span>\n"
             "- \"Why not Toyota or Crown?\"\n"
             "  → Heli offers similar quality at a better price with faster part availability."
-            f"\n\n{filtered_context}"
+            f"\n\n{extra_context}"
         )
     }
 

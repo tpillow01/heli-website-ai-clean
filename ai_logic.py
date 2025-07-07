@@ -1,13 +1,16 @@
 import json
 
-# Load models from JSON
+# Only load this if user doesn't provide models explicitly
 with open("models.json", "r", encoding="utf-8") as f:
     models_data = json.load(f)
 
 print(f"✅ Loaded {len(models_data)} models from JSON")
 
-def filter_models(user_input):
-    filtered = models_data
+def filter_models(user_input, models_list=None):
+    if models_list is None:
+        models_list = models_data
+
+    filtered = models_list
 
     if "narrow aisle" in user_input.lower():
         filtered = [m for m in filtered if "narrow" in m.get("Type", "").lower()]
@@ -30,12 +33,13 @@ def filter_models(user_input):
     print(f"📌 Filtered models: {filtered}")
     return filtered[:3]
 
-def generate_forklift_context(user_input):
-    filtered_data = filter_models(user_input)
+def generate_forklift_context(user_input, models=None):
+    if models is None:
+        models = filter_models(user_input)
 
-    if filtered_data:
+    if models:
         context_lines = ["Here are a few matching Heli models:"]
-        for m in filtered_data:
+        for m in models:
             context_lines += [
                 "<span class=\"section-label\">Model:</span>",
                 f"- {m.get('Model', 'N/A')}",
@@ -52,11 +56,9 @@ def generate_forklift_context(user_input):
 
                 ""
             ]
-        context = "\n".join(context_lines)
+        return "\n".join(context_lines)
     else:
-        context = (
+        return (
             "You are a forklift expert assistant. No models matched the filters, "
             "but please provide a professional recommendation based on the user's input."
         )
-
-    return context
