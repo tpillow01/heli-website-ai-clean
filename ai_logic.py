@@ -6,6 +6,27 @@ with open("models.json", "r", encoding="utf-8") as f:
 
 print(f"✅ Loaded {len(models_data)} models from JSON")
 
+
+def convert_to_lbs(capacity_raw):
+    text = str(capacity_raw).lower().strip()
+
+    # Extract numeric part
+    num = ''.join(c if c.isdigit() or c == '.' else ' ' for c in text).strip().split()[0]
+    try:
+        val = float(num)
+    except:
+        return f"{capacity_raw}"  # fallback if invalid
+
+    if "kg" in text:
+        pounds = round(val * 2.20462)
+        return f"{pounds:,} lbs (converted from {val:,} kg)"
+    elif "ton" in text or "t" in text:
+        pounds = round(val * 2000)
+        return f"{pounds:,} lbs (converted from {val} tons)"
+    else:
+        return f"{val:,} lbs"  # assume already in pounds
+
+
 def filter_models(user_input, models_list=None):
     if models_list is None:
         models_list = models_data
@@ -33,6 +54,7 @@ def filter_models(user_input, models_list=None):
     print(f"📌 Filtered models: {filtered}")
     return filtered[:3]
 
+
 def generate_forklift_context(user_input, models=None):
     if models is None:
         models = filter_models(user_input)
@@ -49,7 +71,7 @@ def generate_forklift_context(user_input, models=None):
                 f"- {m.get('Power', 'N/A')}",
 
                 "<span class=\"section-label\">Capacity:</span>",
-                f"- {m.get('Capacity', 'N/A')}",
+                f"- {convert_to_lbs(m.get('Capacity', 'N/A'))}",
 
                 "<span class=\"section-label\">Features:</span>",
                 f"- {m.get('Features', 'N/A')}",
