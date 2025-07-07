@@ -10,12 +10,19 @@ print(f"✅ Loaded {len(models_data)} models from JSON")
 def convert_to_lbs(capacity_raw):
     text = str(capacity_raw).lower().strip()
 
-    # Extract numeric part
-    num = ''.join(c if c.isdigit() or c == '.' else ' ' for c in text).strip().split()[0]
+    # Guard: if empty or null, just return "N/A"
+    if not text or text in ["n/a", "na", "none"]:
+        return "N/A"
+
+    # Try to extract numeric part
+    parts = ''.join(c if c.isdigit() or c == '.' else ' ' for c in text).strip().split()
+    if not parts:
+        return f"{capacity_raw}"  # fallback if no numbers found
+
     try:
-        val = float(num)
+        val = float(parts[0])
     except:
-        return f"{capacity_raw}"  # fallback if invalid
+        return f"{capacity_raw}"  # fallback if invalid number
 
     if "kg" in text:
         pounds = round(val * 2.20462)
