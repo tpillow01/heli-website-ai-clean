@@ -10,25 +10,24 @@ print(f"✅ Loaded {len(models_data)} models from JSON")
 # Convert weight from kg/tons to lbs
 def convert_to_lbs(capacity_raw):
     text = str(capacity_raw).lower().strip()
-
     if not text or text in ["n/a", "na", "none"]:
         return "N/A"
 
     parts = ''.join(c if c.isdigit() or c == '.' else ' ' for c in text).strip().split()
     if not parts:
-        return f"{capacity_raw}"
+        return str(capacity_raw)
 
     try:
         val = float(parts[0])
     except:
-        return f"{capacity_raw}"
+        return str(capacity_raw)
 
     if "kg" in text:
         pounds = round(val * 2.20462)
-        return f"{pounds:,} lbs (converted from {val:,} kg)"
+        return f"{pounds:,} lbs (from {val:,} kg)"
     elif "ton" in text or "t" in text:
         pounds = round(val * 2000)
-        return f"{pounds:,} lbs (converted from {val} tons)"
+        return f"{pounds:,} lbs (from {val} tons)"
     else:
         return f"{val:,} lbs"
 
@@ -45,12 +44,16 @@ def mm_to_feet_inches(mm_value):
         return str(mm_value)
 
 
-# Convert meters to feet
+# Convert meters (with units) to feet
 def m_to_feet(m_value):
     try:
-        meters = float(m_value)
+        text = str(m_value).lower()
+        num_part = ''.join(c if c.isdigit() or c == '.' else ' ' for c in text).strip().split()
+        if not num_part:
+            return str(m_value)
+        meters = float(num_part[0])
         feet = round(meters * 3.28084, 1)
-        return f"{feet} ft (converted from {meters} m)"
+        return f"{feet} ft (from {meters} m)"
     except:
         return str(m_value)
 
@@ -90,7 +93,6 @@ def generate_forklift_context(user_input, models=None):
     if models:
         context_lines = ["Here are a few matching Heli models:"]
         for m in models:
-            # Handle lift height (could be in mm or meters)
             lift_raw = m.get('LiftHeight_mm', 'N/A')
             lift_str = str(lift_raw).lower()
             if "m" in lift_str and "mm" not in lift_str:
