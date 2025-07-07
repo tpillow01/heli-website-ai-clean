@@ -25,7 +25,7 @@ print(f"✅ Loaded {len(model_data)} models from JSON")
 # Store conversation history
 conversation_history = []
 
-# Helper: fuzzy match company name
+# Fuzzy match company name
 def find_account_by_name(name):
     names = [acct.get("Account Name", "") for acct in account_data]
     match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
@@ -33,7 +33,7 @@ def find_account_by_name(name):
         return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
 
-# Helper: filter models based on customer info
+# Filter models using industry and truck types
 def filter_models_for_account(account):
     industry = account.get("Industry", "").lower()
     truck_types = account.get("Truck Types at Location", "").lower()
@@ -46,12 +46,12 @@ def filter_models_for_account(account):
             filtered.append(model)
     return filtered
 
-# Helper: format models into prompt-friendly blocks
+# Limit models to reduce OpenAI token size
 def format_models(models):
     if not models:
         return "- No suitable model matches found."
     blocks = ""
-    for m in models[:2]:  # ✅ Limit to 2 to avoid token overload
+    for m in models[:2]:
         blocks += (
             "<span class=\"section-label\">Suggested Model:</span>\n"
             f"- Model: {m.get('Model')}\n"
@@ -88,19 +88,19 @@ Customer Profile:
 {model_blocks}
 """
     else:
-        model_blocks = format_models(model_data)  # Show general models
+        model_blocks = format_models(model_data[:2])
         extra_context = (
             "No customer data was found. Proceeding with general forklift recommendations.\n\n"
             + model_blocks
         )
 
-    # Inject extra context + user prompt
+    # Final prompt: user context + input
     user_question = extra_context + "\n\n" + user_question
     filtered_context = generate_forklift_context(user_question)
 
-    # ✅ Trim chat history to prevent token overload
+    # Trim old chat history
     if len(conversation_history) > 2:
-        conversation_history.pop(0)
+        conversation_history = conversation_history[-2:]
 
     conversation_history.append({"role": "user", "content": user_question})
 
@@ -111,45 +111,38 @@ Customer Profile:
             "You are a helpful, detailed Heli Forklift sales assistant. "
             "When recommending models, format your response as plain text but wrap section headers in a <span class=\"section-label\">...</span> tag. "
             "Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. "
-            "List details underneath using hyphens. Leave a blank line between sections. "
-            "Indent subpoints for clarity.\n\n"
-            "At the end, include:\n"
-            "- Sales Pitch Techniques: 1–2 persuasive points.\n"
-            "- Common Objections: 1–2 common concerns and how to address them.\n\n"
+            "Leave blank lines between sections.\n\n"
             "<span class=\"section-label\">Example:</span>\n"
             "<span class=\"section-label\">Model:</span>\n"
             "- Heli H2000 Series 5-7T\n"
             "- Designed for heavy-duty applications\n\n"
             "<span class=\"section-label\">Power:</span>\n"
-            "- Diesel\n"
-            "- Provides high torque and durability\n\n"
+            "- Diesel\n\n"
             "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
-            "- Emphasize Heli’s lower total cost of ownership.\n"
-            "- Highlight that standard features are optional on other brands.\n\n"
+            "- Emphasize Heli’s lower total cost of ownership.\n\n"
             "<span class=\"section-label\">Common Objections:</span>\n"
             "- \"Why not Toyota or Crown?\"\n"
-            "  → Heli offers similar quality at a better price with faster part availability."
+            "  → Heli offers similar quality at a better price."
             f"\n\n{filtered_context}"
         )
     }
 
     messages = [system_prompt] + conversation_history
 
-    # ✅ Token trimming logic
+    # Trim tokens to prevent 429/overload
     encoding = tiktoken.encoding_for_model("gpt-4")
 
     def num_tokens_from_messages(messages):
         return sum(len(encoding.encode(m["content"])) for m in messages)
 
-    # Reduce message list if too long
     while num_tokens_from_messages(messages) > 7000 and len(messages) > 2:
-        messages.pop(1)  # remove older user messages (index 1 keeps system prompt at index 0)
+        messages.pop(1)  # keep system prompt at index 0
 
     try:
         response = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
-            max_tokens=600,
+            max_tokens=500,
             temperature=0.7
         )
         ai_reply = response.choices[0].message.content.strip()
