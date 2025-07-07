@@ -1,6 +1,6 @@
 import json
 
-# Only load this if user doesn't provide models explicitly
+# Load models from JSON
 with open("models.json", "r", encoding="utf-8") as f:
     models_data = json.load(f)
 
@@ -10,19 +10,17 @@ print(f"✅ Loaded {len(models_data)} models from JSON")
 def convert_to_lbs(capacity_raw):
     text = str(capacity_raw).lower().strip()
 
-    # Guard: if empty or null, just return "N/A"
     if not text or text in ["n/a", "na", "none"]:
         return "N/A"
 
-    # Try to extract numeric part
     parts = ''.join(c if c.isdigit() or c == '.' else ' ' for c in text).strip().split()
     if not parts:
-        return f"{capacity_raw}"  # fallback if no numbers found
+        return f"{capacity_raw}"
 
     try:
         val = float(parts[0])
     except:
-        return f"{capacity_raw}"  # fallback if invalid number
+        return f"{capacity_raw}"
 
     if "kg" in text:
         pounds = round(val * 2.20462)
@@ -31,7 +29,18 @@ def convert_to_lbs(capacity_raw):
         pounds = round(val * 2000)
         return f"{pounds:,} lbs (converted from {val} tons)"
     else:
-        return f"{val:,} lbs"  # assume already in pounds
+        return f"{val:,} lbs"
+
+
+def mm_to_feet_inches(mm_value):
+    try:
+        mm = float(mm_value)
+        total_inches = mm / 25.4
+        feet = int(total_inches // 12)
+        inches = round(total_inches % 12)
+        return f"{feet} ft {inches} in"
+    except:
+        return str(mm_value)
 
 
 def filter_models(user_input, models_list=None):
@@ -79,6 +88,12 @@ def generate_forklift_context(user_input, models=None):
 
                 "<span class=\"section-label\">Capacity:</span>",
                 f"- {convert_to_lbs(m.get('Capacity', 'N/A'))}",
+
+                "<span class=\"section-label\">Dimensions:</span>",
+                f"- Height: {mm_to_feet_inches(m.get('Height_mm', 'N/A'))}",
+                f"- Width: {mm_to_feet_inches(m.get('Width_mm', 'N/A'))}",
+                f"- Length: {mm_to_feet_inches(m.get('Length_mm', 'N/A'))}",
+                f"- Max Lift Height: {mm_to_feet_inches(m.get('LiftHeight_mm', 'N/A'))}",
 
                 "<span class=\"section-label\">Features:</span>",
                 f"- {m.get('Features', 'N/A')}",
