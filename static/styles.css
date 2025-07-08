@@ -18,10 +18,11 @@ body {
     width: 95%;
     max-width: 1400px;
     box-shadow:
-        0 0 0 3px #ff0000,   /* Inner red border */
-        0 0 0 6px #000,      /* Black fill between */
-        0 0 0 9px #ff0000;   /* Outer red border */
+        0 0 0 3px #ff0000,
+        0 0 0 6px #000,
+        0 0 0 9px #ff0000;
     box-sizing: border-box;
+    position: relative; /* important for animation positioning */
 }
 
 /* Logo Bar */
@@ -151,6 +152,16 @@ textarea:focus {
     outline: none;
 }
 
+input[type="text"] {
+    padding: 10px;
+    font-size: 18px;
+    border: 2px solid #000000;
+    border-radius: 8px;
+    background-color: #ffffff;
+    color: #000000;
+    font-family: "Times New Roman", Times, serif;
+}
+
 button {
     padding: 12px;
     font-size: 18px;
@@ -189,6 +200,32 @@ button:hover {
     font-size: 12px;
 }
 
+/* Forklift Animation */
+.forklift-animation {
+    position: absolute;
+    top: 40%;
+    left: -200px;
+    width: 180px;
+    height: 100px;
+    z-index: 1000;
+    display: none;
+    animation: drive-across 4s linear infinite;
+}
+
+.forklift-img {
+    width: 100%;
+    height: auto;
+}
+
+@keyframes drive-across {
+    0% {
+        left: -200px;
+    }
+    100% {
+        left: 100%;
+    }
+}
+
 /* Mobile responsive */
 @media (max-width: 600px) {
     .logo-bar {
@@ -215,7 +252,7 @@ button:hover {
         height: 50vh;
     }
 
-    textarea, button {
+    textarea, button, input[type="text"] {
         font-size: 16px;
         width: 100%;
     }
@@ -223,5 +260,11 @@ button:hover {
     #scroll-btn {
         font-size: 14px;
         padding: 10px 14px;
+    }
+
+    .forklift-animation {
+        width: 120px;
+        height: 70px;
+        top: 35%;
     }
 }

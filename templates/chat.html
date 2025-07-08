@@ -19,6 +19,21 @@
       </div>
     </div>
 
+    <!-- Forklift Animation -->
+    <div class="forklift-animation" id="forklift-animation">
+      <svg class="forklift-img" viewBox="0 0 180 100" xmlns="http://www.w3.org/2000/svg">
+        <g fill="none" stroke="#000" stroke-width="2">
+          <rect x="70" y="50" width="50" height="30" />
+          <circle cx="80" cy="85" r="8" />
+          <circle cx="110" cy="85" r="8" />
+          <rect x="120" y="40" width="30" height="30" fill="white" stroke="#000"/>
+          <text x="125" y="60" fill="red" font-size="10" font-weight="bold">HELI</text>
+          <line x1="70" y1="50" x2="70" y2="20" />
+          <line x1="72" y1="50" x2="72" y2="20" />
+        </g>
+      </svg>
+    </div>
+
     <!-- Chat Box -->
     <div id="chat-box"></div>
 
@@ -40,6 +55,7 @@
     const input = document.getElementById('userInput');
     const customerField = document.getElementById('customer-name');
     const chatBox = document.getElementById('chat-box');
+    const forkliftAnim = document.getElementById('forklift-animation');
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -47,6 +63,8 @@
     }
 
     function renderAIResponse(aiReply) {
+      forkliftAnim.style.display = 'none'; // hide animation
+
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
       paragraphs.forEach(p => {
@@ -72,6 +90,7 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
+      forkliftAnim.style.display = 'block'; // show animation
 
       try {
         const res = await fetch('/api/chat', {
@@ -84,9 +103,11 @@
           const data = await res.json();
           renderAIResponse(data.response);
         } else {
+          forkliftAnim.style.display = 'none';
           chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
         }
       } catch (error) {
+        forkliftAnim.style.display = 'none';
         chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
       }
 
