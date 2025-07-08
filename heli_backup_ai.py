@@ -8,9 +8,7 @@ from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
 
-# Load API key
-api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
+client = OpenAI()  # ✅ Let it read the key from the environment
 
 # Load customer account data
 with open("accounts.json", "r", encoding="utf-8") as f:
