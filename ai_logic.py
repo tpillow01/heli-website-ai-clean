@@ -4,9 +4,21 @@ import json
 with open("models.json", "r", encoding="utf-8") as f:
     models_data = json.load(f)
 
-# Load customer accounts
+# Load customer accounts and convert list to lookup dict
 with open("accounts.json", "r", encoding="utf-8") as f:
-    accounts_data = json.load(f)
+    accounts_raw = json.load(f)
+    accounts_data = {
+        acct["Account Name"].strip().lower().replace(" ", "_"): {
+            "company_name": acct["Account Name"],
+            "industry": acct.get("Industry", "N/A"),
+            "fleet_size": acct.get("Total Company Fleet Size", "N/A"),
+            "indoor_use": acct.get("Indoor Use", False),
+            "outdoor_use": acct.get("Outdoor Use", False),
+            "application": acct.get("Application", "N/A")
+        }
+        for acct in accounts_raw
+        if "Account Name" in acct
+    }
 
 print(f"✅ Loaded {len(models_data)} models from JSON")
 
