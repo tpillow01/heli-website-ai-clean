@@ -8,11 +8,11 @@ from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
 
-# Load API key from environment variable
+# Load API key
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
-# Load customer data
+# Load customer account data
 with open("accounts.json", "r", encoding="utf-8") as f:
     account_data = json.load(f)
 print(f"✅ Loaded {len(account_data)} accounts from JSON")
@@ -22,10 +22,10 @@ with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} models from JSON")
 
-# Store conversation history
+# Conversation memory
 conversation_history = []
 
-# Helper: fuzzy match company name
+# Fuzzy match customer name
 def find_account_by_name(name):
     names = [acct.get("Account Name", "") for acct in account_data]
     match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
@@ -33,7 +33,7 @@ def find_account_by_name(name):
         return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
 
-# Helper: filter models based on customer info
+# Optional model filtering for account (not used in ai_logic fallback)
 def filter_models_for_account(account):
     industry = account.get("Industry", "").lower()
     truck_types = account.get("Truck Types at Location", "").lower()
@@ -46,12 +46,12 @@ def filter_models_for_account(account):
             filtered.append(model)
     return filtered
 
-# Helper: format models into prompt-friendly blocks
+# Format a model block (simple fallback only)
 def format_models(models):
     if not models:
         return "- No suitable model matches found."
     blocks = ""
-    for m in models[:2]:  # Limit to 2 models to avoid token overload
+    for m in models[:2]:
         blocks += (
             "<span class=\"section-label\">Suggested Model:</span>\n"
             f"- Model: {m.get('Model')}\n"
@@ -67,45 +67,42 @@ def home():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    global conversation_history  # ✅ Fixes UnboundLocalError
+    global conversation_history
 
     data = request.json
     user_question = data.get('question', '').strip()
+    customer_name = data.get('customer', '').strip()
 
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'})
 
-    account = find_account_by_name(user_question)
-    extra_context = ""
-
+    # Look up customer profile
+    account = find_account_by_name(customer_name)
+    account_context = ""
     if account:
-        filtered_models = filter_models_for_account(account)
-        model_blocks = format_models(filtered_models)
-        extra_context = f"""
-Customer Profile:
+        account_context = f"""
+<span class="section-label">Customer Profile:</span>
+- Company: {account.get("Account Name")}
 - Industry: {account.get("Industry")}
 - Fleet Size: {account.get("Total Company Fleet Size")}
 - Truck Types: {account.get("Truck Types at Location")}
 
-{model_blocks}
 """
-    else:
-        model_blocks = format_models(model_data)
-        extra_context = (
-            "No customer data was found. Proceeding with general forklift recommendations.\n\n"
-            + model_blocks
-        )
 
-    # Build final prompt
-    user_question = extra_context + "\n\n" + user_question
-    filtered_context = generate_forklift_context(user_question)
+    # Generate forklift model context based on user input + customer name
+    combined_context = generate_forklift_context(user_question, customer_name)
 
-    # Trim old messages if needed
-    if len(conversation_history) > 2:
-        conversation_history.pop(0)
+    # Combine both contexts
+    final_prompt = f"{account_context}{combined_context}"
 
+    # Add to memory
     conversation_history.append({"role": "user", "content": user_question})
 
+    # Trim old messages
+    if len(conversation_history) > 4:
+        conversation_history.pop(0)
+
+    # System instructions
     system_prompt = {
         "role": "system",
         "content": (
@@ -130,20 +127,19 @@ Customer Profile:
             "<span class=\"section-label\">Common Objections:</span>\n"
             "- \"Why not Toyota or Crown?\"\n"
             "  → Heli offers similar quality at a better price with faster part availability."
-            f"\n\n{filtered_context}"
         )
     }
 
-    messages = [system_prompt] + conversation_history
+    messages = [system_prompt, {"role": "user", "content": final_prompt}] + conversation_history
 
-    # Token count trimming
+    # Token management
     encoding = tiktoken.encoding_for_model("gpt-4")
 
     def num_tokens_from_messages(messages):
         return sum(len(encoding.encode(m["content"])) for m in messages)
 
     while num_tokens_from_messages(messages) > 7000 and len(messages) > 2:
-        messages.pop(1)  # remove oldest user message
+        messages.pop(1)
 
     try:
         response = client.chat.completions.create(
