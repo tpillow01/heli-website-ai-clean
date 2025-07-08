@@ -14,7 +14,8 @@ with open("accounts.json", "r", encoding="utf-8") as f:
             "fleet_size": acct.get("Total Company Fleet Size", "N/A"),
             "indoor_use": acct.get("Indoor Use", False),
             "outdoor_use": acct.get("Outdoor Use", False),
-            "application": acct.get("Application", "N/A")
+            "application": acct.get("Application", "N/A"),
+            "sic_code": acct.get("SIC Code", "N/A")
         }
         for acct in accounts_raw
         if "Account Name" in acct
@@ -83,6 +84,7 @@ def get_customer_context(customer_name):
         f"<span class=\"section-label\">Customer Profile:</span>",
         f"- Company: {profile['company_name']}",
         f"- Industry: {profile['industry']}",
+        f"- SIC Code: {profile['sic_code']}",
         f"- Fleet Size: {profile['fleet_size']}",
     ]
     if profile.get("indoor_use"):
@@ -90,11 +92,12 @@ def get_customer_context(customer_name):
     if profile.get("outdoor_use"):
         lines.append("- Uses forklifts outdoors")
     lines.append(f"- Application: {profile['application']}")
-    lines.append("")  # Add a break before models
+    lines.append("")
     return "\n".join(lines)
 
-# Filter models from user input
-def filter_models(user_input, models_list=None):
+# Filter models from user input and SIC
+
+def filter_models(user_input, customer_name=None, models_list=None):
     if models_list is None:
         models_list = models_data
 
@@ -118,13 +121,26 @@ def filter_models(user_input, models_list=None):
                 return False
         filtered = [m for m in filtered if capacity_ok(m.get("Capacity", 0))]
 
+    # Add SIC-based filtering influence
+    if customer_name:
+        key = customer_name.strip().lower().replace(" ", "_")
+        profile = accounts_data.get(key)
+        if profile:
+            sic = str(profile.get("sic_code", "")).strip()
+            if sic.startswith("42") or "warehouse" in profile.get("industry", "").lower():
+                filtered = [m for m in filtered if "electric" in m.get("Power", "").lower() or "narrow" in m.get("Type", "").lower() or m.get("Type", "").lower().startswith("warehouse")]
+            elif sic.startswith("15") or sic.startswith("16") or sic.startswith("17") or "construction" in profile.get("industry", "").lower():
+                filtered = [m for m in filtered if "diesel" in m.get("Power", "").lower() or "rough" in m.get("Type", "").lower()]
+            elif sic.startswith("20") or "manufacturing" in profile.get("industry", "").lower():
+                filtered = [m for m in filtered if "LPG" in m.get("Power", "").upper() or "indoor" in m.get("Application", "").lower()]
+
     print(f"📌 Filtered models: {filtered}")
-    return filtered[:3]  # Limit to 3
+    return filtered[:3]
 
 # Final context builder
 def generate_forklift_context(user_input, customer_name=None):
     customer_context = get_customer_context(customer_name)
-    models = filter_models(user_input)
+    models = filter_models(user_input, customer_name)
 
     if models:
         context_lines = []
