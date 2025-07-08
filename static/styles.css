@@ -6,7 +6,9 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
+    min-height: 100svh; /* mobile friendly height */
+    box-sizing: border-box;
+    overflow-y: auto; /* allows scrolling on small screens */
 }
 
 .chat-container {
@@ -189,6 +191,16 @@ button:hover {
 
 /* Mobile responsive */
 @media (max-width: 600px) {
+    .logo-bar {
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .logo-wrapper {
+        height: auto;
+    }
+
     .logo-img {
         height: 60px;
     }
@@ -205,6 +217,7 @@ button:hover {
 
     textarea, button {
         font-size: 16px;
+        width: 100%;
     }
 
     #scroll-btn {

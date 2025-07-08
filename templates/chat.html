@@ -24,16 +24,19 @@
 
     <!-- Input Form -->
     <form class="input-form" id="chat-form">
-      <textarea id="user-input" rows="3" placeholder="Describe the customer's needs..."></textarea>
+      <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
       <button type="submit">Send</button>
     </form>
+
+    <!-- Optional Scroll Button -->
+    <button id="scroll-btn" onclick="scrollToBottom()">↓ Scroll to Bottom</button>
 
     <div class="footer">Powered by Tynan Equipment AI</div>
   </div>
 
   <script>
     const form = document.getElementById('chat-form');
-    const input = document.getElementById('user-input');
+    const input = document.getElementById('userInput');
     const chatBox = document.getElementById('chat-box');
 
     function formatLabels(text) {
@@ -85,6 +88,16 @@
       }
 
       chatBox.scrollTop = chatBox.scrollHeight;
+    });
+
+    function scrollToBottom() {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    chatBox.addEventListener('scroll', () => {
+      const scrollBtn = document.getElementById('scroll-btn');
+      const nearBottom = chatBox.scrollHeight - chatBox.scrollTop <= chatBox.clientHeight + 100;
+      scrollBtn.style.display = nearBottom ? 'none' : 'block';
     });
   </script>
 </body>
