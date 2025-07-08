@@ -215,6 +215,9 @@ button:hover {
 .forklift-img {
     width: 100%;
     height: auto;
+    display: block;
+    background-color: transparent;
+    mix-blend-mode: multiply;
 }
 
 @keyframes drive-across {
