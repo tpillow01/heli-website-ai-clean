@@ -186,13 +186,13 @@ button:hover {
     font-size: 12px;
 }
 
-/* Forklift Animation */
+/* Forklift Animation - now 1.5x larger */
 .forklift-animation {
     position: absolute;
     top: 40%;
     left: -200px;
-    width: 180px;
-    height: 100px;
+    width: 270px; /* 180px * 1.5 */
+    height: 150px; /* 100px * 1.5 */
     z-index: 1000;
     display: none;
     animation: drive-across 4s linear infinite;
@@ -244,8 +244,8 @@ button:hover {
     }
 
     .forklift-animation {
-        width: 120px;
-        height: 70px;
+        width: 180px; /* 120px * 1.5 */
+        height: 105px; /* 70px * 1.5 */
         top: 35%;
     }
 }
