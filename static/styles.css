@@ -190,8 +190,8 @@ button:hover {
 /* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 16px;     /* Adjust down */
-  left: 52px;    /* Adjust right */
+  top: 18px;     /* Adjust down */
+  left: 54px;    /* Adjust right */
   width: 12px;
   height: 12px;
   background-color: red;
