@@ -79,14 +79,11 @@
 
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
-      animateForklift(); // start immediately
+      animateForklift();
       animationInterval = setInterval(animateForklift, 4200);
     }
 
     function animateForklift() {
-      forkliftAnim.style.animation = 'none'; // reset animation
-      void forkliftAnim.offsetWidth; // force reflow
-
       if (isForward) {
         forkliftAnim.style.animation = 'drive-forward 4s linear';
         reverseLight.style.display = 'none';
@@ -94,7 +91,6 @@
         forkliftAnim.style.animation = 'drive-backward 4s linear';
         reverseLight.style.display = 'block';
       }
-
       isForward = !isForward;
     }
 
