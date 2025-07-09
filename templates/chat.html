@@ -8,6 +8,7 @@
 </head>
 <body>
   <div class="chat-container">
+    <!-- Logo Bar -->
     <div class="logo-bar">
       <div class="logo-wrapper">
         <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img">
@@ -18,13 +19,16 @@
       </div>
     </div>
 
+    <!-- Forklift Animation -->
     <div class="forklift-animation" id="forklift-animation">
       <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
       <div class="reverse-light" id="reverse-light"></div>
     </div>
 
+    <!-- Chat Box -->
     <div id="chat-box" class="chat-box"></div>
 
+    <!-- Input Section -->
     <div id="input-wrapper">
       <form class="input-form" id="chat-form">
         <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
@@ -43,7 +47,7 @@
     const reverseLight = document.getElementById('reverse-light');
 
     let interval;
-    let isForward = true;
+    let forward = true;
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -51,17 +55,19 @@
     }
 
     function renderAIResponse(aiReply) {
-      stopAnimation();
+      stopForkliftAnimation();
 
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
       paragraphs.forEach(p => {
-        const formatted = formatLabels(p);
-        html += formatted.startsWith('-')
-          ? `<div class="subpoint">${formatted}</div>`
-          : formatted.includes('section-label')
-            ? `<div>${formatted}</div>`
-            : `<div class="final-note">${formatted}</div>`;
+        let formatted = formatLabels(p);
+        if (formatted.trim().startsWith('-')) {
+          html += `<div class="subpoint">${formatted}</div>`;
+        } else if (formatted.includes('section-label')) {
+          html += `<div>${formatted}</div>`;
+        } else {
+          html += `<div class="final-note">${formatted}</div>`;
+        }
       });
       html += '</div>';
 
@@ -72,21 +78,30 @@
     }
 
     function animateForklift() {
-      forkliftAnim.style.animation = isForward ? 'drive-forward 4s linear' : 'drive-backward 4s linear';
-      reverseLight.style.display = isForward ? 'none' : 'block';
-      isForward = !isForward;
+      forkliftAnim.classList.remove('forward', 'backward');
+      void forkliftAnim.offsetWidth; // force reflow
+
+      if (forward) {
+        forkliftAnim.classList.add('forward');
+        reverseLight.style.display = 'none';
+      } else {
+        forkliftAnim.classList.add('backward');
+        reverseLight.style.display = 'block';
+      }
+
+      forward = !forward;
     }
 
-    function startAnimation() {
+    function startForkliftAnimation() {
       forkliftAnim.style.display = 'block';
       animateForklift();
       interval = setInterval(animateForklift, 4200);
     }
 
-    function stopAnimation() {
+    function stopForkliftAnimation() {
       clearInterval(interval);
-      forkliftAnim.style.animation = 'none';
       forkliftAnim.style.display = 'none';
+      forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.style.display = 'none';
     }
 
@@ -97,7 +112,7 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-      startAnimation();
+      startForkliftAnimation();
 
       try {
         const res = await fetch('/api/chat', {
@@ -110,16 +125,16 @@
           const data = await res.json();
           renderAIResponse(data.response);
         } else {
-          stopAnimation();
+          stopForkliftAnimation();
           chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
         }
       } catch (error) {
-        stopAnimation();
+        stopForkliftAnimation();
         chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
       }
     });
 
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         form.dispatchEvent(new Event('submit'));
