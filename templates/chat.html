@@ -46,8 +46,8 @@
     const forkliftAnim = document.getElementById('forklift-animation');
     const reverseLight = document.getElementById('reverse-light');
 
-    let interval;
-    let forward = true;
+    let animationInterval;
+    let isForward = true;
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -55,7 +55,7 @@
     }
 
     function renderAIResponse(aiReply) {
-      stopForkliftAnimation();
+      stopAnimation();
 
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
@@ -77,32 +77,31 @@
       wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function animateForklift() {
-      forkliftAnim.classList.remove('forward', 'backward');
-      void forkliftAnim.offsetWidth; // force reflow
-
-      if (forward) {
-        forkliftAnim.classList.add('forward');
-        reverseLight.style.display = 'none';
-      } else {
-        forkliftAnim.classList.add('backward');
-        reverseLight.style.display = 'block';
-      }
-
-      forward = !forward;
-    }
-
-    function startForkliftAnimation() {
+    function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
       animateForklift();
-      interval = setInterval(animateForklift, 4200);
+      animationInterval = setInterval(animateForklift, 4200);
     }
 
-    function stopForkliftAnimation() {
-      clearInterval(interval);
+    function animateForklift() {
+      forkliftAnim.classList.remove('forward', 'backward');
+      reverseLight.classList.remove('active');
+
+      if (isForward) {
+        forkliftAnim.classList.add('forward');
+      } else {
+        forkliftAnim.classList.add('backward');
+        reverseLight.classList.add('active');
+      }
+
+      isForward = !isForward;
+    }
+
+    function stopAnimation() {
+      clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
       forkliftAnim.classList.remove('forward', 'backward');
-      reverseLight.style.display = 'none';
+      reverseLight.classList.remove('active');
     }
 
     form.addEventListener('submit', async (e) => {
@@ -112,7 +111,7 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-      startForkliftAnimation();
+      startAnimationLoop();
 
       try {
         const res = await fetch('/api/chat', {
@@ -125,11 +124,11 @@
           const data = await res.json();
           renderAIResponse(data.response);
         } else {
-          stopForkliftAnimation();
+          stopAnimation();
           chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
         }
       } catch (error) {
-        stopForkliftAnimation();
+        stopAnimation();
         chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
       }
     });

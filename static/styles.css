@@ -196,9 +196,25 @@ button:hover {
   height: 14px;
   background-color: red;
   border-radius: 50%;
-  box-shadow: 0 0 8px red;
   display: none;
   z-index: 1001;
+}
+
+/* Flashing animation when active */
+@keyframes backup-light-flash {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 8px red;
+  }
+  50% {
+    opacity: 0.2;
+    box-shadow: 0 0 2px red;
+  }
+}
+
+.reverse-light.active {
+  display: block;
+  animation: backup-light-flash 0.6s infinite;
 }
 
 /* Mobile Responsive */
