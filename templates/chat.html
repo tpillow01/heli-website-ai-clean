@@ -33,7 +33,6 @@
         <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
         <button type="submit">Send</button>
       </form>
-      <button id="toggle-input">Hide Input</button>
     </div>
 
     <div class="footer">Powered by Tynan Equipment AI</div>
@@ -44,8 +43,6 @@
     const input = document.getElementById('userInput');
     const chatBox = document.getElementById('chat-box');
     const forkliftAnim = document.getElementById('forklift-animation');
-    const inputWrapper = document.getElementById('input-wrapper');
-    const toggleInput = document.getElementById('toggle-input');
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -109,11 +106,6 @@
         e.preventDefault();
         form.dispatchEvent(new Event('submit'));
       }
-    });
-
-    toggleInput.addEventListener('click', () => {
-      inputWrapper.classList.toggle('hidden');
-      toggleInput.textContent = inputWrapper.classList.contains('hidden') ? 'Show Input' : 'Hide Input';
     });
   </script>
 </body>

@@ -178,18 +178,6 @@ button:hover {
     background-color: #ffcccc;
 }
 
-/* Toggle Button */
-#toggle-input-btn {
-    margin-top: 10px;
-    background-color: #ff0000;
-    color: #ffffff;
-    border: none;
-    padding: 8px 12px;
-    font-size: 14px;
-    border-radius: 6px;
-    cursor: pointer;
-}
-
 /* Footer */
 .footer {
     text-align: center;
