@@ -63,8 +63,8 @@ body {
     border: 3px solid #000000;
     border-radius: 8px;
     padding: 20px;
-    height: 60vh;
-    max-height: 600px;
+    height: 75vh;
+    max-height: 750px;
     overflow-y: auto;
     margin-bottom: 15px;
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
@@ -140,6 +140,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    align-items: center;
 }
 
 textarea {
@@ -151,21 +152,13 @@ textarea {
     background-color: #ffffff;
     color: #000000;
     font-family: "Times New Roman", Times, serif;
+    width: 100%;
+    max-width: 1000px;
 }
 
 textarea:focus {
     border-color: #ff0000;
     outline: none;
-}
-
-input[type="text"] {
-    padding: 10px;
-    font-size: 18px;
-    border: 2px solid #000000;
-    border-radius: 8px;
-    background-color: #ffffff;
-    color: #000000;
-    font-family: "Times New Roman", Times, serif;
 }
 
 button {
@@ -177,6 +170,8 @@ button {
     border-radius: 8px;
     margin-top: 8px;
     cursor: pointer;
+    width: 100%;
+    max-width: 300px;
 }
 
 button:hover {
@@ -193,23 +188,6 @@ button:hover {
     font-size: 14px;
     border-radius: 6px;
     cursor: pointer;
-}
-
-/* Scroll Button */
-#scroll-btn {
-    position: fixed;
-    bottom: 25px;
-    right: 20px;
-    background-color: #ff0000;
-    color: #ffffff;
-    border: none;
-    padding: 12px 16px;
-    border-radius: 50px;
-    font-weight: bold;
-    font-size: 16px;
-    box-shadow: 0 0 12px rgba(0,0,0,0.3);
-    display: none;
-    z-index: 999;
 }
 
 /* Footer */
@@ -269,17 +247,12 @@ button:hover {
 
     #chat-box {
         font-size: 16px;
-        height: 50vh;
+        height: 60vh;
     }
 
-    textarea, button, input[type="text"] {
+    textarea, button {
         font-size: 16px;
         width: 100%;
-    }
-
-    #scroll-btn {
-        font-size: 14px;
-        padding: 10px 14px;
     }
 
     .forklift-animation {

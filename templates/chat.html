@@ -25,17 +25,16 @@
     </div>
 
     <!-- Chat Box -->
-    <div id="chat-box"></div>
+    <div id="chat-box" class="chat-box"></div>
 
-    <!-- Input Form -->
-    <form class="input-form" id="chat-form">
-      <input type="text" id="customer-name" placeholder="Customer Name (optional)">
-      <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
-      <button type="submit">Send</button>
-    </form>
-
-    <!-- Optional Scroll Button -->
-    <button id="scroll-btn" onclick="scrollToBottom()">↓ Scroll to Bottom</button>
+    <!-- Input Section -->
+    <div id="input-wrapper">
+      <form class="input-form" id="chat-form">
+        <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <button id="toggle-input">Hide Input</button>
+    </div>
 
     <div class="footer">Powered by Tynan Equipment AI</div>
   </div>
@@ -43,25 +42,18 @@
   <script>
     const form = document.getElementById('chat-form');
     const input = document.getElementById('userInput');
-    const customerField = document.getElementById('customer-name');
     const chatBox = document.getElementById('chat-box');
     const forkliftAnim = document.getElementById('forklift-animation');
-
-    // Submit message when Enter is pressed (Shift+Enter makes a new line)
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        form.requestSubmit(); // trigger form submission
-      }
-    });
+    const inputWrapper = document.getElementById('input-wrapper');
+    const toggleInput = document.getElementById('toggle-input');
 
     function formatLabels(text) {
-      return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:|Customer Profile:|Recommended Heli Models:)/g,
+      return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
         '<span class="section-label">$1</span>');
     }
 
     function renderAIResponse(aiReply) {
-      forkliftAnim.style.display = 'none'; // hide animation
+      forkliftAnim.style.display = 'none';
 
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
@@ -76,30 +68,27 @@
         }
       });
       html += '</div>';
-      chatBox.innerHTML += html;
 
-      // Scroll to top of newly added message
-      const lastMessage = chatBox.querySelector('.message.ai:last-child');
-      if (lastMessage) {
-        chatBox.scrollTop = lastMessage.offsetTop;
-      }
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = html;
+      chatBox.appendChild(wrapper);
+      wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const question = input.value.trim();
-      const customer = customerField.value.trim();
       if (!question) return;
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-      forkliftAnim.style.display = 'block'; // show animation
+      forkliftAnim.style.display = 'block';
 
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, customer })
+          body: JSON.stringify({ question })
         });
 
         if (res.ok) {
@@ -115,14 +104,16 @@
       }
     });
 
-    function scrollToBottom() {
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.dispatchEvent(new Event('submit'));
+      }
+    });
 
-    chatBox.addEventListener('scroll', () => {
-      const scrollBtn = document.getElementById('scroll-btn');
-      const nearBottom = chatBox.scrollHeight - chatBox.scrollTop <= chatBox.clientHeight + 100;
-      scrollBtn.style.display = nearBottom ? 'none' : 'block';
+    toggleInput.addEventListener('click', () => {
+      inputWrapper.classList.toggle('hidden');
+      toggleInput.textContent = inputWrapper.classList.contains('hidden') ? 'Show Input' : 'Hide Input';
     });
   </script>
 </body>
