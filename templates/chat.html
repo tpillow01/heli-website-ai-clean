@@ -8,7 +8,6 @@
 </head>
 <body>
   <div class="chat-container">
-    <!-- Logo Bar -->
     <div class="logo-bar">
       <div class="logo-wrapper">
         <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img">
@@ -19,16 +18,13 @@
       </div>
     </div>
 
-    <!-- Forklift Animation -->
     <div class="forklift-animation" id="forklift-animation">
       <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
       <div class="reverse-light" id="reverse-light"></div>
     </div>
 
-    <!-- Chat Box -->
     <div id="chat-box" class="chat-box"></div>
 
-    <!-- Input Section -->
     <div id="input-wrapper">
       <form class="input-form" id="chat-form">
         <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
@@ -46,7 +42,7 @@
     const forkliftAnim = document.getElementById('forklift-animation');
     const reverseLight = document.getElementById('reverse-light');
 
-    let animationInterval;
+    let interval;
     let isForward = true;
 
     function formatLabels(text) {
@@ -61,13 +57,11 @@
       let html = '<div class="message ai">';
       paragraphs.forEach(p => {
         const formatted = formatLabels(p);
-        if (formatted.trim().startsWith('-')) {
-          html += `<div class="subpoint">${formatted}</div>`;
-        } else if (formatted.includes('section-label')) {
-          html += `<div>${formatted}</div>`;
-        } else {
-          html += `<div class="final-note">${formatted}</div>`;
-        }
+        html += formatted.startsWith('-')
+          ? `<div class="subpoint">${formatted}</div>`
+          : formatted.includes('section-label')
+            ? `<div>${formatted}</div>`
+            : `<div class="final-note">${formatted}</div>`;
       });
       html += '</div>';
 
@@ -77,22 +71,22 @@
       wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function startAnimationLoop() {
-      forkliftAnim.style.display = 'block';
-      animateForklift();
-      animationInterval = setInterval(animateForklift, 4200);
-    }
-
     function animateForklift() {
       forkliftAnim.style.animation = isForward ? 'drive-forward 4s linear' : 'drive-backward 4s linear';
       reverseLight.style.display = isForward ? 'none' : 'block';
       isForward = !isForward;
     }
 
+    function startAnimation() {
+      forkliftAnim.style.display = 'block';
+      animateForklift();
+      interval = setInterval(animateForklift, 4200);
+    }
+
     function stopAnimation() {
-      clearInterval(animationInterval);
-      forkliftAnim.style.display = 'none';
+      clearInterval(interval);
       forkliftAnim.style.animation = 'none';
+      forkliftAnim.style.display = 'none';
       reverseLight.style.display = 'none';
     }
 
@@ -103,7 +97,7 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-      startAnimationLoop();
+      startAnimation();
 
       try {
         const res = await fetch('/api/chat', {
@@ -125,7 +119,7 @@
       }
     });
 
-    input.addEventListener('keydown', function(e) {
+    input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         form.dispatchEvent(new Event('submit'));
