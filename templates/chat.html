@@ -60,7 +60,7 @@
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
       paragraphs.forEach(p => {
-        let formatted = formatLabels(p);
+        const formatted = formatLabels(p);
         if (formatted.trim().startsWith('-')) {
           html += `<div class="subpoint">${formatted}</div>`;
         } else if (formatted.includes('section-label')) {
@@ -84,21 +84,16 @@
     }
 
     function animateForklift() {
-      if (isForward) {
-        forkliftAnim.style.animation = 'drive-forward 4s linear';
-        reverseLight.style.display = 'none';
-      } else {
-        forkliftAnim.style.animation = 'drive-backward 4s linear';
-        reverseLight.style.display = 'block';
-      }
+      forkliftAnim.style.animation = isForward ? 'drive-forward 4s linear' : 'drive-backward 4s linear';
+      reverseLight.style.display = isForward ? 'none' : 'block';
       isForward = !isForward;
     }
 
     function stopAnimation() {
       clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
-      reverseLight.style.display = 'none';
       forkliftAnim.style.animation = 'none';
+      reverseLight.style.display = 'none';
     }
 
     form.addEventListener('submit', async (e) => {

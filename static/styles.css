@@ -165,34 +165,11 @@ button:hover {
 .forklift-animation {
   position: absolute;
   top: 50%;
+  left: -270px;
   width: 270px;
   height: auto;
   display: none;
-  animation: back-forth 8s linear infinite;
   z-index: 1000;
-}
-
-@keyframes back-forth {
-  0% {
-    left: -270px;
-    transform: scaleX(1);
-  }
-  45% {
-    left: 100%;
-    transform: scaleX(1);
-  }
-  50% {
-    left: 100%;
-    transform: scaleX(1);
-  }
-  95% {
-    left: -270px;
-    transform: scaleX(1);
-  }
-  100% {
-    left: -270px;
-    transform: scaleX(1);
-  }
 }
 
 .forklift-img {
@@ -201,10 +178,11 @@ button:hover {
   position: relative;
 }
 
+/* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 10px;
-  left: 45px;
+  top: 4px;     /* Adjusted for cabin area */
+  left: 115px;  /* Centered near rear roof */
   width: 14px;
   height: 14px;
   background-color: red;
@@ -212,6 +190,29 @@ button:hover {
   box-shadow: 0 0 8px red;
   display: none;
   z-index: 1001;
+}
+
+/* Keyframes */
+@keyframes drive-forward {
+  0% {
+    left: -270px;
+    transform: scaleX(1);
+  }
+  100% {
+    left: 100%;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes drive-backward {
+  0% {
+    left: 100%;
+    transform: scaleX(1);
+  }
+  100% {
+    left: -270px;
+    transform: scaleX(1);
+  }
 }
 
 /* Mobile Responsive */
@@ -236,7 +237,8 @@ button:hover {
     height: 60vh;
   }
 
-  textarea, button {
+  textarea,
+  button {
     font-size: 16px;
     width: 100%;
   }
