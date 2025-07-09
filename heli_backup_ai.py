@@ -10,39 +10,16 @@ app = Flask(__name__)
 
 client = OpenAI()  # ✅ Let it read the key from the environment
 
-# Load customer account data
-with open("accounts.json", "r", encoding="utf-8") as f:
-    account_data = json.load(f)
-print(f"✅ Loaded {len(account_data)} accounts from JSON")
-
-# Load model data
-with open("models.json", "r", encoding="utf-8") as f:
-    model_data = json.load(f)
-print(f"✅ Loaded {len(model_data)} models from JSON")
-
 # Conversation memory
 conversation_history = []
 
 # Fuzzy match customer name
 def find_account_by_name(name):
-    names = [acct.get("Account Name", "") for acct in account_data]
-    match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
-    if match:
-        return next(acct for acct in account_data if acct["Account Name"] == match[0])
-    return None
+    return None  # Optional fallback removed since accounts are now handled in ai_logic
 
 # Optional model filtering for account (not used in ai_logic fallback)
 def filter_models_for_account(account):
-    industry = account.get("Industry", "").lower()
-    truck_types = account.get("Truck Types at Location", "").lower()
-
-    filtered = []
-    for model in model_data:
-        model_industries = [i.lower() for i in model.get("Industries", [])]
-        model_truck_types = [t.lower() for t in model.get("Compatible Truck Types", [])]
-        if any(ind in industry for ind in model_industries) or any(tt in truck_types for tt in model_truck_types):
-            filtered.append(model)
-    return filtered
+    return []  # Unused now — handled in ai_logic
 
 # Format a model block (simple fallback only)
 def format_models(models):
@@ -74,24 +51,8 @@ def chat():
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'})
 
-    # Look up customer profile
-    account = find_account_by_name(customer_name)
-    account_context = ""
-    if account:
-        account_context = f"""
-<span class="section-label">Customer Profile:</span>
-- Company: {account.get("Account Name")}
-- Industry: {account.get("Industry")}
-- Fleet Size: {account.get("Total Company Fleet Size")}
-- Truck Types: {account.get("Truck Types at Location")}
-
-"""
-
     # Generate forklift model context based on user input + customer name
     combined_context = generate_forklift_context(user_question, customer_name)
-
-    # Combine both contexts
-    final_prompt = f"{account_context}{combined_context}"
 
     # Add to memory
     conversation_history.append({"role": "user", "content": user_question})
@@ -128,7 +89,7 @@ def chat():
         )
     }
 
-    messages = [system_prompt, {"role": "user", "content": final_prompt}] + conversation_history
+    messages = [system_prompt, {"role": "user", "content": combined_context}] + conversation_history
 
     # Token management
     encoding = tiktoken.encoding_for_model("gpt-4")
