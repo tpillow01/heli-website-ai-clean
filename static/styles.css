@@ -6,9 +6,9 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100svh; /* mobile friendly height */
+    min-height: 100svh;
     box-sizing: border-box;
-    overflow-y: auto; /* allows scrolling on small screens */
+    overflow-y: auto;
 }
 
 .chat-container {
@@ -17,12 +17,9 @@ body {
     border-radius: 14px;
     width: 95%;
     max-width: 1400px;
-    box-shadow:
-        0 0 0 3px #ff0000,
-        0 0 0 6px #000,
-        0 0 0 9px #ff0000;
+    box-shadow: 0 0 0 3px #ff0000, 0 0 0 6px #000, 0 0 0 9px #ff0000;
     box-sizing: border-box;
-    position: relative; /* important for animation positioning */
+    position: relative;
 }
 
 /* Logo Bar */
@@ -129,6 +126,15 @@ body {
     line-height: 1.6;
 }
 
+/* Sticky Form Container */
+.form-container {
+    position: sticky;
+    bottom: 0;
+    background-color: #000;
+    padding-top: 10px;
+    z-index: 10;
+}
+
 /* Form styling */
 .input-form {
     display: flex;
@@ -177,6 +183,19 @@ button:hover {
     background-color: #ffcccc;
 }
 
+/* Toggle Button */
+#toggle-input-btn {
+    margin-top: 10px;
+    background-color: #ff0000;
+    color: #ffffff;
+    border: none;
+    padding: 8px 12px;
+    font-size: 14px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* Scroll Button */
 #scroll-btn {
     position: fixed;
     bottom: 25px;
@@ -193,6 +212,7 @@ button:hover {
     z-index: 999;
 }
 
+/* Footer */
 .footer {
     text-align: center;
     color: #ffffff;
@@ -215,9 +235,6 @@ button:hover {
 .forklift-img {
     width: 100%;
     height: auto;
-    display: block;
-    background-color: transparent;
-    mix-blend-mode: multiply;
 }
 
 @keyframes drive-across {
@@ -229,7 +246,7 @@ button:hover {
     }
 }
 
-/* Mobile responsive */
+/* Mobile Responsive */
 @media (max-width: 600px) {
     .logo-bar {
         flex-direction: column;
