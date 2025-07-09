@@ -71,6 +71,7 @@ body {
     color: #000000;
     font-size: 18px;
     line-height: 1.8;
+    position: relative;
 }
 
 .message {
@@ -186,13 +187,13 @@ button:hover {
     font-size: 12px;
 }
 
-/* Forklift Animation - now 1.5x larger */
+/* Forklift Animation */
 .forklift-animation {
     position: absolute;
     top: 40%;
-    left: -200px;
-    width: 270px; /* 180px * 1.5 */
-    height: 150px; /* 100px * 1.5 */
+    left: -300px;
+    width: 270px;  /* 1.5x size */
+    height: auto;
     z-index: 1000;
     display: none;
     animation: drive-across 4s linear infinite;
@@ -201,15 +202,32 @@ button:hover {
 .forklift-img {
     width: 100%;
     height: auto;
+    position: relative;
 }
 
+.reverse-light {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background-color: #ffffff;
+    border-radius: 50%;
+    top: 40%;
+    left: 10px;
+    box-shadow: 0 0 10px 4px #ffffff;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.reverse .reverse-light {
+    opacity: 1;
+}
+
+/* Animation Keyframes */
 @keyframes drive-across {
-    0% {
-        left: -200px;
-    }
-    100% {
-        left: 100%;
-    }
+    0% { left: -300px; }
+    49% { left: 100%; transform: scaleX(1); }
+    50% { transform: scaleX(-1); }
+    100% { left: -300px; transform: scaleX(-1); }
 }
 
 /* Mobile Responsive */
@@ -244,8 +262,7 @@ button:hover {
     }
 
     .forklift-animation {
-        width: 180px; /* 120px * 1.5 */
-        height: 105px; /* 70px * 1.5 */
+        width: 200px;
         top: 35%;
     }
 }

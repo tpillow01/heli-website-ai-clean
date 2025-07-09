@@ -22,6 +22,7 @@
     <!-- Forklift Animation -->
     <div class="forklift-animation" id="forklift-animation">
       <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
+      <div class="reverse-light" id="reverse-light"></div>
     </div>
 
     <!-- Chat Box -->
@@ -43,6 +44,9 @@
     const input = document.getElementById('userInput');
     const chatBox = document.getElementById('chat-box');
     const forkliftAnim = document.getElementById('forklift-animation');
+    const reverseLight = document.getElementById('reverse-light');
+
+    let goingForward = true;
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -51,6 +55,7 @@
 
     function renderAIResponse(aiReply) {
       forkliftAnim.style.display = 'none';
+      reverseLight.style.opacity = 0;
 
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
@@ -72,6 +77,29 @@
       wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    function triggerForkliftAnimation() {
+      forkliftAnim.style.display = 'block';
+      forkliftAnim.style.animation = 'none';
+      forkliftAnim.offsetHeight; // force reflow
+
+      if (goingForward) {
+        forkliftAnim.style.animation = 'drive-across 4s linear';
+        forkliftAnim.style.transform = 'scaleX(1)';
+        reverseLight.style.opacity = 0;
+      } else {
+        forkliftAnim.style.animation = 'drive-back 4s linear';
+        forkliftAnim.style.transform = 'scaleX(-1)';
+        reverseLight.style.opacity = 1;
+      }
+
+      goingForward = !goingForward;
+
+      setTimeout(() => {
+        forkliftAnim.style.display = 'none';
+        reverseLight.style.opacity = 0;
+      }, 4000);
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const question = input.value.trim();
@@ -79,7 +107,7 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-      forkliftAnim.style.display = 'block';
+      triggerForkliftAnimation();
 
       try {
         const res = await fetch('/api/chat', {
