@@ -165,10 +165,10 @@ button:hover {
 .forklift-animation {
   position: absolute;
   top: 50%;
+  left: 0; /* Start on the left side */
   width: 270px;
   height: auto;
   display: none;
-  left: 0;
   z-index: 1000;
   transition: left 4s linear;
 }
@@ -187,35 +187,34 @@ button:hover {
   position: relative;
 }
 
-/* Reverse Light (inside bulb, flashes red) */
+/* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 10px;
-  left: 42px;
-  width: 12px;
-  height: 12px;
+  top: 14px;   /* adjust this value to move light lower */
+  left: 50px;  /* adjust this value to move light right */
+  width: 14px;
+  height: 14px;
   background-color: red;
   border-radius: 50%;
   display: none;
   z-index: 1001;
-  mix-blend-mode: screen;
-  opacity: 0.85;
 }
 
-.reverse-light.active {
-  display: block;
-  animation: backup-light-flash 0.6s infinite;
-}
-
+/* Flashing animation when active */
 @keyframes backup-light-flash {
   0%, 100% {
-    opacity: 0.85;
-    box-shadow: 0 0 6px 2px red;
+    opacity: 1;
+    box-shadow: 0 0 8px red;
   }
   50% {
     opacity: 0.2;
     box-shadow: 0 0 2px red;
   }
+}
+
+.reverse-light.active {
+  display: block;
+  animation: backup-light-flash 0.6s infinite;
 }
 
 /* Mobile Responsive */
