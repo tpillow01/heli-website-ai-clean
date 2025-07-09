@@ -58,7 +58,7 @@ def mm_to_feet_inches(mm_value):
     except:
         return str(mm_value)
 
-# Convert meters to ft (if stored as "3m" or "3.5 m")
+# Convert meters to ft
 def m_to_feet(m_value):
     try:
         text = str(m_value).lower()
@@ -96,7 +96,6 @@ def get_customer_context(customer_name):
     return "\n".join(lines)
 
 # Filter models from user input and SIC
-
 def filter_models(user_input, customer_name=None, models_list=None):
     if models_list is None:
         models_list = models_data
@@ -104,13 +103,13 @@ def filter_models(user_input, customer_name=None, models_list=None):
     filtered = models_list
 
     if "narrow aisle" in user_input.lower():
-        filtered = [m for m in filtered if "narrow" in m.get("Type", "").lower()]
+        filtered = [m for m in filtered if "narrow" in str(m.get("Type", "")).lower()]
 
     if "rough terrain" in user_input.lower():
-        filtered = [m for m in filtered if "rough" in m.get("Type", "").lower()]
+        filtered = [m for m in filtered if "rough" in str(m.get("Type", "")).lower()]
 
     if "electric" in user_input.lower():
-        filtered = [m for m in filtered if "electric" in m.get("Power", "").lower()]
+        filtered = [m for m in filtered if "electric" in str(m.get("Power", "")).lower()]
 
     if "3000 lb" in user_input.lower() or "3,000 lb" in user_input.lower():
         def capacity_ok(cap):
@@ -121,18 +120,27 @@ def filter_models(user_input, customer_name=None, models_list=None):
                 return False
         filtered = [m for m in filtered if capacity_ok(m.get("Capacity", 0))]
 
-    # Add SIC-based filtering influence
     if customer_name:
         key = customer_name.strip().lower().replace(" ", "_")
         profile = accounts_data.get(key)
         if profile:
             sic = str(profile.get("sic_code", "")).strip()
-            if sic.startswith("42") or "warehouse" in profile.get("industry", "").lower():
-                filtered = [m for m in filtered if "electric" in m.get("Power", "").lower() or "narrow" in m.get("Type", "").lower() or m.get("Type", "").lower().startswith("warehouse")]
-            elif sic.startswith("15") or sic.startswith("16") or sic.startswith("17") or "construction" in profile.get("industry", "").lower():
-                filtered = [m for m in filtered if "diesel" in m.get("Power", "").lower() or "rough" in m.get("Type", "").lower()]
-            elif sic.startswith("20") or "manufacturing" in profile.get("industry", "").lower():
-                filtered = [m for m in filtered if "LPG" in m.get("Power", "").upper() or "indoor" in m.get("Application", "").lower()]
+            industry = str(profile.get("industry", "")).lower()
+            application = str(profile.get("application", "")).lower()
+
+            if sic.startswith("42") or "warehouse" in industry:
+                filtered = [m for m in filtered if
+                            "electric" in str(m.get("Power", "")).lower() or
+                            "narrow" in str(m.get("Type", "")).lower() or
+                            str(m.get("Type", "")).lower().startswith("warehouse")]
+            elif sic.startswith(("15", "16", "17")) or "construction" in industry:
+                filtered = [m for m in filtered if
+                            "diesel" in str(m.get("Power", "")).lower() or
+                            "rough" in str(m.get("Type", "")).lower()]
+            elif sic.startswith("20") or "manufacturing" in industry:
+                filtered = [m for m in filtered if
+                            "lpg" in str(m.get("Power", "")).lower() or
+                            "indoor" in application]
 
     print(f"📌 Filtered models: {filtered}")
     return filtered[:3]
