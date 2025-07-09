@@ -47,7 +47,7 @@
     const reverseLight = document.getElementById('reverse-light');
 
     let animationInterval;
-    let isForward = true;
+    let isForward = false;  // Start with reverse (light on)
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -91,7 +91,7 @@
         forkliftAnim.classList.add('forward');
       } else {
         forkliftAnim.classList.add('backward');
-        reverseLight.classList.add('active');
+        reverseLight.classList.add('active'); // Flash light only during reverse
       }
 
       isForward = !isForward;

@@ -190,25 +190,24 @@ button:hover {
 /* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 8px;
-  left: 38px;
-  width: 14px;
-  height: 14px;
+  top: 4px;
+  left: 50px;
+  width: 16px;
+  height: 16px;
   background-color: red;
   border-radius: 50%;
   display: none;
   z-index: 1001;
+  mix-blend-mode: screen; /* Ensures it looks like it’s glowing from inside */
 }
 
-/* Flashing animation when active */
+/* Flashing animation */
 @keyframes backup-light-flash {
   0%, 100% {
-    opacity: 1;
-    box-shadow: 0 0 8px red;
+    background-color: rgba(255, 0, 0, 1);
   }
   50% {
-    opacity: 0.2;
-    box-shadow: 0 0 2px red;
+    background-color: rgba(255, 0, 0, 0.2);
   }
 }
 
