@@ -46,7 +46,7 @@
     const forkliftAnim = document.getElementById('forklift-animation');
     const reverseLight = document.getElementById('reverse-light');
 
-    let goingForward = true;
+    let forward = true;
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -55,7 +55,6 @@
 
     function renderAIResponse(aiReply) {
       forkliftAnim.style.display = 'none';
-      reverseLight.style.opacity = 0;
 
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
@@ -77,29 +76,6 @@
       wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function triggerForkliftAnimation() {
-      forkliftAnim.style.display = 'block';
-      forkliftAnim.style.animation = 'none';
-      forkliftAnim.offsetHeight; // force reflow
-
-      if (goingForward) {
-        forkliftAnim.style.animation = 'drive-across 4s linear';
-        forkliftAnim.style.transform = 'scaleX(1)';
-        reverseLight.style.opacity = 0;
-      } else {
-        forkliftAnim.style.animation = 'drive-back 4s linear';
-        forkliftAnim.style.transform = 'scaleX(-1)';
-        reverseLight.style.opacity = 1;
-      }
-
-      goingForward = !goingForward;
-
-      setTimeout(() => {
-        forkliftAnim.style.display = 'none';
-        reverseLight.style.opacity = 0;
-      }, 4000);
-    }
-
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const question = input.value.trim();
@@ -107,7 +83,13 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-      triggerForkliftAnimation();
+
+      // Alternate animation direction
+      forkliftAnim.style.display = 'block';
+      forkliftAnim.style.animation = forward ? 'drive-forward 4s linear' : 'drive-reverse 4s linear';
+      reverseLight.style.display = forward ? 'none' : 'block';
+
+      forward = !forward;
 
       try {
         const res = await fetch('/api/chat', {
@@ -121,10 +103,12 @@
           renderAIResponse(data.response);
         } else {
           forkliftAnim.style.display = 'none';
+          reverseLight.style.display = 'none';
           chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
         }
       } catch (error) {
         forkliftAnim.style.display = 'none';
+        reverseLight.style.display = 'none';
         chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
       }
     });

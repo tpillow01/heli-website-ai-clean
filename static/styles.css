@@ -71,7 +71,6 @@ body {
     color: #000000;
     font-size: 18px;
     line-height: 1.8;
-    position: relative;
 }
 
 .message {
@@ -191,43 +190,37 @@ button:hover {
 .forklift-animation {
     position: absolute;
     top: 40%;
-    left: -300px;
-    width: 270px;  /* 1.5x size */
+    width: 270px;
     height: auto;
     z-index: 1000;
     display: none;
-    animation: drive-across 4s linear infinite;
 }
 
 .forklift-img {
     width: 100%;
     height: auto;
-    position: relative;
 }
 
 .reverse-light {
     position: absolute;
-    width: 14px;
-    height: 14px;
-    background-color: #ffffff;
+    width: 16px;
+    height: 16px;
+    background-color: red;
     border-radius: 50%;
-    top: 40%;
-    left: 10px;
-    box-shadow: 0 0 10px 4px #ffffff;
-    opacity: 0;
-    transition: opacity 0.3s ease-in-out;
+    bottom: 18px;
+    left: 20px;
+    display: none;
 }
 
-.reverse .reverse-light {
-    opacity: 1;
-}
-
-/* Animation Keyframes */
-@keyframes drive-across {
+/* Animations */
+@keyframes drive-forward {
     0% { left: -300px; }
-    49% { left: 100%; transform: scaleX(1); }
-    50% { transform: scaleX(-1); }
-    100% { left: -300px; transform: scaleX(-1); }
+    100% { left: 100%; }
+}
+
+@keyframes drive-reverse {
+    0% { left: 100%; }
+    100% { left: -300px; }
 }
 
 /* Mobile Responsive */
@@ -262,7 +255,7 @@ button:hover {
     }
 
     .forklift-animation {
-        width: 200px;
+        width: 180px;
         top: 35%;
     }
 }
