@@ -165,7 +165,7 @@ button:hover {
 .forklift-animation {
   position: absolute;
   top: 50%;
-  left: 0; /* Start on the left side */
+  left: -300px; /* Start off screen on the left */
   width: 270px;
   height: auto;
   display: none;
@@ -190,10 +190,10 @@ button:hover {
 /* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 14px;   /* adjust this value to move light lower */
-  left: 50px;  /* adjust this value to move light right */
-  width: 14px;
-  height: 14px;
+  top: 16px;     /* Adjust down */
+  left: 52px;    /* Adjust right */
+  width: 12px;
+  height: 12px;
   background-color: red;
   border-radius: 50%;
   display: none;
