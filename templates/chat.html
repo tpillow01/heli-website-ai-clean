@@ -45,8 +45,7 @@
     const chatBox = document.getElementById('chat-box');
     const forkliftAnim = document.getElementById('forklift-animation');
     const reverseLight = document.getElementById('reverse-light');
-
-    let forward = true;
+    let goingForward = true;
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -55,6 +54,7 @@
 
     function renderAIResponse(aiReply) {
       forkliftAnim.style.display = 'none';
+      reverseLight.style.display = 'none';
 
       const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
       let html = '<div class="message ai">';
@@ -76,6 +76,20 @@
       wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    function playForkliftAnimation() {
+      forkliftAnim.style.display = 'block';
+
+      if (goingForward) {
+        forkliftAnim.style.animation = 'drive-forward 4s linear forwards';
+        reverseLight.style.display = 'none';
+      } else {
+        forkliftAnim.style.animation = 'drive-backward 4s linear forwards';
+        reverseLight.style.display = 'block';
+      }
+
+      goingForward = !goingForward;
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const question = input.value.trim();
@@ -83,13 +97,7 @@
 
       chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
-
-      // Alternate animation direction
-      forkliftAnim.style.display = 'block';
-      forkliftAnim.style.animation = forward ? 'drive-forward 4s linear' : 'drive-reverse 4s linear';
-      reverseLight.style.display = forward ? 'none' : 'block';
-
-      forward = !forward;
+      playForkliftAnimation();
 
       try {
         const res = await fetch('/api/chat', {

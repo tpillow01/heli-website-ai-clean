@@ -190,8 +190,9 @@ button:hover {
 .forklift-animation {
     position: absolute;
     top: 40%;
+    left: -300px;
     width: 270px;
-    height: auto;
+    height: 150px;
     z-index: 1000;
     display: none;
 }
@@ -199,28 +200,38 @@ button:hover {
 .forklift-img {
     width: 100%;
     height: auto;
+    position: relative;
 }
 
+/* Reverse light circle */
 .reverse-light {
     position: absolute;
-    width: 16px;
-    height: 16px;
-    background-color: red;
+    width: 20px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: 50%;
-    bottom: 18px;
-    left: 20px;
+    top: 15px;
+    right: 15px;
+    animation: blink 0.4s infinite;
     display: none;
 }
 
-/* Animations */
+/* Forward animation */
 @keyframes drive-forward {
     0% { left: -300px; }
     100% { left: 100%; }
 }
 
-@keyframes drive-reverse {
+/* Backward animation */
+@keyframes drive-backward {
     0% { left: 100%; }
     100% { left: -300px; }
+}
+
+/* Blinking reverse light */
+@keyframes blink {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 1; }
 }
 
 /* Mobile Responsive */
@@ -256,6 +267,7 @@ button:hover {
 
     .forklift-animation {
         width: 180px;
+        height: 100px;
         top: 35%;
     }
 }
