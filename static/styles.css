@@ -164,7 +164,7 @@ button:hover {
 .forklift-animation {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: -300px; /* 🚨 Start completely off-screen on the left */
   width: 270px;
   height: auto;
   display: none;
@@ -174,11 +174,11 @@ button:hover {
 }
 
 .forklift-animation.forward {
-  left: 100%;
+  left: 100vw; /* ✅ Moves all the way to the right */
 }
 
 .forklift-animation.backward {
-  left: -300px;
+  left: -300px; /* ✅ Moves all the way back to the left */
 }
 
 .forklift-img {
@@ -191,7 +191,7 @@ button:hover {
 .reverse-light {
   position: absolute;
   top: 22px;
-  left: 58px;
+  left: 60px;
   width: 14px;
   height: 14px;
   background-color: red;

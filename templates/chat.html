@@ -47,7 +47,7 @@
     const reverseLight = document.getElementById('reverse-light');
 
     let animationInterval;
-    let isForward = true;
+    let isForward = true; // ✅ So it always starts going forward
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
