@@ -159,11 +159,11 @@ button:hover {
   font-size: 12px;
 }
 
-/* ✅ Forklift Animation stays inside chat-box and starts on the left */
+/* ✅ Forklift Animation inside chat box and starts on left */
 .forklift-animation {
   position: absolute;
   top: 50%;
-  left: -300px;
+  left: -270px; /* off screen left start */
   width: 270px;
   height: auto;
   display: none;
@@ -173,11 +173,11 @@ button:hover {
 }
 
 .forklift-animation.forward {
-  left: calc(100% - 270px);
+  left: calc(100% - 270px); /* moves to right edge inside chat box */
 }
 
 .forklift-animation.backward {
-  left: -300px;
+  left: -270px; /* moves fully back to left */
 }
 
 .forklift-img {
