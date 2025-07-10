@@ -21,6 +21,7 @@
 
     <!-- Chat Box -->
     <div id="chat-box" class="chat-box">
+      <!-- Forklift Animation Inside -->
       <div class="forklift-animation" id="forklift-animation">
         <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
         <div class="reverse-light" id="reverse-light"></div>
@@ -80,7 +81,7 @@
       forkliftAnim.style.display = 'block';
       forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.classList.remove('active');
-      animateForklift();
+      animateForklift(); // Start immediately
       animationInterval = setInterval(animateForklift, 4200);
     }
 

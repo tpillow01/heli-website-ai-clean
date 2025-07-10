@@ -63,13 +63,14 @@ body {
   padding: 20px;
   height: 75vh;
   max-height: 750px;
-  overflow-y: auto;
+  overflow: visible; /* ✅ allows forklift to animate freely */
   margin-bottom: 15px;
   box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
   color: #000000;
   font-size: 18px;
   line-height: 1.8;
   position: relative;
+  z-index: 0;
 }
 
 .message {
@@ -110,6 +111,7 @@ body {
   margin-top: 8px;
 }
 
+/* Form */
 .input-form {
   display: flex;
   flex-direction: column;
@@ -159,25 +161,25 @@ button:hover {
   font-size: 12px;
 }
 
-/* ✅ Forklift Animation inside chat box and starts on left */
+/* ✅ Forklift Animation */
 .forklift-animation {
   position: absolute;
   top: 50%;
-  left: -270px; /* off screen left start */
+  left: -270px;
   width: 270px;
   height: auto;
   display: none;
-  z-index: 1000;
-  transition: left 4s linear;
   transform: translateY(-50%);
+  transition: left 4s linear;
+  z-index: 10;
 }
 
 .forklift-animation.forward {
-  left: calc(100% - 270px); /* moves to right edge inside chat box */
+  left: calc(100% - 270px);
 }
 
 .forklift-animation.backward {
-  left: -270px; /* moves fully back to left */
+  left: -270px;
 }
 
 .forklift-img {
