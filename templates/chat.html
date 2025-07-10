@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -61,11 +62,11 @@
       paragraphs.forEach(p => {
         let formatted = formatLabels(p);
         if (formatted.trim().startsWith('-')) {
-          html += <div class="subpoint">${formatted}</div>;
+          html += `<div class="subpoint">${formatted}</div>`;
         } else if (formatted.includes('section-label')) {
-          html += <div>${formatted}</div>;
+          html += `<div>${formatted}</div>`;
         } else {
-          html += <div class="final-note">${formatted}</div>;
+          html += `<div class="final-note">${formatted}</div>`;
         }
       });
       html += '</div>';
@@ -110,7 +111,7 @@
       const question = input.value.trim();
       if (!question) return;
 
-      chatBox.innerHTML += <div class="message user">You: ${question}</div>;
+      chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
       startAnimationLoop();
 
@@ -126,11 +127,11 @@
           renderAIResponse(data.response);
         } else {
           stopAnimation();
-          chatBox.innerHTML += <div class="message ai">Error contacting server.</div>;
+          chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
         }
       } catch (error) {
         stopAnimation();
-        chatBox.innerHTML += <div class="message ai">Error: ${error.message}</div>;
+        chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
       }
     });
 
