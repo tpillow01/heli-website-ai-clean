@@ -6,7 +6,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100svh;
+  min-height: 100vh;
   box-sizing: border-box;
   overflow-y: auto;
 }
@@ -66,14 +66,12 @@ body {
   height: 75vh;
   max-height: 750px;
   overflow-y: auto;
-  overflow-x: hidden; /* ✅ Prevent overflow */
   margin-bottom: 15px;
   box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
   color: #000000;
   font-size: 18px;
   line-height: 1.8;
-  position: relative; /* ✅ Make it the positioning context for animation */
-  z-index: 1;
+  position: relative;
 }
 
 .message {
@@ -114,7 +112,7 @@ body {
   margin-top: 8px;
 }
 
-/* Form */
+/* Input Form */
 .input-form {
   display: flex;
   flex-direction: column;
@@ -164,26 +162,24 @@ button:hover {
   font-size: 12px;
 }
 
-/* ✅ Forklift Animation (stays in the chat box) */
+/* ✅ Forklift Animation */
 .forklift-animation {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: -300px;
   width: 270px;
-  height: auto;
   display: none;
-  transform: translateY(-50%);
+  z-index: 10;
   transition: left 4s linear;
-  z-index: 1000;
-  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .forklift-animation.forward {
-  left: calc(100% - 270px); /* ✅ Stops at right edge of box */
+  left: calc(100% - 270px);
 }
 
 .forklift-animation.backward {
-  left: 0; /* ✅ Starts and returns to left side */
+  left: -300px;
 }
 
 .forklift-img {
@@ -195,7 +191,7 @@ button:hover {
 /* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 20px;
+  top: 22px;
   left: 62px;
   width: 14px;
   height: 14px;
