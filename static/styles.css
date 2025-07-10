@@ -6,7 +6,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  min-height: 100svh;
   box-sizing: border-box;
   overflow-y: auto;
 }
@@ -71,7 +71,6 @@ body {
   color: #000000;
   font-size: 18px;
   line-height: 1.8;
-  position: relative;
 }
 
 .message {
@@ -112,7 +111,7 @@ body {
   margin-top: 8px;
 }
 
-/* Input Form */
+/* Form */
 .input-form {
   display: flex;
   flex-direction: column;
@@ -162,20 +161,20 @@ button:hover {
   font-size: 12px;
 }
 
-/* ✅ Forklift Animation */
+/* Forklift Animation */
 .forklift-animation {
   position: absolute;
   top: 50%;
-  left: -300px;
   width: 270px;
+  height: auto;
   display: none;
-  z-index: 10;
+  left: 0;
+  z-index: 1000;
   transition: left 4s linear;
-  transform: translateY(-50%);
 }
 
 .forklift-animation.forward {
-  left: calc(100% - 270px);
+  left: 100%;
 }
 
 .forklift-animation.backward {
@@ -188,33 +187,35 @@ button:hover {
   position: relative;
 }
 
-/* Reverse Light */
+/* Reverse Light (inside bulb, flashes red) */
 .reverse-light {
   position: absolute;
-  top: 22px;
+  top: 20px;
   left: 62px;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   background-color: red;
   border-radius: 50%;
   display: none;
   z-index: 1001;
-}
-
-@keyframes backup-light-flash {
-  0%, 100% {
-    opacity: 1;
-    box-shadow: 0 0 8px red;
-  }
-  50% {
-    opacity: 0.2;
-    box-shadow: 0 0 2px red;
-  }
+  mix-blend-mode: screen;
+  opacity: 0.85;
 }
 
 .reverse-light.active {
   display: block;
   animation: backup-light-flash 0.6s infinite;
+}
+
+@keyframes backup-light-flash {
+  0%, 100% {
+    opacity: 0.85;
+    box-shadow: 0 0 6px 2px red;
+  }
+  50% {
+    opacity: 0.2;
+    box-shadow: 0 0 2px red;
+  }
 }
 
 /* Mobile Responsive */

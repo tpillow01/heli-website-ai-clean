@@ -19,14 +19,14 @@
       </div>
     </div>
 
-    <!-- Chat Box (position context for animation) -->
-    <div id="chat-box" class="chat-box">
-      <!-- Forklift Animation (must be inside chat-box for positioning) -->
-      <div class="forklift-animation" id="forklift-animation">
-        <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
-        <div class="reverse-light" id="reverse-light"></div>
-      </div>
+    <!-- Forklift Animation -->
+    <div class="forklift-animation" id="forklift-animation">
+      <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
+      <div class="reverse-light" id="reverse-light"></div>
     </div>
+
+    <!-- Chat Box -->
+    <div id="chat-box" class="chat-box"></div>
 
     <!-- Input Section -->
     <div id="input-wrapper">
@@ -79,8 +79,12 @@
 
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
+
+      // Reset to left side before starting
       forkliftAnim.classList.remove('forward', 'backward');
+      forkliftAnim.style.left = '-300px';
       reverseLight.classList.remove('active');
+
       animateForklift(); // Start immediately
       animationInterval = setInterval(animateForklift, 4200);
     }
