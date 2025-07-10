@@ -71,6 +71,8 @@ body {
   color: #000000;
   font-size: 18px;
   line-height: 1.8;
+  position: relative;
+  overflow-x: hidden;
 }
 
 .message {
@@ -161,10 +163,11 @@ button:hover {
   font-size: 12px;
 }
 
+/* 🔧 Forklift Animation INSIDE chat box */
 .forklift-animation {
   position: absolute;
-  top: 50%;
-  left: -300px; /* 🚨 Start completely off-screen on the left */
+  top: 85%;
+  left: -250px;
   width: 270px;
   height: auto;
   display: none;
@@ -174,11 +177,11 @@ button:hover {
 }
 
 .forklift-animation.forward {
-  left: 100vw; /* ✅ Moves all the way to the right */
+  left: calc(100% - 20px);
 }
 
 .forklift-animation.backward {
-  left: -300px; /* ✅ Moves all the way back to the left */
+  left: -250px;
 }
 
 .forklift-img {
