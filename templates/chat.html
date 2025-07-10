@@ -19,14 +19,14 @@
       </div>
     </div>
 
-    <!-- Forklift Animation -->
-    <div class="forklift-animation" id="forklift-animation">
-      <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
-      <div class="reverse-light" id="reverse-light"></div>
-    </div>
-
     <!-- Chat Box -->
-    <div id="chat-box" class="chat-box"></div>
+    <div id="chat-box" class="chat-box">
+      <!-- Forklift Animation Inside -->
+      <div class="forklift-animation" id="forklift-animation">
+        <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
+        <div class="reverse-light" id="reverse-light"></div>
+      </div>
+    </div>
 
     <!-- Input Section -->
     <div id="input-wrapper">
@@ -47,7 +47,7 @@
     const reverseLight = document.getElementById('reverse-light');
 
     let animationInterval;
-    let isForward = true; // ✅ So it always starts going forward
+    let isForward = true;
 
     function formatLabels(text) {
       return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -81,7 +81,7 @@
       forkliftAnim.style.display = 'block';
       forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.classList.remove('active');
-      animateForklift(); // Start immediately
+      animateForklift();
       animationInterval = setInterval(animateForklift, 4200);
     }
 

@@ -22,7 +22,6 @@ body {
   position: relative;
 }
 
-/* Logo Bar */
 .logo-bar {
   display: flex;
   justify-content: space-between;
@@ -57,7 +56,6 @@ body {
   padding: 10px;
 }
 
-/* Chat Box */
 #chat-box {
   background-color: #ffffff;
   border: 3px solid #000000;
@@ -72,7 +70,6 @@ body {
   font-size: 18px;
   line-height: 1.8;
   position: relative;
-  overflow-x: hidden;
 }
 
 .message {
@@ -113,7 +110,6 @@ body {
   margin-top: 8px;
 }
 
-/* Form */
 .input-form {
   display: flex;
   flex-direction: column;
@@ -163,11 +159,11 @@ button:hover {
   font-size: 12px;
 }
 
-/* 🔧 Forklift Animation INSIDE chat box */
+/* ✅ Forklift Animation stays inside chat-box and starts on the left */
 .forklift-animation {
   position: absolute;
-  top: 85%;
-  left: -250px;
+  top: 50%;
+  left: -300px;
   width: 270px;
   height: auto;
   display: none;
@@ -177,11 +173,11 @@ button:hover {
 }
 
 .forklift-animation.forward {
-  left: calc(100% - 20px);
+  left: calc(100% - 270px);
 }
 
 .forklift-animation.backward {
-  left: -250px;
+  left: -300px;
 }
 
 .forklift-img {
@@ -194,7 +190,7 @@ button:hover {
 .reverse-light {
   position: absolute;
   top: 22px;
-  left: 60px;
+  left: 62px;
   width: 14px;
   height: 14px;
   background-color: red;
@@ -219,7 +215,7 @@ button:hover {
   animation: backup-light-flash 0.6s infinite;
 }
 
-/* Mobile Responsive */
+/* Mobile */
 @media (max-width: 600px) {
   .logo-bar {
     flex-direction: column;
