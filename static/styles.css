@@ -253,6 +253,6 @@ button:hover {
   /* Tweak the reverse-light so it sits inside the bulb on small screens */
   .reverse-light {
     top: 18px;   /* adjust up/down as needed */
-    left: 42px;  /* adjust left/right as needed */
+    left: 40px;  /* adjust left/right as needed */
   }
 }
