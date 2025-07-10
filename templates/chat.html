@@ -19,14 +19,14 @@
       </div>
     </div>
 
-    <!-- Forklift Animation -->
-    <div class="forklift-animation" id="forklift-animation">
-      <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
-      <div class="reverse-light" id="reverse-light"></div>
+    <!-- Chat Box (position context for animation) -->
+    <div id="chat-box" class="chat-box">
+      <!-- Forklift Animation (must be inside chat-box for positioning) -->
+      <div class="forklift-animation" id="forklift-animation">
+        <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
+        <div class="reverse-light" id="reverse-light"></div>
+      </div>
     </div>
-
-    <!-- Chat Box -->
-    <div id="chat-box" class="chat-box"></div>
 
     <!-- Input Section -->
     <div id="input-wrapper">
