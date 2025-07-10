@@ -168,17 +168,9 @@ button:hover {
   width: 270px;
   height: auto;
   display: none;
-  left: 0;
   z-index: 1000;
   transition: left 4s linear;
-}
-
-.forklift-animation.forward {
-  left: 100%;
-}
-
-.forklift-animation.backward {
-  left: -300px;
+  transform: translateY(-50%);
 }
 
 .forklift-img {
@@ -190,8 +182,8 @@ button:hover {
 /* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 20px; /* Adjusted down */
-  left: 56px; /* Adjusted right */
+  top: 20px;
+  left: 56px;
   width: 14px;
   height: 14px;
   background-color: red;
@@ -200,7 +192,6 @@ button:hover {
   z-index: 1001;
 }
 
-/* Flashing animation when active */
 @keyframes backup-light-flash {
   0%, 100% {
     opacity: 1;
