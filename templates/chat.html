@@ -78,12 +78,19 @@
     }
 
     function startAnimationLoop() {
+      // Make visible and reset classes
       forkliftAnim.style.display = 'block';
       forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.classList.remove('active');
 
-      animateForklift(); // Start animation immediately
-      animationInterval = setInterval(animateForklift, 4200);
+      // Ensure first move is forward from the left
+      isForward = true;
+
+      // Wait for next paint so you see it at left:0, then animate
+      requestAnimationFrame(() => {
+        animateForklift();
+        animationInterval = setInterval(animateForklift, 4200);
+      });
     }
 
     function animateForklift() {
