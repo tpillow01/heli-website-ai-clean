@@ -79,13 +79,10 @@
 
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
-
-      // Reset to left side before starting
       forkliftAnim.classList.remove('forward', 'backward');
-      forkliftAnim.style.left = '-300px';
       reverseLight.classList.remove('active');
 
-      animateForklift(); // Start immediately
+      animateForklift(); // Start animation immediately
       animationInterval = setInterval(animateForklift, 4200);
     }
 
