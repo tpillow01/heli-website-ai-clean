@@ -8,20 +8,18 @@ from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
 
-client = OpenAI()  # ✅ Let it read the key from the environment
+client = OpenAI()  # ✅ Uses environment variable for API key
 
 # Conversation memory
 conversation_history = []
 
 # Fuzzy match customer name
 def find_account_by_name(name):
-    return None  # Optional fallback removed since accounts are now handled in ai_logic
+    return None
 
-# Optional model filtering for account (not used in ai_logic fallback)
 def filter_models_for_account(account):
-    return []  # Unused now — handled in ai_logic
+    return []
 
-# Format a model block (simple fallback only)
 def format_models(models):
     if not models:
         return "- No suitable model matches found."
@@ -51,17 +49,13 @@ def chat():
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'})
 
-    # Generate forklift model context based on user input + customer name
     combined_context = generate_forklift_context(user_question, customer_name)
 
-    # Add to memory
     conversation_history.append({"role": "user", "content": user_question})
 
-    # Trim old messages
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # System instructions
     system_prompt = {
         "role": "system",
         "content": (
@@ -91,7 +85,6 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": combined_context}] + conversation_history
 
-    # Token management
     encoding = tiktoken.encoding_for_model("gpt-4")
 
     def num_tokens_from_messages(messages):
@@ -113,6 +106,3 @@ def chat():
         ai_reply = f"Error contacting OpenAI: {e}"
 
     return jsonify({'response': ai_reply})
-
-if __name__ == "__main__":
-    app.run(debug=True, port=5004)
