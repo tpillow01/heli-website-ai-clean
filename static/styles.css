@@ -190,7 +190,7 @@ button:hover {
 /* Reverse Light (inside bulb, flashes red) */
 .reverse-light {
   position: absolute;
-  top: 21px;
+  top: 24px;
   left: 60px;
   width: 12px;
   height: 12px;
