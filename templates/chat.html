@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -62,11 +61,11 @@
       paragraphs.forEach(p => {
         let formatted = formatLabels(p);
         if (formatted.trim().startsWith('-')) {
-          html += `<div class="subpoint">${formatted}</div>`;
+          html += <div class="subpoint">${formatted}</div>;
         } else if (formatted.includes('section-label')) {
-          html += `<div>${formatted}</div>`;
+          html += <div>${formatted}</div>;
         } else {
-          html += `<div class="final-note">${formatted}</div>`;
+          html += <div class="final-note">${formatted}</div>;
         }
       });
       html += '</div>';
@@ -79,26 +78,30 @@
 
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
-      forkliftAnim.style.left = '-300px';
-      isForward = true;
-      animateForklift();
+      forkliftAnim.classList.remove('forward', 'backward');
+      reverseLight.classList.remove('active');
+      animateForklift(); // Start immediately
       animationInterval = setInterval(animateForklift, 4200);
     }
 
     function animateForklift() {
+      forkliftAnim.classList.remove('forward', 'backward');
+      reverseLight.classList.remove('active');
+
       if (isForward) {
-        forkliftAnim.style.left = '100%';
-        reverseLight.classList.remove('active');
+        forkliftAnim.classList.add('forward');
       } else {
-        forkliftAnim.style.left = '-300px';
+        forkliftAnim.classList.add('backward');
         reverseLight.classList.add('active');
       }
+
       isForward = !isForward;
     }
 
     function stopAnimation() {
       clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
+      forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.classList.remove('active');
     }
 
@@ -107,7 +110,7 @@
       const question = input.value.trim();
       if (!question) return;
 
-      chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
+      chatBox.innerHTML += <div class="message user">You: ${question}</div>;
       input.value = '';
       startAnimationLoop();
 
@@ -123,14 +126,20 @@
           renderAIResponse(data.response);
         } else {
           stopAnimation();
-          chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
+          chatBox.innerHTML += <div class="message ai">Error contacting server.</div>;
         }
       } catch (error) {
         stopAnimation();
-        chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
+        chatBox.innerHTML += <div class="message ai">Error: ${error.message}</div>;
       }
     });
 
     input.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        form.dispatchEvent(new Event('submit'));
+      }
+    });
+  </script>
+</body>
+</html>
