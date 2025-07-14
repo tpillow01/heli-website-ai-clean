@@ -7,19 +7,29 @@ from openai import OpenAI
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
-
 client = OpenAI()  # ✅ Uses environment variable for API key
 
-# Conversation memory
-conversation_history = []
+# ─── Load accounts.json for customer matching ─────────────────────────────────
+with open("accounts.json", "r", encoding="utf-8") as f:
+    account_data = json.load(f)
+print(f"✅ Loaded {len(account_data)} accounts from JSON")
 
-# Placeholder customer match (can expand later)
+# Conversation memory
+dconversation_history = []
+
+# Fuzzy match customer name
 def find_account_by_name(name):
+    names = [acct.get("Account Name", "") for acct in account_data]
+    match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
+    if match:
+        return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
 
+# Placeholder model filter (unused for now)
 def filter_models_for_account(account):
     return []
 
+# Format model blocks for inclusion in prompt
 def format_models(models):
     if not models:
         return "- No suitable model matches found."
@@ -47,11 +57,14 @@ def chat():
         return jsonify({'response': 'Invalid request. Please send a JSON body.'}), 400
 
     user_question = data.get('question', '').strip()
-    customer_name = data.get('customer', '').strip()
-
     if not user_question:
-        return jsonify({'response': 'Please enter a description of the customer\u2019s needs.'})
+        return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
 
+    # Attempt to match a customer
+    account = find_account_by_name(user_question)
+    customer_name = account.get('Account Name') if account else ''
+
+    # Build combined context
     combined_context = generate_forklift_context(user_question, customer_name)
     conversation_history.append({"role": "user", "content": user_question})
 
@@ -59,44 +72,31 @@ def chat():
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # Define system behavior
+    # System prompt defines overall behavior
     system_prompt = {
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant. "
             "When recommending models, format your response as plain text but wrap section headers in a <span class=\"section-label\">...</span> tag. "
-            "Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. "
-            "List details underneath using hyphens. Leave a blank line between sections. "
-            "Indent subpoints for clarity.\n\n"
+            "Use sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. "
+            "List details with hyphens. Leave blank lines between sections.Indent subpoints.\n\n"
             "At the end, include:\n"
             "- Sales Pitch Techniques: 1–2 persuasive points.\n"
-            "- Common Objections: 1–2 common concerns and how to address them.\n\n"
-            "<span class=\"section-label\">Example:</span>\n"
-            "<span class=\"section-label\">Model:</span>\n"
-            "- Heli H2000 Series 5-7T\n"
-            "- Designed for heavy-duty applications\n\n"
-            "<span class=\"section-label\">Power:</span>\n"
-            "- Diesel\n"
-            "- Provides high torque and durability\n\n"
-            "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
-            "- Emphasize Heli’s lower total cost of ownership.\n"
-            "- Highlight that standard features are optional on other brands.\n\n"
-            "<span class=\"section-label\">Common Objections:</span>\n"
-            "- \"Why not Toyota or Crown?\"\n"
-            "  → Heli offers similar quality at a better price with faster part availability."
+            "- Common Objections: 1–2 common concerns and how to address them."
         )
     }
 
     messages = [system_prompt, {"role": "user", "content": combined_context}] + conversation_history
 
-    # Token management
+    # Token management to avoid overflow
     encoding = tiktoken.encoding_for_model("gpt-4")
-    def num_tokens_from_messages(messages):
-        return sum(len(encoding.encode(m["content"])) for m in messages)
+    def num_tokens_from_messages(msgs):
+        return sum(len(encoding.encode(m["content"])) for m in msgs)
 
     while num_tokens_from_messages(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
+    # Call OpenAI
     try:
         response = client.chat.completions.create(
             model="gpt-4",
@@ -111,3 +111,6 @@ def chat():
         ai_reply = "Something went wrong when contacting the AI. Please try again."
 
     return jsonify({'response': ai_reply})
+
+if __name__ == '__main__':
+    app.run(debug=True)

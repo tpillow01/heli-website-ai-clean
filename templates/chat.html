@@ -25,12 +25,13 @@
       <div class="reverse-light" id="reverse-light"></div>
     </div>
 
-    <!-- Responses -->
+    <!-- Chat Responses -->
     <div id="response-area" class="response-area"></div>
 
     <!-- Input -->
     <form id="chat-form" class="input-form">
-      <textarea id="userInput" rows="3" placeholder="Ask a forklift-related question…" required></textarea>
+      <textarea id="userInput" rows="3"
+        placeholder="Ask a forklift-related question…" required></textarea>
       <button type="submit">Submit</button>
     </form>
 
@@ -92,16 +93,16 @@
 
     form.addEventListener('submit', async e => {
       e.preventDefault();
-      const question = input.value.trim();
-      if (!question) return;
-      renderBubble(question, 'user');
+      const q = input.value.trim();
+      if (!q) return;
+      renderBubble(q, 'user');
       input.value = '';
       startAnimationLoop();
       try {
         const res = await fetch('/api/chat', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ question })
+          body: JSON.stringify({ question: q })
         });
         if (res.ok) {
           const { response } = await res.json();
@@ -114,6 +115,7 @@
       }
     });
 
+    // Press Enter to send (Shift+Enter for newline)
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
