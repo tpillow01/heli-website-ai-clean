@@ -1,3 +1,4 @@
+<!-- templates/chat.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -62,11 +63,11 @@
       paragraphs.forEach(p => {
         let formatted = formatLabels(p);
         if (formatted.trim().startsWith('-')) {
-          html += <div class="subpoint">${formatted}</div>;
+          html += `<div class="subpoint">${formatted}</div>`;
         } else if (formatted.includes('section-label')) {
-          html += <div>${formatted}</div>;
+          html += `<div>${formatted}</div>`;
         } else {
-          html += <div class="final-note">${formatted}</div>;
+          html += `<div class="final-note">${formatted}</div>`;
         }
       });
       html += '</div>';
@@ -78,15 +79,12 @@
     }
 
     function startAnimationLoop() {
-      // Make visible and reset classes
       forkliftAnim.style.display = 'block';
       forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.classList.remove('active');
 
-      // Ensure first move is forward from the left
       isForward = true;
 
-      // Wait for next paint so you see it at left:0, then animate
       requestAnimationFrame(() => {
         animateForklift();
         animationInterval = setInterval(animateForklift, 4200);
@@ -119,7 +117,7 @@
       const question = input.value.trim();
       if (!question) return;
 
-      chatBox.innerHTML += <div class="message user">You: ${question}</div>;
+      chatBox.innerHTML += `<div class="message user">You: ${question}</div>`;
       input.value = '';
       startAnimationLoop();
 
@@ -135,11 +133,11 @@
           renderAIResponse(data.response);
         } else {
           stopAnimation();
-          chatBox.innerHTML += <div class="message ai">Error contacting server.</div>;
+          chatBox.innerHTML += `<div class="message ai">Error contacting server.</div>`;
         }
       } catch (error) {
         stopAnimation();
-        chatBox.innerHTML += <div class="message ai">Error: ${error.message}</div>;
+        chatBox.innerHTML += `<div class="message ai">Error: ${error.message}</div>`;
       }
     });
 
