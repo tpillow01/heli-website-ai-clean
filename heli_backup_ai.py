@@ -50,7 +50,7 @@ def chat():
     customer_name = data.get('customer', '').strip()
 
     if not user_question:
-        return jsonify({'response': 'Please enter a description of the customer’s needs.'})
+        return jsonify({'response': 'Please enter a description of the customer\u2019s needs.'})
 
     combined_context = generate_forklift_context(user_question, customer_name)
     conversation_history.append({"role": "user", "content": user_question})
