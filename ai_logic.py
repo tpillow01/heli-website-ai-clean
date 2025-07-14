@@ -21,10 +21,17 @@ def get_customer_context(customer_name: str) -> str:
     profile = accounts_data.get(key)
     if not profile:
         return ""
+    # Format SIC Code as integer/string
+    raw_sic = profile.get("SIC Code", "N/A")
+    try:
+        sic_code = str(int(raw_sic))
+    except Exception:
+        sic_code = str(raw_sic)
     lines = [
         "<span class=\"section-label\">Customer Profile:</span>",
         f"- Company: {profile['Account Name']}",
         f"- Industry: {profile.get('Industry','N/A')}",
+        f"- SIC Code: {sic_code}",
         f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}",
         f"- Truck Types: {profile.get('Truck Types at Location','N/A')}"
     ]
