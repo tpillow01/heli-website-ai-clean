@@ -14,7 +14,7 @@ with open("accounts.json", "r", encoding="utf-8") as f:
     account_data = json.load(f)
 print(f"✅ Loaded {len(account_data)} accounts from JSON")
 
-# ─── Load models.json for forklift recommendations ─────────────────────────────
+# ─── Load models.json ONCE for forklift recommendations ────────────────────────
 with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} forklift models from JSON")
@@ -22,7 +22,7 @@ print(f"✅ Loaded {len(model_data)} forklift models from JSON")
 # Conversation history
 conversation_history = []
 
-# Fuzzy match customer name
+
 def find_account_by_name(name):
     names = [acct.get("Account Name", "") for acct in account_data]
     match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
@@ -30,33 +30,15 @@ def find_account_by_name(name):
         return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
 
-# Filter models based on customer industry
-def filter_models_for_account(account):
-    industry = account.get("Industry", "").lower()
-    return [m for m in model_data if industry in [i.lower() for i in m.get("Industries", [])]]
-
-# Format model blocks for inclusion in context
-def format_models(models):
-    if not models:
-        return "- No suitable model matches found."
-    blocks = []
-    for m in models[:5]:
-        blocks.append(
-            f"<span class=\"section-label\">Model:</span> {m.get('Model')}\n"
-            f"- Power: {m.get('Power')}\n"
-            f"- Capacity: {m.get('Capacity')}\n"
-            f"- Type: {m.get('Type')}\n"
-        )
-    return "\n".join(blocks)
 
 @app.route('/')
 def home():
     return render_template('chat.html')
 
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     global conversation_history
-
     data = request.get_json()
     if not data:
         return jsonify({'response': 'Invalid request. Please send JSON.'}), 400
@@ -65,34 +47,28 @@ def chat():
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
 
-    # Attempt to match customer
+    # Fuzzy-match the account
     account = find_account_by_name(user_question)
-    if account:
-        filtered = filter_models_for_account(account)
-        model_ctx = format_models(filtered)
-        acct_ctx = (
-            f"Customer Account: {account.get('Account Name')}\n"
-            f"Industry: {account.get('Industry')}\n\n"
-        )
-        combined_context = acct_ctx + model_ctx + "\n\n" + user_question
-    else:
-        general_ctx = format_models(model_data)
-        combined_context = "General Recommendations:\n" + general_ctx + "\n\n" + user_question
+    customer_name = account["Account Name"] if account else ""
+
+    # Build the combined context (using the single model_data loaded above)
+    filtered_context = generate_forklift_context(user_question, customer_name, model_data)
 
     # Append to history
     conversation_history.append({"role": "user", "content": user_question})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # System prompt
+    # Your detailed system prompt, unchanged
     system_prompt = {
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant. "
-            "When recommending models, format your response as plain text but wrap section headers in a <span class=\"section-label\">...</span> tag. "
-            "Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. "
-            "List details underneath using hyphens. Leave a blank line between sections. "
-            "Indent subpoints for clarity.\n\n"
+            "When recommending models, format your response as plain text but wrap section headers in a "
+            "<span class=\"section-label\">...</span> tag. "
+            "Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, "
+            "Sales Pitch Techniques:, Common Objections:. List details underneath using hyphens. "
+            "Leave a blank line between sections. Indent subpoints for clarity.\n\n"
             "At the end, include:\n"
             "- Sales Pitch Techniques: 1–2 persuasive points.\n"
             "- Common Objections: 1–2 common concerns and how to address them.\n\n"
@@ -109,17 +85,18 @@ def chat():
             "<span class=\"section-label\">Common Objections:</span>\n"
             "- \"Why not Toyota or Crown?\"\n"
             "  → Heli offers similar quality at a better price with faster part availability."
-            f"\n\n{combined_context}"
+            f"\n\n{filtered_context}"
         )
     }
 
-    # Build messages
+    # Assemble messages in the correct order
     messages = [system_prompt] + conversation_history
 
-    # Token management
+    # Token‐limit safety
     encoding = tiktoken.encoding_for_model("gpt-4")
     def num_tokens(msgs):
         return sum(len(encoding.encode(m["content"])) for m in msgs)
+
     while num_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
@@ -137,6 +114,7 @@ def chat():
         ai_reply = "Something went wrong when contacting the AI. Please try again."
 
     return jsonify({'response': ai_reply})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
