@@ -1,4 +1,3 @@
-import os
 import json
 import difflib
 import tiktoken
@@ -7,7 +6,7 @@ from openai import OpenAI
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
-client = OpenAI()  # ✅ Uses environment variable for API key
+client = OpenAI()  # Uses OPENAI_API_KEY from env
 
 # ─── Load accounts.json for customer matching ─────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
@@ -19,9 +18,8 @@ with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} forklift models from JSON")
 
-# Conversation history
+# Conversation memory
 conversation_history = []
-
 
 def find_account_by_name(name):
     names = [acct.get("Account Name", "") for acct in account_data]
@@ -30,45 +28,41 @@ def find_account_by_name(name):
         return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
 
-
 @app.route('/')
 def home():
     return render_template('chat.html')
 
-
 @app.route('/api/chat', methods=['POST'])
 def chat():
     global conversation_history
-    data = request.get_json()
-    if not data:
-        return jsonify({'response': 'Invalid request. Please send JSON.'}), 400
-
+    data = request.get_json() or {}
     user_question = data.get('question', '').strip()
+
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
 
-    # Fuzzy-match the account
+    # 1) Fuzzy-match customer
     account = find_account_by_name(user_question)
     customer_name = account["Account Name"] if account else ""
 
-    # Build the combined context (using the single model_data loaded above)
-    filtered_context = generate_forklift_context(user_question, customer_name, model_data)
+    # 2) Build dynamic context (customer profile + filtered models)
+    dynamic_context = generate_forklift_context(user_question, customer_name, model_data)
 
-    # Append to history
+    # 3) Append user query to history
     conversation_history.append({"role": "user", "content": user_question})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # Your detailed system prompt, unchanged
+    # 4) Static system prompt (guidelines + example)
     system_prompt = {
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant. "
-            "When recommending models, format your response as plain text but wrap section headers in a "
-            "<span class=\"section-label\">...</span> tag. "
-            "Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, "
-            "Sales Pitch Techniques:, Common Objections:. List details underneath using hyphens. "
-            "Leave a blank line between sections. Indent subpoints for clarity.\n\n"
+            "When recommending models, format your response as plain text but wrap "
+            "section headers in a <span class=\"section-label\">...</span> tag. "
+            "Use these sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, "
+            "Sales Pitch Techniques:, Common Objections:. List details underneath with hyphens. "
+            "Indent subpoints for clarity.\n\n"
             "At the end, include:\n"
             "- Sales Pitch Techniques: 1–2 persuasive points.\n"
             "- Common Objections: 1–2 common concerns and how to address them.\n\n"
@@ -85,36 +79,37 @@ def chat():
             "<span class=\"section-label\">Common Objections:</span>\n"
             "- \"Why not Toyota or Crown?\"\n"
             "  → Heli offers similar quality at a better price with faster part availability."
-            f"\n\n{filtered_context}"
         )
     }
 
-    # Assemble messages in the correct order
-    messages = [system_prompt] + conversation_history
+    # 5) Assemble the messages list
+    messages = [
+        system_prompt,
+        {"role": "user", "content": dynamic_context}
+    ] + conversation_history
 
-    # Token‐limit safety
+    # 6) Trim tokens if too long
     encoding = tiktoken.encoding_for_model("gpt-4")
-    def num_tokens(msgs):
+    def count_tokens(msgs):
         return sum(len(encoding.encode(m["content"])) for m in msgs)
-
-    while num_tokens(messages) > 7000 and len(messages) > 2:
+    while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
+    # 7) Call OpenAI
     try:
-        response = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
             max_tokens=600,
             temperature=0.7
         )
-        ai_reply = response.choices[0].message.content.strip()
+        ai_reply = resp.choices[0].message.content.strip()
         conversation_history.append({"role": "assistant", "content": ai_reply})
     except Exception as e:
         print("OpenAI API error:", e)
         ai_reply = "Something went wrong when contacting the AI. Please try again."
 
     return jsonify({'response': ai_reply})
-
 
 if __name__ == '__main__':
     app.run(debug=True)

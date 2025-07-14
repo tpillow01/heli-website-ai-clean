@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Make sure this matches your CSS filename -->
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 </head>
 <body>
@@ -16,14 +15,15 @@
       </div>
       <div class="header-title">Tynan Equipment AI</div>
       <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='heli.png.png') }}" alt="Heli Logo" class="logo-img" />
+        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
       </div>
     </div>
 
     <!-- Forklift Animation -->
     <div class="forklift-animation" id="forklift-animation">
-      <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
-      <div class="reverse-light" id="reverse-light"></div>
+      <div class="forklift-unit">
+        <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
+      </div>
     </div>
 
     <!-- Responses -->
@@ -49,10 +49,8 @@
     const input = document.getElementById('userInput');
     const responseArea = document.getElementById('response-area');
     const forkliftAnim = document.getElementById('forklift-animation');
-    const reverseLight = document.getElementById('reverse-light');
-
-    let animationInterval;
-    let isForward = true;
+    const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
+    let animationInterval, isForward = true;
 
     function formatLabels(text) {
       return text.replace(
@@ -75,27 +73,23 @@
 
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
-      forkliftAnim.classList.remove('forward', 'backward');
-      reverseLight.style.opacity = '0';
+      forkliftUnit.style.left = '0';
       isForward = true;
-      requestAnimationFrame(() => {
-        animateForklift();
-        animationInterval = setInterval(animateForklift, 2200);
-      });
+      animationInterval = setInterval(animateForklift, 2000);
     }
 
     function animateForklift() {
-      forkliftAnim.classList.toggle('forward', isForward);
-      forkliftAnim.classList.toggle('backward', !isForward);
-      reverseLight.style.opacity = isForward ? '0' : '1';
+      if (isForward) {
+        forkliftUnit.style.left = 'calc(100% - 200px)';
+      } else {
+        forkliftUnit.style.left = '0';
+      }
       isForward = !isForward;
     }
 
     function stopAnimation() {
       clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
-      forkliftAnim.classList.remove('forward', 'backward');
-      reverseLight.style.opacity = '0';
     }
 
     form.addEventListener('submit', async e => {
@@ -108,8 +102,8 @@
 
       try {
         const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ question: q })
         });
         if (res.ok) {
