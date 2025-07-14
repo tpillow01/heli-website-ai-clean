@@ -1,258 +1,187 @@
-body {
-  background: linear-gradient(to bottom, #000000, #333333);
-  font-family: "Times New Roman", Times, serif;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100svh;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+
+* {
   box-sizing: border-box;
-  overflow-y: auto;
 }
 
-.chat-container {
-  background-color: #000000;
-  padding: 30px;
-  border-radius: 14px;
-  width: 95%;
-  max-width: 1400px;
-  box-shadow: 0 0 0 3px #ff0000, 0 0 0 6px #000, 0 0 0 9px #ff0000;
-  box-sizing: border-box;
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #0d0d0d;
+  color: #fff;
+}
+
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
   position: relative;
 }
 
-/* Logo Bar */
-.logo-bar {
+/* Header with logos and title */
+.chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 30px;
-  margin-bottom: 15px;
-  flex-wrap: wrap;
-}
-
-.logo-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 90px;
-}
-
-.logo-img {
-  height: 90px;
-  width: auto;
-  object-fit: contain;
-  display: block;
-}
-
-.header-title {
-  flex: 2;
-  color: #ffffff;
-  font-size: 36px;
-  font-weight: bold;
-  text-align: center;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
-  letter-spacing: 1.5px;
-  padding: 10px;
-}
-
-/* Chat Box */
-#chat-box {
-  background-color: #ffffff;
-  border: 3px solid #000000;
-  border-radius: 8px;
-  padding: 20px;
-  height: 75vh;
-  max-height: 750px;
-  overflow-y: auto;
-  margin-bottom: 15px;
-  box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
-  color: #000000;
-  font-size: 18px;
-  line-height: 1.8;
-}
-
-.message {
-  margin-bottom: 10px;
-}
-
-.message.user {
-  font-weight: bold;
-}
-
-.message.ai {
-  font-size: 18px;
-  margin-bottom: 28px;
-  padding-bottom: 8px;
-  line-height: 1.8;
-  border-bottom: 1px dashed #999;
-}
-
-.section-label {
-  color: #000000;
-  font-weight: bold;
-  font-size: 20px;
-  display: block;
-  margin-top: 24px;
-  margin-bottom: 6px;
-  line-height: 1.6;
-  border-bottom: 1px solid #ccc;
-  padding-bottom: 4px;
-}
-
-.subpoint {
-  margin-left: 35px;
-  margin-bottom: 8px;
-  font-size: 17px;
-}
-
-.final-note {
-  margin-top: 8px;
-}
-
-/* Form */
-.input-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: center;
-}
-
-textarea {
-  resize: none;
-  padding: 10px;
-  font-size: 18px;
-  border: 2px solid #000000;
-  border-radius: 8px;
-  background-color: #ffffff;
-  color: #000000;
-  font-family: "Times New Roman", Times, serif;
-  width: 100%;
-  max-width: 1000px;
-}
-
-textarea:focus {
-  border-color: #ff0000;
-  outline: none;
-}
-
-button {
-  padding: 12px;
-  font-size: 18px;
-  background-color: #ffffff;
-  color: #000000;
-  border: 2px solid #000000;
-  border-radius: 8px;
-  margin-top: 8px;
-  cursor: pointer;
-  width: 100%;
-  max-width: 300px;
-}
-
-button:hover {
-  background-color: #ffcccc;
-}
-
-.footer {
-  text-align: center;
-  color: #ffffff;
-  margin-top: 12px;
-  font-size: 12px;
-}
-
-/* Forklift Animation */
-.forklift-animation {
-  position: absolute;
-  top: 50%;
-  width: 270px;
-  height: auto;
-  display: none;
-  left: 0;
-  z-index: 1000;
-  transition: left 4s linear;
-}
-
-.forklift-animation.forward {
-  left: 100%;
-}
-
-.forklift-animation.backward {
-  left: -300px;
-}
-
-.forklift-img {
-  width: 100%;
-  height: auto;
+  padding: 10px 20px;
+  border-bottom: 1px solid #333;
   position: relative;
 }
 
-/* Reverse Light (inside bulb, flashes red) */
+.chat-title {
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.logo-left,
+.logo-right {
+  height: 50px;
+  width: auto;
+}
+
+/* Forklift animation */
+.forklift-animation {
+  position: relative;
+  height: 80px;
+  margin-top: 10px;
+}
+
+.forklift-img {
+  height: 60px;
+  animation: drive 4s infinite alternate ease-in-out;
+  position: absolute;
+  left: 0;
+}
+
 .reverse-light {
   position: absolute;
-  top: 28px;
-  left: 62px;
-  width: 12px;
-  height: 12px;
+  top: 8px;
+  left: 48px;
+  width: 10px;
+  height: 10px;
   background-color: red;
   border-radius: 50%;
-  display: none;
-  z-index: 1001;
-  mix-blend-mode: screen;
-  opacity: 0.85;
+  animation: blink 1s infinite;
 }
 
-.reverse-light.active {
-  display: block;
-  animation: backup-light-flash 0.6s infinite;
-}
-
-@keyframes backup-light-flash {
-  0%, 100% {
-    opacity: 0.85;
-    box-shadow: 0 0 6px 2px red;
+@keyframes drive {
+  from {
+    left: 0;
   }
-  50% {
-    opacity: 0.2;
-    box-shadow: 0 0 2px red;
+  to {
+    left: 80%;
   }
 }
 
-/* Mobile Responsive */
+@keyframes blink {
+  0%, 50%, 100% {
+    opacity: 1;
+  }
+  25%, 75% {
+    opacity: 0;
+  }
+}
+
+/* Chat box scrollable area */
+.chat-box {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* Message bubbles */
+.user-message,
+.ai-message {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 16px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.user-message {
+  align-self: flex-end;
+  background-color: #ff0000;
+  color: #fff;
+}
+
+.ai-message {
+  align-self: flex-start;
+  background-color: #222;
+  color: #fff;
+}
+
+/* Input area */
+.input-bar {
+  display: flex;
+  align-items: center;
+  padding: 15px 20px;
+  border-top: 1px solid #333;
+  background-color: #0d0d0d;
+}
+
+.input-bar input {
+  flex: 1;
+  background-color: #1a1a1a;
+  color: #fff;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 16px;
+  outline: none;
+}
+
+.input-bar button {
+  background-color: #ff0000;
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  margin-left: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background 0.2s ease;
+}
+
+.input-bar button:hover {
+  background-color: #cc0000;
+}
+
+/* Mobile responsiveness */
 @media (max-width: 600px) {
-  .logo-bar {
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .logo-img {
-    height: 60px;
-  }
-
-  .header-title {
-    font-size: 24px;
-    padding: 5px 0;
-  }
-
-  #chat-box {
+  .chat-title {
     font-size: 16px;
-    height: 60vh;
   }
 
-  textarea,
-  button {
-    font-size: 16px;
-    width: 100%;
+  .logo-left,
+  .logo-right {
+    height: 40px;
   }
 
-  .forklift-animation {
-    width: 180px;
+  .input-bar input,
+  .input-bar button {
+    font-size: 14px;
   }
 
-  /* Tweak the reverse-light so it sits inside the bulb on small screens */
+  .forklift-img {
+    height: 50px;
+  }
+
   .reverse-light {
-    top: 18px;   /* adjust up/down as needed */
-    left: 40px;  /* adjust left/right as needed */
+    top: 6px;
+    left: 40px;
+    width: 8px;
+    height: 8px;
   }
 }
