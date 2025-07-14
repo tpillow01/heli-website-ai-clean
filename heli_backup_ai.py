@@ -13,7 +13,7 @@ client = OpenAI()  # ✅ Uses environment variable for API key
 # Conversation memory
 conversation_history = []
 
-# Fuzzy match customer name
+# Placeholder customer match (can expand later)
 def find_account_by_name(name):
     return None
 
@@ -42,7 +42,10 @@ def home():
 def chat():
     global conversation_history
 
-    data = request.json
+    data = request.get_json()
+    if not data:
+        return jsonify({'response': 'Invalid request. Please send a JSON body.'}), 400
+
     user_question = data.get('question', '').strip()
     customer_name = data.get('customer', '').strip()
 
@@ -50,12 +53,13 @@ def chat():
         return jsonify({'response': 'Please enter a description of the customer’s needs.'})
 
     combined_context = generate_forklift_context(user_question, customer_name)
-
     conversation_history.append({"role": "user", "content": user_question})
 
+    # Keep history short
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
+    # Define system behavior
     system_prompt = {
         "role": "system",
         "content": (
@@ -85,8 +89,8 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": combined_context}] + conversation_history
 
+    # Token management
     encoding = tiktoken.encoding_for_model("gpt-4")
-
     def num_tokens_from_messages(messages):
         return sum(len(encoding.encode(m["content"])) for m in messages)
 
@@ -103,6 +107,7 @@ def chat():
         ai_reply = response.choices[0].message.content.strip()
         conversation_history.append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        ai_reply = f"Error contacting OpenAI: {e}"
+        print("OpenAI API error:", e)
+        ai_reply = "Something went wrong when contacting the AI. Please try again."
 
     return jsonify({'response': ai_reply})
