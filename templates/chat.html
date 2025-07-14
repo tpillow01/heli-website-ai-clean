@@ -10,18 +10,19 @@
   <div class="chat-container">
     <!-- Header -->
     <div class="logo-bar">
-      <img src="{{ url_for('static', filename='tynan_logo.png') }}"
-           alt="Tynan Logo" class="logo-img" />
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img" />
+      </div>
       <div class="header-title">Tynan Equipment AI</div>
-      <img src="{{ url_for('static', filename='heli_logo.png') }}"
-           alt="Heli Logo" class="logo-img" />
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
+      </div>
     </div>
 
     <!-- Forklift Animation -->
     <div class="forklift-animation" id="forklift-animation">
       <div class="forklift-unit">
-        <img src="{{ url_for('static', filename='forklift_heli.png') }}"
-             alt="Forklift" class="forklift-img" />
+        <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
       </div>
     </div>
 
@@ -30,9 +31,12 @@
 
     <!-- Input -->
     <form id="chat-form" class="input-form">
-      <textarea id="userInput"
-                placeholder="Describe the customer's needs..."
-                required autofocus></textarea>
+      <textarea
+        id="userInput"
+        rows="3"
+        placeholder="Describe the customer's needs..."
+        required
+      ></textarea>
       <button type="submit">Send</button>
     </form>
 
@@ -45,18 +49,18 @@
     const input = document.getElementById('userInput');
     const responseArea = document.getElementById('response-area');
     const forkliftAnim = document.getElementById('forklift-animation');
-    const unit = forkliftAnim.querySelector('.forklift-unit');
-    let animInterval, forward = true;
+    const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
+    let animationInterval, isForward = true;
 
     function formatLabels(text) {
       return text.replace(
-        /(Model:|Power:|Capacity:|Dimensions \(in\):|Max Lifting Height \(in\):|Sales Pitch Techniques:|Common Objections:)/g,
+        /(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
         '<span class="section-label">$1</span>'
       );
     }
 
-    function renderBubble(text, sender='ai') {
-      stopAnim();
+    function renderBubble(text, sender = 'ai') {
+      stopAnimation();
       const bubble = document.createElement('div');
       bubble.className = `response-bubble ${sender}`;
       bubble.innerHTML = formatLabels(text)
@@ -67,42 +71,49 @@
       bubble.scrollIntoView({ behavior: 'smooth' });
     }
 
-    function startAnim() {
+    function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
-      unit.style.left = '0';
-      forward = true;
-      animInterval = setInterval(() => {
-        unit.style.left = forward ? 'calc(100% - ' + unit.offsetWidth + 'px)' : '0';
-        forward = !forward;
-      }, window.innerWidth < 768 ? 1500 : 2000);
+      forkliftUnit.style.left = '0';
+      isForward = true;
+      animationInterval = setInterval(animateForklift, 2000);
     }
 
-    function stopAnim() {
-      clearInterval(animInterval);
+    function animateForklift() {
+      if (isForward) {
+        forkliftUnit.style.left = 'calc(100% - 200px)';
+      } else {
+        forkliftUnit.style.left = '0';
+      }
+      isForward = !isForward;
+    }
+
+    function stopAnimation() {
+      clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
     }
 
     form.addEventListener('submit', async e => {
       e.preventDefault();
-      const question = input.value.trim();
-      if (!question) return;
-      renderBubble(question, 'user');
+      const q = input.value.trim();
+      if (!q) return;
+      renderBubble(q, 'user');
       input.value = '';
-      startAnim();
+      startAnimationLoop();
+
       try {
         const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question })
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ question: q })
         });
         if (res.ok) {
           const { response } = await res.json();
           renderBubble(response, 'ai');
         } else {
-          renderBubble('❌ Server error', 'ai');
+          renderBubble('❌ Error contacting server.', 'ai');
         }
       } catch (err) {
-        renderBubble(`❌ ${err.message}`, 'ai');
+        renderBubble(`❌ Error: ${err.message}`, 'ai');
       }
     });
 
