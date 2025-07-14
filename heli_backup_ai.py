@@ -6,26 +6,31 @@ from openai import OpenAI
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
-client = OpenAI()  # Uses OPENAI_API_KEY from env
+client = OpenAI()  # Uses OPENAI_API_KEY env var
 
-# ─── Load accounts.json for customer matching ─────────────────────────────────
+# ─── Load accounts.json ──────────────────────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
     account_data = json.load(f)
 print(f"✅ Loaded {len(account_data)} accounts from JSON")
 
-# ─── Load models.json ONCE for forklift recommendations ────────────────────────
+# ─── Load models.json ───────────────────────────────────────────────────
 with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} forklift models from JSON")
 
-# Conversation memory
+# ─── Conversation memory (in‑process) ──────────────────────────────────
 conversation_history = []
 
-def find_account_by_name(name):
+def find_account_by_name(text: str):
+    """
+    Return the first account whose name fuzzy‑matches any substring of `text`,
+    or None if no good match.
+    """
     names = [acct.get("Account Name", "") for acct in account_data]
-    match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
+    # get_close_matches will match the best full name overlap
+    match = difflib.get_close_matches(text, names, n=1, cutoff=0.6)
     if match:
-        return next(acct for acct in account_data if acct["Account Name"] == match[0])
+        return next(a for a in account_data if a["Account Name"] == match[0])
     return None
 
 @app.route('/')
@@ -37,65 +42,59 @@ def chat():
     global conversation_history
     data = request.get_json() or {}
     user_question = data.get('question', '').strip()
-
     if not user_question:
-        return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
+        return jsonify({'response': 'Please describe the customer’s needs (you can mention a company name here).'}), 400
 
-    # 1) Fuzzy-match customer
+    # 1) See if the question mentions a known account
     account = find_account_by_name(user_question)
     customer_name = account["Account Name"] if account else ""
 
-    # 2) Build dynamic context (customer profile + filtered models)
-    dynamic_context = generate_forklift_context(user_question, customer_name, model_data)
+    # 2) Build your forklift‑specific context
+    #    generate_forklift_context will include the Customer Profile section
+    #    if customer_name is non‑empty, or fall back to general models.
+    prompt_context = generate_forklift_context(user_question, customer_name, model_data)
 
-    # 3) Append user query to history
+    # 3) Maintain a short conversation history
     conversation_history.append({"role": "user", "content": user_question})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # 4) Static system prompt (guidelines + example)
+    # 4) System prompt
     system_prompt = {
         "role": "system",
         "content": (
-            "You are a helpful, detailed Heli Forklift sales assistant. "
-            "When recommending models, format your response as plain text but wrap "
-            "section headers in a <span class=\"section-label\">...</span> tag. "
-            "Use these sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, "
-            "Sales Pitch Techniques:, Common Objections:. List details underneath with hyphens. "
-            "Indent subpoints for clarity.\n\n"
-            "At the end, include:\n"
-            "- Sales Pitch Techniques: 1–2 persuasive points.\n"
-            "- Common Objections: 1–2 common concerns and how to address them.\n\n"
-            "<span class=\"section-label\">Example:</span>\n"
+            "You are a helpful, detailed Heli Forklift sales assistant.\n"
+            "Wrap section headers in <span class=\"section-label\">…</span> tags.\n"
+            "Valid sections (in order):\n"
+            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
+            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
+            "List each detail with hyphens and leave blank lines between sections.\n\n"
+            "Example:\n"
+            "<span class=\"section-label\">Customer Profile:</span>\n"
+            "- Company: Acme Co\n"
+            "- Industry: Retail\n"
+            "- SIC Code: 5311\n\n"
             "<span class=\"section-label\">Model:</span>\n"
-            "- Heli H2000 Series 5-7T\n"
-            "- Designed for heavy-duty applications\n\n"
+            "- Heli G Series 3–3.5T Electric Forklift\n\n"
             "<span class=\"section-label\">Power:</span>\n"
-            "- Diesel\n"
-            "- Provides high torque and durability\n\n"
+            "- Electric\n\n"
             "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
-            "- Emphasize Heli’s lower total cost of ownership.\n"
-            "- Highlight that standard features are optional on other brands.\n\n"
+            "- Emphasize zero emissions.\n\n"
             "<span class=\"section-label\">Common Objections:</span>\n"
-            "- \"Why not Toyota or Crown?\"\n"
-            "  → Heli offers similar quality at a better price with faster part availability."
+            "- \"Electric won’t last a full shift.\"\n"
+            "  → Our G Series runs 8–10 hours on a single charge."
         )
     }
 
-    # 5) Assemble the messages list
-    messages = [
-        system_prompt,
-        {"role": "user", "content": dynamic_context}
-    ] + conversation_history
-
-    # 6) Trim tokens if too long
+    # 5) Assemble and prune tokens
+    messages = [system_prompt, {"role": "user", "content": prompt_context}] + conversation_history
     encoding = tiktoken.encoding_for_model("gpt-4")
     def count_tokens(msgs):
         return sum(len(encoding.encode(m["content"])) for m in msgs)
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
-    # 7) Call OpenAI
+    # 6) Call Chat API
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
@@ -106,8 +105,8 @@ def chat():
         ai_reply = resp.choices[0].message.content.strip()
         conversation_history.append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        print("OpenAI API error:", e)
-        ai_reply = "Something went wrong when contacting the AI. Please try again."
+        print("OpenAI error:", e)
+        ai_reply = f"❌ Internal error: {e}"
 
     return jsonify({'response': ai_reply})
 
