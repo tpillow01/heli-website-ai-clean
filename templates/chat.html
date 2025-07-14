@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Make sure this matches your CSS filename -->
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 </head>
 <body>
@@ -25,14 +26,18 @@
       <div class="reverse-light" id="reverse-light"></div>
     </div>
 
-    <!-- Chat Responses -->
+    <!-- Responses -->
     <div id="response-area" class="response-area"></div>
 
     <!-- Input -->
     <form id="chat-form" class="input-form">
-      <textarea id="userInput" rows="3"
-        placeholder="Ask a forklift-related question…" required></textarea>
-      <button type="submit">Submit</button>
+      <textarea
+        id="userInput"
+        rows="3"
+        placeholder="Describe the customer's needs..."
+        required
+      ></textarea>
+      <button type="submit">Send</button>
     </form>
 
     <!-- Footer -->
@@ -45,7 +50,9 @@
     const responseArea = document.getElementById('response-area');
     const forkliftAnim = document.getElementById('forklift-animation');
     const reverseLight = document.getElementById('reverse-light');
-    let animationInterval, isForward = true;
+
+    let animationInterval;
+    let isForward = true;
 
     function formatLabels(text) {
       return text.replace(
@@ -54,7 +61,7 @@
       );
     }
 
-    function renderBubble(text, sender='ai') {
+    function renderBubble(text, sender = 'ai') {
       stopAnimation();
       const bubble = document.createElement('div');
       bubble.className = `response-bubble ${sender}`;
@@ -68,7 +75,7 @@
 
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
-      forkliftAnim.classList.remove('forward','backward');
+      forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.style.opacity = '0';
       isForward = true;
       requestAnimationFrame(() => {
@@ -87,7 +94,7 @@
     function stopAnimation() {
       clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
-      forkliftAnim.classList.remove('forward','backward');
+      forkliftAnim.classList.remove('forward', 'backward');
       reverseLight.style.opacity = '0';
     }
 
@@ -98,10 +105,11 @@
       renderBubble(q, 'user');
       input.value = '';
       startAnimationLoop();
+
       try {
         const res = await fetch('/api/chat', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question: q })
         });
         if (res.ok) {
@@ -115,7 +123,6 @@
       }
     });
 
-    // Press Enter to send (Shift+Enter for newline)
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
