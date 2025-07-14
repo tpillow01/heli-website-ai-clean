@@ -15,7 +15,7 @@ with open("accounts.json", "r", encoding="utf-8") as f:
 print(f"✅ Loaded {len(account_data)} accounts from JSON")
 
 # Conversation memory
-dconversation_history = []
+conversation_history = []
 
 # Fuzzy match customer name
 def find_account_by_name(name):
