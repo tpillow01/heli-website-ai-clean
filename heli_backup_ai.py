@@ -19,7 +19,7 @@ with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} forklift models from JSON")
 
-# Conversation memory
+# Conversation history
 conversation_history = []
 
 # Fuzzy match customer name
@@ -33,12 +33,7 @@ def find_account_by_name(name):
 # Filter models based on customer industry
 def filter_models_for_account(account):
     industry = account.get("Industry", "").lower()
-    results = []
-    for m in model_data:
-        inds = [i.lower() for i in m.get("Industries", [])]
-        if any(ind in industry for ind in inds):
-            results.append(m)
-    return results
+    return [m for m in model_data if industry in [i.lower() for i in m.get("Industries", [])]]
 
 # Format model blocks for inclusion in context
 def format_models(models):
@@ -73,7 +68,6 @@ def chat():
     # Attempt to match customer
     account = find_account_by_name(user_question)
     if account:
-        # Use account info and filter models
         filtered = filter_models_for_account(account)
         model_ctx = format_models(filtered)
         acct_ctx = (
@@ -82,23 +76,45 @@ def chat():
         )
         combined_context = acct_ctx + model_ctx + "\n\n" + user_question
     else:
-        # No account: general recommendations
         general_ctx = format_models(model_data)
         combined_context = "General Recommendations:\n" + general_ctx + "\n\n" + user_question
 
-    # Build AI context and call OpenAI
+    # Append to history
     conversation_history.append({"role": "user", "content": user_question})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
+    # System prompt
     system_prompt = {
         "role": "system",
         "content": (
-            "You are a Heli Forklift sales assistant. Use only the provided models.json for recommendations and accounts.json when matching companies. "
-            "Format section headers in <span class=\"section-label\"> tags and list details with hyphens."
+            "You are a helpful, detailed Heli Forklift sales assistant. "
+            "When recommending models, format your response as plain text but wrap section headers in a <span class=\"section-label\">...</span> tag. "
+            "Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. "
+            "List details underneath using hyphens. Leave a blank line between sections. "
+            "Indent subpoints for clarity.\n\n"
+            "At the end, include:\n"
+            "- Sales Pitch Techniques: 1–2 persuasive points.\n"
+            "- Common Objections: 1–2 common concerns and how to address them.\n\n"
+            "<span class=\"section-label\">Example:</span>\n"
+            "<span class=\"section-label\">Model:</span>\n"
+            "- Heli H2000 Series 5-7T\n"
+            "- Designed for heavy-duty applications\n\n"
+            "<span class=\"section-label\">Power:</span>\n"
+            "- Diesel\n"
+            "- Provides high torque and durability\n\n"
+            "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
+            "- Emphasize Heli’s lower total cost of ownership.\n"
+            "- Highlight that standard features are optional on other brands.\n\n"
+            "<span class=\"section-label\">Common Objections:</span>\n"
+            "- \"Why not Toyota or Crown?\"\n"
+            "  → Heli offers similar quality at a better price with faster part availability."
+            f"\n\n{combined_context}"
         )
     }
-    messages = [system_prompt, {"role": "user", "content": combined_context}] + conversation_history
+
+    # Build messages
+    messages = [system_prompt] + conversation_history
 
     # Token management
     encoding = tiktoken.encoding_for_model("gpt-4")
@@ -108,17 +124,17 @@ def chat():
         messages.pop(1)
 
     try:
-        resp = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
             max_tokens=600,
             temperature=0.7
         )
-        ai_reply = resp.choices[0].message.content.strip()
+        ai_reply = response.choices[0].message.content.strip()
         conversation_history.append({"role": "assistant", "content": ai_reply})
     except Exception as e:
         print("OpenAI API error:", e)
-        ai_reply = "Error contacting AI."
+        ai_reply = "Something went wrong when contacting the AI. Please try again."
 
     return jsonify({'response': ai_reply})
 

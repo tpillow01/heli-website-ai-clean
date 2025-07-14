@@ -1,4 +1,4 @@
-/* Updated styles.css: dropped down response box and halved input height */
+/* styles.css – Updated ChatGPT-style theme for Tynan Equipment AI */
 
 /* Reset & Base */
 * {
@@ -53,7 +53,7 @@ body {
 /* Response Area */
 .response-area {
   flex: 4;
-  margin-top: 40px;         /* dropped down */
+  margin-top: 40px;
   padding: 24px;
   overflow-y: auto;
   display: flex;
@@ -93,7 +93,7 @@ body {
 }
 .input-form textarea {
   flex: 1;
-  min-height: 90px;         /* halved from 180px */
+  min-height: 90px;
   padding: 12px;
   font-size: 16px;
   border: none;
@@ -125,22 +125,22 @@ body {
   left: 0;
   width: 100%;
   transform: translateY(-50%);
-  height: auto;
   display: none;
   overflow: visible;
 }
 .forklift-img {
   position: absolute;
+  top: 0;
   left: 0;
   width: 200px;
   height: auto;
-  transition: transform 2s ease-in-out;
+  transition: left 2s ease-in-out;
 }
 .forklift-animation.forward .forklift-img {
-  transform: translateX(calc(100% - 200px));
+  left: calc(100% - 200px);
 }
 .forklift-animation.backward .forklift-img {
-  transform: translateX(0);
+  left: 0;
 }
 
 /* Reverse Light */
@@ -159,8 +159,11 @@ body {
 .forklift-animation.backward .reverse-light {
   opacity: 1;
 }
+
 @keyframes blink {
   0%,100% { opacity: 1; }
+  50%     { opacity: 0.2; }
+}
   50%     { opacity: 0.2; }
 }
 
