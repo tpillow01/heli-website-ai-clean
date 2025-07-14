@@ -7,32 +7,148 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-  <div class="chat-page">
+  <div class="chat-container">
+    <!-- Logo Bar -->
+    <div class="logo-bar">
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img">
+      </div>
+      <div class="header-title">Tynan Equipment AI</div>
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='heli.png.png') }}" alt="Heli Logo" class="logo-img">
+      </div>
+    </div>
 
-    <!-- Header -->
-    <header class="chat-header">
-      <img src="{{ url_for('static', filename='tynan_logo.png') }}" class="logo-left" alt="Tynan Logo">
-      <h1 class="chat-title">Tynan Equipment AI</h1>
-      <img src="{{ url_for('static', filename='heli_logo.png') }}" class="logo-right" alt="Heli Logo">
-    </header>
-
-    <!-- Forklift animation -->
+    <!-- Forklift Animation -->
     <div class="forklift-animation" id="forklift-animation">
-      <img src="{{ url_for('static', filename='forklift_heli.png') }}" class="forklift-img" alt="Forklift">
+      <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift Animation" class="forklift-img">
       <div class="reverse-light" id="reverse-light"></div>
     </div>
 
-    <!-- Chat box -->
+    <!-- Chat Box -->
     <div id="chat-box" class="chat-box"></div>
 
-    <!-- Input bar -->
-    <form class="input-bar" id="chat-form">
-      <input type="text" id="userInput" placeholder="Type your message..." autocomplete="off">
-      <button type="submit">➤</button>
-    </form>
+    <!-- Input Section -->
+    <div id="input-wrapper">
+      <form class="input-form" id="chat-form">
+        <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..."></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </div>
 
+    <div class="footer">Powered by Tynan Equipment AI</div>
   </div>
 
-  <script src="{{ url_for('static', filename='chat.js') }}"></script>
+  <script>
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('userInput');
+    const chatBox = document.getElementById('chat-box');
+    const forkliftAnim = document.getElementById('forklift-animation');
+    const reverseLight = document.getElementById('reverse-light');
+
+    let animationInterval;
+    let isForward = true;
+
+    function formatLabels(text) {
+      return text.replace(/(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
+        '<span class="section-label">$1</span>');
+    }
+
+    function renderAIResponse(aiReply) {
+      stopAnimation();
+
+      const paragraphs = aiReply.split('\n').filter(p => p.trim() !== '');
+      let html = '<div class="message ai">';
+      paragraphs.forEach(p => {
+        let formatted = formatLabels(p);
+        if (formatted.trim().startsWith('-')) {
+          html += <div class="subpoint">${formatted}</div>;
+        } else if (formatted.includes('section-label')) {
+          html += <div>${formatted}</div>;
+        } else {
+          html += <div class="final-note">${formatted}</div>;
+        }
+      });
+      html += '</div>';
+
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = html;
+      chatBox.appendChild(wrapper);
+      wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function startAnimationLoop() {
+      // Make visible and reset classes
+      forkliftAnim.style.display = 'block';
+      forkliftAnim.classList.remove('forward', 'backward');
+      reverseLight.classList.remove('active');
+
+      // Ensure first move is forward from the left
+      isForward = true;
+
+      // Wait for next paint so you see it at left:0, then animate
+      requestAnimationFrame(() => {
+        animateForklift();
+        animationInterval = setInterval(animateForklift, 4200);
+      });
+    }
+
+    function animateForklift() {
+      forkliftAnim.classList.remove('forward', 'backward');
+      reverseLight.classList.remove('active');
+
+      if (isForward) {
+        forkliftAnim.classList.add('forward');
+      } else {
+        forkliftAnim.classList.add('backward');
+        reverseLight.classList.add('active');
+      }
+
+      isForward = !isForward;
+    }
+
+    function stopAnimation() {
+      clearInterval(animationInterval);
+      forkliftAnim.style.display = 'none';
+      forkliftAnim.classList.remove('forward', 'backward');
+      reverseLight.classList.remove('active');
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+
+      chatBox.innerHTML += <div class="message user">You: ${question}</div>;
+      input.value = '';
+      startAnimationLoop();
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          renderAIResponse(data.response);
+        } else {
+          stopAnimation();
+          chatBox.innerHTML += <div class="message ai">Error contacting server.</div>;
+        }
+      } catch (error) {
+        stopAnimation();
+        chatBox.innerHTML += <div class="message ai">Error: ${error.message}</div>;
+      }
+    });
+
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.dispatchEvent(new Event('submit'));
+      }
+    });
+  </script>
 </body>
 </html>
