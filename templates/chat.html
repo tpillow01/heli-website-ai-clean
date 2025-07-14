@@ -15,11 +15,11 @@
       </div>
       <div class="header-title">Tynan Equipment AI</div>
       <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
+        <img src="{{ url_for('static', filename='heli.png.png') }}" alt="Heli Logo" class="logo-img" />
       </div>
     </div>
 
-    <!-- Forklift Animation -->
+    <!-- Forklift Animation (hidden until startAnimationLoop) -->
     <div class="forklift-animation" id="forklift-animation">
       <div class="forklift-unit">
         <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
@@ -36,6 +36,7 @@
         rows="3"
         placeholder="Describe the customer's needs..."
         required
+        autofocus
       ></textarea>
       <button type="submit">Send</button>
     </form>
@@ -60,7 +61,10 @@
     }
 
     function renderBubble(text, sender = 'ai') {
-      stopAnimation();
+      // only stop animation when rendering the AI response
+      if (sender === 'ai') {
+        stopAnimation();
+      }
       const bubble = document.createElement('div');
       bubble.className = `response-bubble ${sender}`;
       bubble.innerHTML = formatLabels(text)
@@ -79,11 +83,9 @@
     }
 
     function animateForklift() {
-      if (isForward) {
-        forkliftUnit.style.left = 'calc(100% - 200px)';
-      } else {
-        forkliftUnit.style.left = '0';
-      }
+      // move to the opposite side based on its width
+      const moveDistance = `calc(100% - ${forkliftUnit.offsetWidth}px)`;
+      forkliftUnit.style.left = isForward ? moveDistance : '0';
       isForward = !isForward;
     }
 
@@ -92,22 +94,27 @@
       forkliftAnim.style.display = 'none';
     }
 
-    form.addEventListener('submit', async e => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const q = input.value.trim();
       if (!q) return;
+
+      // render user bubble without stopping animation
       renderBubble(q, 'user');
       input.value = '';
+
+      // kick off the forklift thinking animation
       startAnimationLoop();
 
       try {
         const res = await fetch('/api/chat', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question: q })
         });
         if (res.ok) {
           const { response } = await res.json();
+          // this will stop the animation inside renderBubble
           renderBubble(response, 'ai');
         } else {
           renderBubble('❌ Error contacting server.', 'ai');
@@ -117,7 +124,7 @@
       }
     });
 
-    input.addEventListener('keydown', e => {
+    input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         form.dispatchEvent(new Event('submit'));

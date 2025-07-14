@@ -19,7 +19,7 @@ body {
 .chat-container {
   background-color: #202123;
   width: 100%;
-  max-width: 600px;      /* narrower on phones */
+  max-width: 600px;      /* narrower on phones, expands via media query */
   height: 90vh;
   border-radius: 8px;
   display: flex;
@@ -52,14 +52,14 @@ body {
 }
 
 /* Forklift Animation */
-/* Show on all viewports, just scale it down on phones */
+/* Hidden by default; JS will show() and hide() it */
 .forklift-animation {
   position: absolute;
   top: 40%;
   left: 0;
   width: 100%;
   height: auto;
-  display: block;
+  display: none;          /* hide until JS starts it */
   transform: translateY(-50%);
   overflow: visible;
   pointer-events: none;
@@ -70,7 +70,7 @@ body {
   transition: left 2s ease-in-out;
 }
 .forklift-img {
-  width: 160px;           /* default smaller size */
+  width: 160px;           /* smaller on phones */
   height: auto;
 }
 
@@ -154,7 +154,7 @@ body {
   background-color: #202123;
 }
 
-/* Desktop+ larger tablets */
+/* Desktop & larger tablets */
 @media (min-width: 768px) {
   body {
     padding: 20px;
