@@ -10,23 +10,22 @@ body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  min-height: 100vh;
-  padding: 20px;
+  align-items: center;
+  height: 100vh;
 }
 
-/* Main Chat Container */
+/* Chat Container */
 .chat-container {
   background-color: #202123;
   width: 100%;
-  max-width: 1000px;
+  max-width: 600px;
   height: 90vh;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
 }
 
 /* Header */
@@ -34,60 +33,58 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 24px;
+  padding: 12px;
   border-bottom: 1px solid #3e3f41;
 }
 .logo-img {
-  height: 80px;
+  height: 40px;
   object-fit: contain;
 }
 .header-title {
   flex: 1;
   text-align: center;
-  font-size: 32px;
+  font-size: 18px;
   font-weight: 600;
-  color: #ffffff;
 }
 
 /* Forklift Animation */
 .forklift-animation {
   position: absolute;
-  top: 50%;
+  bottom: 100px;            /* sits above input bar */
   left: 0;
   width: 100%;
-  height: 60px;
-  display: none;
-  transform: translateY(-50%);
+  height: auto;
+  display: block;
   overflow: visible;
 }
 .forklift-unit {
   position: absolute;
   left: 0;
-  transition: left 2s ease-in-out;
+  transition: left 1.5s ease-in-out;
 }
 .forklift-img {
-  width: 200px;
+  width: 100px;              /* small on mobile */
   height: auto;
 }
 
 /* Response Area */
 .response-area {
-  flex: 4;
-  padding: 24px;
+  flex: 1;
+  padding: 12px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  background-color: #1b1b1f;
+  gap: 12px;
 }
 
 /* Message Bubbles */
 .response-bubble {
   max-width: 85%;
-  padding: 16px;
+  padding: 12px;
   border-radius: 8px;
-  line-height: 1.6;
+  line-height: 1.4;
   white-space: pre-wrap;
+  font-size: 14px;
 }
 .response-bubble.ai {
   align-self: flex-start;
@@ -100,38 +97,40 @@ body {
 .section-label {
   color: #ff4c4c;
   font-weight: 600;
+  display: block;
+  margin-bottom: 4px;
 }
 
 /* Input Bar */
 .input-form {
   display: flex;
   align-items: center;
-  padding: 16px 24px;
+  padding: 12px;
   border-top: 1px solid #3e3f41;
   background-color: #202123;
 }
 .input-form textarea {
   flex: 1;
-  min-height: 90px; /* half height */
-  padding: 12px;
-  font-size: 16px;
+  height: 60px;
+  padding: 8px;
+  font-size: 14px;
   border: none;
   border-radius: 6px;
   background-color: #2e2f33;
   color: #e4e6eb;
-  resize: vertical;
+  resize: none;
   outline: none;
 }
 .input-form button {
-  margin-left: 12px;
-  padding: 12px 24px;
-  font-size: 16px;
+  margin-left: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
   background-color: #ff4c4c;
   color: #fff;
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s;
 }
 .input-form button:hover {
   background-color: #e04343;
@@ -140,33 +139,20 @@ body {
 /* Footer */
 .footer {
   text-align: center;
-  padding: 12px;
-  font-size: 14px;
+  padding: 8px;
+  font-size: 12px;
   color: #888;
   border-top: 1px solid #3e3f41;
   background-color: #202123;
 }
 
-/* Responsive */
-@media (max-width: 600px) {
-  .logo-img {
-    height: 60px;
-  }
-  .header-title {
-    font-size: 24px;
-  }
-  .response-area {
-    flex: 3;
-    padding: 16px;
-    gap: 12px;
-  }
-  .input-form textarea {
-    min-height: 60px;
-  }
-  .forklift-img {
-    width: 140px;
-  }
-  .forklift-unit {
-    transition: left 1.5s ease-in-out;
-  }
+/* Larger screens (tablet/desktop) */
+@media (min-width: 768px) {
+  .logo-img { height: 60px; }
+  .header-title { font-size: 24px; }
+  .forklift-img { width: 200px; }
+  .forklift-unit { transition: left 2s ease-in-out; }
+  .input-form textarea { height: 120px; font-size: 16px; }
+  .response-bubble { font-size: 16px; }
+  .footer { font-size: 14px; padding: 12px; }
 }
