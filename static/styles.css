@@ -1,4 +1,4 @@
-/* styles.css – Updated ChatGPT-style theme for Tynan Equipment AI */
+/* styles.css – Updated ChatGPT-style theme with synced movement */
 
 /* Reset & Base */
 * {
@@ -128,22 +128,21 @@ body {
   display: none;
   overflow: visible;
 }
-.forklift-img {
+.forklift-unit {
   position: absolute;
-  top: 0;
   left: 0;
-  width: 200px;
-  height: auto;
   transition: left 2s ease-in-out;
 }
-.forklift-animation.forward .forklift-img {
+.forklift-animation.forward .forklift-unit {
   left: calc(100% - 200px);
 }
-.forklift-animation.backward .forklift-img {
+.forklift-animation.backward .forklift-unit {
   left: 0;
 }
-
-/* Reverse Light */
+.forklift-img {
+  width: 200px;
+  height: auto;
+}
 .reverse-light {
   position: absolute;
   top: 50%;
@@ -159,7 +158,6 @@ body {
 .forklift-animation.backward .reverse-light {
   opacity: 1;
 }
-
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.2; }
