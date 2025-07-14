@@ -1,4 +1,4 @@
-/* styles.css – Updated ChatGPT-style theme for Tynan Equipment AI */
+/* Updated styles.css: dropped down response box and halved input height */
 
 /* Reset & Base */
 * {
@@ -21,8 +21,8 @@ body {
 .chat-container {
   background-color: #202123;
   width: 100%;
-  max-width: 1000px;     /* Wider container */
-  height: 90vh;          /* Taller container */
+  max-width: 1000px;
+  height: 90vh;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -40,19 +40,20 @@ body {
   border-bottom: 1px solid #3e3f41;
 }
 .logo-img {
-  height: 80px;      /* Larger logos */
+  height: 80px;
 }
 .header-title {
   flex: 1;
   text-align: center;
-  font-size: 32px;   /* Larger title */
+  font-size: 32px;
   font-weight: 600;
   color: #ffffff;
 }
 
-/* Response Area: bigger and wider */
+/* Response Area */
 .response-area {
-  flex: 4;           /* Increase flex growth */
+  flex: 4;
+  margin-top: 40px;         /* dropped down */
   padding: 24px;
   overflow-y: auto;
   display: flex;
@@ -63,7 +64,7 @@ body {
 
 /* Message Bubbles */
 .response-bubble {
-  max-width: 85%;     /* Wider bubbles */
+  max-width: 85%;
   padding: 16px;
   border-radius: 8px;
   line-height: 1.6;
@@ -92,7 +93,7 @@ body {
 }
 .input-form textarea {
   flex: 1;
-  min-height: 180px;  /* Taller input box */
+  min-height: 90px;         /* halved from 180px */
   padding: 12px;
   font-size: 16px;
   border: none;
@@ -107,7 +108,7 @@ body {
   padding: 12px 24px;
   font-size: 16px;
   background-color: #ff4c4c;
-  color: #ffffff;
+  color: #fff;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -120,47 +121,48 @@ body {
 /* Forklift Animation */
 .forklift-animation {
   position: absolute;
-  bottom: 180px;
+  top: 50%;
   left: 0;
   width: 100%;
-  height: 60px;
+  transform: translateY(-50%);
+  height: auto;
   display: none;
   overflow: visible;
 }
 .forklift-img {
   position: absolute;
   left: 0;
-  width: 60px;
+  width: 200px;
+  height: auto;
   transition: transform 2s ease-in-out;
 }
 .forklift-animation.forward .forklift-img {
-  transform: translateX(calc(100% - 60px));
+  transform: translateX(calc(100% - 200px));
 }
 .forklift-animation.backward .forklift-img {
   transform: translateX(0);
 }
 
-/* Reverse Light (flashes only when backward) */
+/* Reverse Light */
 .reverse-light {
   position: absolute;
-  top: 25%;
-  left: 7px;
-  width: 12px;
-  height: 12px;
+  top: 50%;
+  left: 10px;
+  width: 16px;
+  height: 16px;
   background-color: #ff4c4c;
   border-radius: 50%;
   opacity: 0;
   animation: blink 0.5s infinite;
+  transform: translateY(-50%);
 }
 .forklift-animation.backward .reverse-light {
   opacity: 1;
 }
-
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.2; }
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.2; }
 }
-
 
 /* Footer */
 .footer {
@@ -176,7 +178,7 @@ body {
 @media (max-width: 600px) {
   .logo-img { height: 60px; }
   .header-title { font-size: 24px; }
-  .response-area { flex: 3; padding: 16px; gap: 12px; }
-  .input-form textarea { min-height: 140px; }
-  .forklift-animation { bottom: 140px; width: 140px; }
+  .response-area { flex: 3; margin-top: 20px; padding: 16px; gap: 12px; }
+  .input-form textarea { min-height: 70px; }
+  .forklift-animation { top: 60%; width: 160px; }
 }
