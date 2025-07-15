@@ -1,7 +1,9 @@
 import json
 import difflib
 import tiktoken
-from flask import Flask, render_template, request, jsonify
+import os
+from flask import Flask, render_template, request, jsonify, Response
+from functools import wraps
 from openai import OpenAI
 from ai_logic import generate_forklift_context
 
@@ -21,7 +23,6 @@ print(f"✅ Loaded {len(model_data)} models")
 # Conversation history (if you choose to use it later)
 conversation_history = []
 
-
 def find_account_by_name(text: str):
     """
     Return the first account whose name appears as substring,
@@ -37,13 +38,32 @@ def find_account_by_name(text: str):
         return next(a for a in account_data if a["Account Name"] == match[0])
     return None
 
+# ─── Authorization Logic ────────────────────────────────────────────────
+def check_auth(username, password):
+    return username == os.getenv('RENDER_USERNAME') and password == os.getenv('RENDER_PASSWORD')
+
+def authenticate():
+    return Response(
+        'Authentication required.', 401,
+        {'WWW-Authenticate': 'Basic realm="Login Required"'}
+    )
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
 
 @app.route('/')
+@requires_auth
 def home():
     return render_template('chat.html')
 
-
 @app.route('/api/chat', methods=['POST'])
+@requires_auth
 def chat():
     global conversation_history
 
@@ -132,7 +152,6 @@ def chat():
         ai_reply = f"❌ Internal error: {e}"
 
     return jsonify({'response': ai_reply})
-
 
 if __name__ == '__main__':
     app.run(debug=True)
