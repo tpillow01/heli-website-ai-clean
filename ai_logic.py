@@ -39,15 +39,15 @@ def get_customer_context(customer_name: str) -> str:
         f"- Industry: {profile.get('Industry', 'N/A')}",
         f"- SIC Code: {sic_code}",
         f"- Fleet Size: {profile.get('Total Company Fleet Size', 'N/A')}",
-        f"- Truck Types: {profile.get('Truck Types at Location', 'N/A')}"
+        f"- Truck Types: {profile.get('Truck Types at Location', 'N/A')}",
+        ""  # blank line
     ]
-    lines.append("")  # blank line
     return "\n".join(lines)
 
 
 def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Keyword‐based filtering on the exact JSON fields.
+    Keyword‑based filtering on the exact JSON fields.
     """
     ui = user_input.lower()
     filtered = models_list[:]
@@ -74,7 +74,7 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
             or "lithium" in str(m.get("Power", "")).lower()
         ]
 
-    # Exact capacity requests (e.g. 5000 lb)
+    # Exact capacity requests (e.g. “5000 lb”)
     if "5000" in ui and "lb" in ui:
         def ok(c):
             try:
@@ -86,6 +86,7 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
             if ok(m.get("Capacity_lbs", 0))
         ]
 
+    print(f"[DEBUG] filter_models: matched {len(filtered)} models")
     return filtered[:5]
 
 

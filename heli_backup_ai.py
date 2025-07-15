@@ -1,14 +1,12 @@
 import json
 import difflib
 import tiktoken
-import os
-from flask import Flask, render_template, request, jsonify, Response
-from functools import wraps
+from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
-client = OpenAI()  # uses OPENAI_API_KEY env
+client = OpenAI()  # uses OPENAI_API_KEY env var
 
 # ─── Load accounts.json ──────────────────────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
@@ -20,17 +18,17 @@ with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} models")
 
-# Conversation history (if you choose to use it later)
 conversation_history = []
+
 
 def find_account_by_name(text: str):
     """
     Return the first account whose name appears as substring,
-    else fuzzy‐match.
+    else fuzzy‑match.
     """
-    lower_text = text.lower()
+    lower = text.lower()
     for acct in account_data:
-        if acct["Account Name"].lower() in lower_text:
+        if acct["Account Name"].lower() in lower:
             return acct
     names = [a["Account Name"] for a in account_data]
     match = difflib.get_close_matches(text, names, n=1, cutoff=0.6)
@@ -38,32 +36,13 @@ def find_account_by_name(text: str):
         return next(a for a in account_data if a["Account Name"] == match[0])
     return None
 
-# ─── Authorization Logic ────────────────────────────────────────────────
-def check_auth(username, password):
-    return username == os.getenv('RENDER_USERNAME') and password == os.getenv('RENDER_PASSWORD')
-
-def authenticate():
-    return Response(
-        'Authentication required.', 401,
-        {'WWW-Authenticate': 'Basic realm="Login Required"'}
-    )
-
-def requires_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return authenticate()
-        return f(*args, **kwargs)
-    return decorated
 
 @app.route('/')
-@requires_auth
 def home():
     return render_template('chat.html')
 
+
 @app.route('/api/chat', methods=['POST'])
-@requires_auth
 def chat():
     global conversation_history
 
@@ -72,23 +51,23 @@ def chat():
     if not user_q:
         return jsonify({'response': 'Please describe the customer’s needs.'}), 400
 
-    # 1) Detect company
+    # 1) detect company
     acct = find_account_by_name(user_q)
     cust_name = acct["Account Name"] if acct else ""
     print(f"🔍 find_account_by_name: matched = '{cust_name}'")
 
-    # 2) Build prompt context
+    # 2) build prompt context
     prompt_context = generate_forklift_context(user_q, cust_name, model_data)
     print("=== PROMPT CONTEXT ===")
     print(prompt_context)
     print("======================")
 
-    # 3) (Optional) track history
+    # 3) maintain (optional) history
     conversation_history.append({"role": "user", "content": user_q})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # 4) Combined system prompt
+    # 4) combined system prompt
     system_prompt = {
         "role": "system",
         "content": (
@@ -123,21 +102,19 @@ def chat():
         )
     }
 
-    # 5) Assemble messages
+    # 5) assemble messages
     messages = [
         system_prompt,
         {"role": "user", "content": prompt_context}
     ]
-    # You may later append conversation_history here if needed.
 
-    # 6) Token‐limit guard
+    # 6) prune tokens
     encoding = tiktoken.encoding_for_model("gpt-4")
-    def count_tokens(msgs):
-        return sum(len(encoding.encode(m["content"])) for m in msgs)
+    def count_tokens(ms): return sum(len(encoding.encode(m["content"])) for m in ms)
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
-    # 7) Call OpenAI
+    # 7) call OpenAI
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
@@ -152,6 +129,7 @@ def chat():
         ai_reply = f"❌ Internal error: {e}"
 
     return jsonify({'response': ai_reply})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
