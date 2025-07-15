@@ -4,11 +4,11 @@ import json
 from typing import List, Dict, Any
 
 # —————————————————————————————————————————————————————————————————————
-# Load customer accounts.json just once
+# Load customer accounts.json once
 # —————————————————————————————————————————————————————————————————————
 with open("accounts.json", "r", encoding="utf-8") as f:
     accounts_raw = json.load(f)
-accounts_data = {
+accounts_data: Dict[str, Dict[str, Any]] = {
     acct["Account Name"].strip().lower().replace(" ", "_"): acct
     for acct in accounts_raw
     if "Account Name" in acct
@@ -21,93 +21,86 @@ def get_customer_context(customer_name: str) -> str:
     profile = accounts_data.get(key)
     if not profile:
         return ""
-    # Format SIC Code as integer/string
     raw_sic = profile.get("SIC Code", "N/A")
     try:
         sic_code = str(int(raw_sic))
-    except Exception:
+    except:
         sic_code = str(raw_sic)
     lines = [
         "<span class=\"section-label\">Customer Profile:</span>",
         f"- Company: {profile['Account Name']}",
-        f"- Industry: {profile.get('Industry','N/A')}",
+        f"- Industry: {profile.get('Industry', 'N/A')}",
         f"- SIC Code: {sic_code}",
-        f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}",
-        f"- Truck Types: {profile.get('Truck Types at Location','N/A')}"
+        f"- Fleet Size: {profile.get('Total Company Fleet Size', 'N/A')}",
+        f"- Truck Types: {profile.get('Truck Types at Location', 'N/A')}"
     ]
     lines.append("")  # blank line
     return "\n".join(lines)
 
-
-# —————————————————————————————————————————————————————————————————————
-# Keyword-based filter of models_list
-# —————————————————————————————————————————————————————————————————————
-def filter_models(
-    user_input: str,
-    customer_name: str = None,
-    models_list: List[Dict[str, Any]] = None
-) -> List[Dict[str, Any]]:
-    if models_list is None:
-        return []
+def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ui = user_input.lower()
     filtered = models_list[:]
 
-    # Example filters—add/remove as needed
+    # Filter by type keywords
     if "narrow aisle" in ui:
-        filtered = [m for m in filtered if "narrow" in str(m.get("Type","")).lower()]
+        filtered = [m for m in filtered if "narrow" in str(m.get("Type", "")).lower()]
     if "rough terrain" in ui:
-        filtered = [m for m in filtered if "rough" in str(m.get("Type","")).lower()]
-    if "electric" in ui:
-        filtered = [m for m in filtered if "electric" in str(m.get("Power","")).lower()]
-    if "3000 lb" in ui or "3,000 lb" in ui:
-        def cap_ok(c):
+        filtered = [m for m in filtered if "rough" in str(m.get("Type", "")).lower()]
+
+    # Filter by power source
+    if "electric" in ui or "lithium" in ui:
+        filtered = [
+            m for m in filtered
+            if "electric" in str(m.get("Power", "")).lower()
+            or "lithium" in str(m.get("Power", "")).lower()
+        ]
+
+    # Exact capacity requests (e.g. 5000 lb)
+    if "5000" in ui and "lb" in ui:
+        def ok(c):
             try:
-                return float(str(c).split()[0].replace(",", "")) >= 3000
+                return float(str(c).split()[0].replace(",", "")) >= 5000
             except:
                 return False
-        filtered = [m for m in filtered if cap_ok(m.get("Load Capacity (lbs)", 0))]
+        filtered = [m for m in filtered if ok(m.get("Capacity_lbs", 0))]
 
     return filtered[:5]
 
-
-# —————————————————————————————————————————————————————————————————————
-# Build the AI prompt context
-# —————————————————————————————————————————————————————————————————————
 def generate_forklift_context(
     user_input: str,
-    customer_name: str = None,
-    models_list: List[Dict[str, Any]] = None
+    customer_name: str,
+    models_list: List[Dict[str, Any]]
 ) -> str:
     cust_ctx = get_customer_context(customer_name)
-    models = filter_models(user_input, customer_name, models_list)
+    hits = filter_models(user_input, models_list)
 
     lines: List[str] = []
     if cust_ctx:
         lines.append(cust_ctx)
 
-    if models:
-        for m in models:
-            lines.append("<span class=\"section-label\">Model:</span>")
-            lines.append(f"- Model: {m.get('Model Name','N/A')}")
-
-            lines.append("<span class=\"section-label\">Power:</span>")
-            lines.append(f"- {m.get('Power','N/A')}")
-
-            lines.append("<span class=\"section-label\">Capacity:</span>")
-            lines.append(f"- {m.get('Load Capacity (lbs)','N/A')}")
-
-            lines.append("<span class=\"section-label\">Dimensions (in):</span>")
-            lines.append(f"- Height: {m.get('Overall Height (in)','N/A')}")
-            lines.append(f"- Width: {m.get('Overall Width (in)','N/A')}")
-            lines.append(f"- Length: {m.get('Overall Length (in)','N/A')}")
-
-            lines.append("<span class=\"section-label\">Max Lifting Height (in):</span>")
-            lines.append(f"- {m.get('Max Lifting Height (in)','N/A')}")
-
-            lines.append("")  # blank line between models
+    if hits:
+        lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
+        for m in hits:
+            lines += [
+                "<span class=\"section-label\">Model:</span>",
+                f"- {m.get('Model', 'N/A')}",
+                "<span class=\"section-label\">Type:</span>",
+                f"- {m.get('Type', 'N/A')}",
+                "<span class=\"section-label\">Power:</span>",
+                f"- {m.get('Power', 'N/A')}",
+                "<span class=\"section-label\">Capacity (lbs):</span>",
+                f"- {m.get('Capacity_lbs', 'N/A')}",
+                "<span class=\"section-label\">Dimensions (in):</span>",
+                f"- H: {m.get('Height_in', 'N/A')}",
+                f"- W: {m.get('Width_in', 'N/A')}",
+                f"- L: {m.get('Length_in', 'N/A')}",
+                "<span class=\"section-label\">Max Lifting Height (in):</span>",
+                f"- {m.get('LiftHeight_in', 'N/A')}",
+                ""  # blank line
+            ]
     else:
-        lines.append("No matching models found in the provided data.")
+        lines.append("No matching models found in the provided data.\n")
 
-    # finally, include the raw user question
+    # Always finish with the raw question
     lines.append(user_input)
     return "\n".join(lines)
