@@ -70,45 +70,45 @@ def chat():
     print(prompt_context)
     print("=== PROMPT CONTEXT END ===")
 
-    # 3) Maintain a short conversation history (for future if you choose to include it)
+    # 3) Optionally maintain conversation history
     conversation_history.append({"role": "user", "content": user_question})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
-    # 4) Your full system prompt
+    # 4) Your specified system prompt
     system_prompt = {
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "Wrap section headers in <span class=\"section-label\">…</span> tags.\n"
-            "Valid sections (in order):\n"
-            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
-            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
-            "List each detail with hyphens and leave blank lines between sections.\n\n"
+            "When providing customer-specific info, wrap it in a <span class=\"section-label\">Customer Profile:</span> section.\n"
+            "When recommending models, wrap section headers in a <span class=\"section-label\">...</span> tag.\n"
+            "Use these sections in order if present:\n"
+            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
+            "List details underneath using hyphens. Leave a blank line between sections. Indent subpoints for clarity.\n\n"
             "Example:\n"
             "<span class=\"section-label\">Customer Profile:</span>\n"
-            "- Company: Acme Co\n"
+            "- Company: Acme Corp\n"
             "- Industry: Retail\n"
             "- SIC Code: 5311\n\n"
             "<span class=\"section-label\">Model:</span>\n"
-            "- Heli G Series 3–3.5T Electric Forklift\n\n"
+            "- Heli H2000 Series 5-7T\n\n"
             "<span class=\"section-label\">Power:</span>\n"
-            "- Electric\n\n"
+            "- Diesel\n\n"
             "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
-            "- Emphasize zero emissions.\n\n"
+            "- Emphasize reliability.\n\n"
             "<span class=\"section-label\">Common Objections:</span>\n"
-            "- \"Electric won’t last a full shift.\"\n"
-            "  → Our G Series runs 8–10 hours on a single charge."
+            "- \"Why not Toyota?\"\n"
+            "  → Heli offers faster part availability.\n\n"
         )
     }
 
-    # 5) Assemble messages (context + history if desired)
+    # 5) Assemble the messages
     messages = [
         system_prompt,
         {"role": "user", "content": prompt_context}
-    ]  # + conversation_history  # you can append prior turns here
+    ]
 
-    # 6) Token‐limit safety
+    # 6) Prune if over token limit
     encoding = tiktoken.encoding_for_model("gpt-4")
     def count_tokens(msgs):
         return sum(len(encoding.encode(m["content"])) for m in msgs)
@@ -116,7 +116,7 @@ def chat():
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
-    # 7) Call Chat API
+    # 7) Call the Chat API
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
