@@ -1,3 +1,5 @@
+# heli_backup_ai.py
+
 import json
 import difflib
 import tiktoken
@@ -23,11 +25,18 @@ conversation_history = []
 
 def find_account_by_name(text: str):
     """
-    Return the first account whose name fuzzy‑matches any substring of `text`,
-    or None if no good match.
+    First tries a direct substring match of any account name in the question text.
+    If none found, falls back to fuzzy matching against full account names.
+    Returns the account dict or None.
     """
-    names = [acct.get("Account Name", "") for acct in account_data]
-    # get_close_matches will match the best full name overlap
+    lower_text = text.lower()
+    # 1) direct substring match
+    for acct in account_data:
+        name = acct.get("Account Name", "")
+        if name.lower() in lower_text:
+            return acct
+    # 2) fallback to fuzzy match on full names
+    names = [acct["Account Name"] for acct in account_data]
     match = difflib.get_close_matches(text, names, n=1, cutoff=0.6)
     if match:
         return next(a for a in account_data if a["Account Name"] == match[0])
@@ -40,19 +49,24 @@ def home():
 @app.route('/api/chat', methods=['POST'])
 def chat():
     global conversation_history
+
     data = request.get_json() or {}
     user_question = data.get('question', '').strip()
     if not user_question:
-        return jsonify({'response': 'Please describe the customer’s needs (you can mention a company name here).'}), 400
+        return jsonify({
+            'response': 'Please describe the customer’s needs (you can mention a company name here).'
+        }), 400
 
-    # 1) See if the question mentions a known account
+    # 1) Detect customer
     account = find_account_by_name(user_question)
     customer_name = account["Account Name"] if account else ""
+    print(f"🔍 Matched customer_name: {customer_name or '<<none>>'}")
 
-    # 2) Build your forklift‑specific context
-    #    generate_forklift_context will include the Customer Profile section
-    #    if customer_name is non‑empty, or fall back to general models.
+    # 2) Build context for the AI
     prompt_context = generate_forklift_context(user_question, customer_name, model_data)
+    print("=== PROMPT CONTEXT START ===")
+    print(prompt_context)
+    print("=== PROMPT CONTEXT END ===")
 
     # 3) Maintain a short conversation history
     conversation_history.append({"role": "user", "content": user_question})
@@ -91,6 +105,7 @@ def chat():
     encoding = tiktoken.encoding_for_model("gpt-4")
     def count_tokens(msgs):
         return sum(len(encoding.encode(m["content"])) for m in msgs)
+
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
@@ -109,6 +124,7 @@ def chat():
         ai_reply = f"❌ Internal error: {e}"
 
     return jsonify({'response': ai_reply})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
