@@ -2,7 +2,7 @@ import json
 from typing import List, Dict, Any
 
 # —————————————————————————————————————————————————————————————————————
-# Load customer accounts.json once
+# Load JSON data once at import time
 # —————————————————————————————————————————————————————————————————————
 with open("accounts.json", "r", encoding="utf-8") as f:
     accounts_raw = json.load(f)
@@ -12,27 +12,24 @@ accounts_data: Dict[str, Dict[str, Any]] = {
     if "Account Name" in acct
 }
 
+with open("models.json", "r", encoding="utf-8") as f:
+    models_data: List[Dict[str, Any]] = json.load(f)
+
 
 def get_customer_context(customer_name: str) -> str:
-    """
-    Return a formatted Customer Profile block, or empty if no match.
-    """
+    """Return a Customer Profile section, or empty if no match."""
     if not customer_name:
         return ""
     key = customer_name.strip().lower().replace(" ", "_")
-    print(f"[DEBUG] get_customer_context: lookup key = '{key}'")
     profile = accounts_data.get(key)
     if not profile:
-        print(f"[DEBUG] get_customer_context: no profile for '{key}'")
         return ""
-
-    print(f"[DEBUG] get_customer_context: found profile for '{profile['Account Name']}'")
+    # Normalize SIC code to integer if possible
     raw_sic = profile.get("SIC Code", "N/A")
     try:
         sic_code = str(int(raw_sic))
     except:
         sic_code = str(raw_sic)
-
     lines = [
         "<span class=\"section-label\">Customer Profile:</span>",
         f"- Company: {profile['Account Name']}",
@@ -46,32 +43,24 @@ def get_customer_context(customer_name: str) -> str:
 
 
 def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Keyword‑based filtering on the exact JSON fields.
-    """
+    """Keyword-based filter on your exact models.json fields."""
     ui = user_input.lower()
     filtered = models_list[:]
 
     # Narrow aisle
     if "narrow aisle" in ui:
-        filtered = [
-            m for m in filtered
-            if "narrow" in str(m.get("Type", "")).lower()
-        ]
+        filtered = [m for m in filtered if "narrow" in str(m.get("Type","")).lower()]
 
     # Rough terrain
     if "rough terrain" in ui:
-        filtered = [
-            m for m in filtered
-            if "rough" in str(m.get("Type", "")).lower()
-        ]
+        filtered = [m for m in filtered if "rough" in str(m.get("Type","")).lower()]
 
-    # Electric / Lithium
+    # Electric / lithium
     if "electric" in ui or "lithium" in ui:
         filtered = [
             m for m in filtered
-            if "electric" in str(m.get("Power", "")).lower()
-            or "lithium" in str(m.get("Power", "")).lower()
+            if "electric" in str(m.get("Power","")).lower() 
+            or "lithium" in str(m.get("Power","")).lower()
         ]
 
     # Exact capacity requests (e.g. “5000 lb”)
@@ -81,29 +70,23 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
                 return float(str(c).split()[0].replace(",", "")) >= 5000
             except:
                 return False
-        filtered = [
-            m for m in filtered
-            if ok(m.get("Capacity_lbs", 0))
-        ]
+        filtered = [m for m in filtered if ok(m.get("Capacity_lbs", 0))]
 
-    print(f"[DEBUG] filter_models: matched {len(filtered)} models")
     return filtered[:5]
 
 
 def generate_forklift_context(
     user_input: str,
-    customer_name: str,
-    models_list: List[Dict[str, Any]]
+    customer_name: str
 ) -> str:
     """
-    Build the chunk of context: 
-      - Optional Customer Profile 
-      - Recommended Heli Models block
-      - Finally the raw user question
+    Build the AI context:
+      1) Customer Profile (if any)
+      2) Recommended Heli Models block from models_data
+      3) Finally the raw user question
     """
-    print(f"[DEBUG] generate_forklift_context: customer_name = '{customer_name}'")
     cust_ctx = get_customer_context(customer_name)
-    hits = filter_models(user_input, models_list)
+    hits = filter_models(user_input, models_data)
 
     lines: List[str] = []
     if cust_ctx:
@@ -114,24 +97,24 @@ def generate_forklift_context(
         for m in hits:
             lines += [
                 "<span class=\"section-label\">Model:</span>",
-                f"- {m.get('Model', 'N/A')}",
+                f"- {m.get('Model','N/A')}",
                 "<span class=\"section-label\">Type:</span>",
-                f"- {m.get('Type', 'N/A')}",
+                f"- {m.get('Type','N/A')}",
                 "<span class=\"section-label\">Power:</span>",
-                f"- {m.get('Power', 'N/A')}",
+                f"- {m.get('Power','N/A')}",
                 "<span class=\"section-label\">Capacity (lbs):</span>",
-                f"- {m.get('Capacity_lbs', 'N/A')}",
+                f"- {m.get('Capacity_lbs','N/A')}",
                 "<span class=\"section-label\">Dimensions (in):</span>",
-                f"- H: {m.get('Height_in', 'N/A')}",
-                f"- W: {m.get('Width_in', 'N/A')}",
-                f"- L: {m.get('Length_in', 'N/A')}",
+                f"- H: {m.get('Height_in','N/A')}",
+                f"- W: {m.get('Width_in','N/A')}",
+                f"- L: {m.get('Length_in','N/A')}",
                 "<span class=\"section-label\">Max Lifting Height (in):</span>",
-                f"- {m.get('LiftHeight_in', 'N/A')}",
-                ""  # blank line between models
+                f"- {m.get('LiftHeight_in','N/A')}",
+                ""  # blank line
             ]
     else:
         lines.append("No matching models found in the provided data.\n")
 
-    # Always finish with the raw question
+    # Always finish with the raw user question
     lines.append(user_input)
     return "\n".join(lines)
