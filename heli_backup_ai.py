@@ -1,54 +1,70 @@
+# heli_backup_ai.py
+
+import os
+import json
 import difflib
 import tiktoken
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
-import json
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
-client = OpenAI()  # reads OPENAI_API_KEY from env
+client = OpenAI()  # uses OPENAI_API_KEY env var
 
-# Load JSON just once
+# ─── Load password from environment ───────────────────────────────────────
+PASSWORD = os.getenv("PASSWORD")
+if not PASSWORD:
+    raise RuntimeError("PASSWORD environment variable not set")
+
+# ─── Load JSON data ──────────────────────────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
-    account_data = json.load(f)
+    accounts_raw = json.load(f)
+print(f"✅ Loaded {len(accounts_raw)} accounts")
 
-@app.route('/')
-def home():
-    return render_template('chat.html')
+with open("models.json", "r", encoding="utf-8") as f:
+    models_raw = json.load(f)
+print(f"✅ Loaded {len(models_raw)} models")
 
-def find_account_by_name(text: str):
+
+def find_account_by_name(text: str) -> str:
     """
-    Look for a substring match of any account name in `text`,
-    otherwise fallback to fuzzy match.
+    1) Exact substring match (case‑insensitive) against Account Name
+    2) Fuzzy match over all names if no exact
     """
-    lower = text.lower()
-    for acct in account_data:
-        if acct["Account Name"].lower() in lower:
-            return acct
-    names = [a["Account Name"] for a in account_data]
-    match = difflib.get_close_matches(text, names, n=1, cutoff=0.6)
-    if match:
-        return next(a for a in account_data if a["Account Name"] == match[0])
-    return None
+    txt = text.lower()
+    names = [acct.get("Account Name", "") for acct in accounts_raw]
+    # exact match
+    for name in names:
+        if name and name.lower() in txt:
+            return name
+    # fuzzy fallback
+    close = difflib.get_close_matches(text, names, n=1, cutoff=0.6)
+    return close[0] if close else ""
 
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    data = request.get_json() or {}
-    user_q = data.get('question','').strip()
-    if not user_q:
-        return jsonify({'response':'Please describe the customer’s needs.'}), 400
 
-    # 1) detect company
-    acct = find_account_by_name(user_q)
-    cust_name = acct["Account Name"] if acct else ""
+@app.route("/")
+def index():
+    return render_template("chat.html")
 
-    # 2) build context
-    prompt_ctx = generate_forklift_context(user_q, cust_name)
 
-    # 3) build system prompt
+@app.route("/api/chat", methods=["POST"])
+def chat_api():
+    payload = request.get_json() or {}
+    user_q = payload.get("question", "").strip()
+    pwd = payload.get("password", "")
+    if pwd != PASSWORD:
+        return jsonify({"error": "Invalid password"}), 401
+
+    # 2) detect account
+    customer = find_account_by_name(user_q)
+
+    # 3) build context
+    prompt_ctx = generate_forklift_context(user_q, customer)
+
+    # 4) assemble messages with your original system prompt
     system_prompt = {
-        "role":"system",
-        "content":(
+        "role": "system",
+        "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
             "When providing customer-specific data, wrap it in a "
             "<span class=\"section-label\">Customer Profile:</span> section.\n"
@@ -78,34 +94,29 @@ def chat():
             "  → Heli offers faster part availability.\n"
         )
     }
+    user_msg = {"role": "user", "content": prompt_ctx}
 
-    # 4) assemble messages
-    messages = [
-        system_prompt,
-        {"role":"user","content":prompt_ctx}
-    ]
-
-    # 5) token‐limit guard
-    encoding = tiktoken.encoding_for_model("gpt-4")
-    def count_tokens(ms): 
-        return sum(len(encoding.encode(m["content"])) for m in ms)
-    while count_tokens(messages) > 7000 and len(messages) > 2:
-        messages.pop(1)
+    # 5) token‑limit guard (~7000 tokens for prompt)
+    enc = tiktoken.encoding_for_model("gpt-4")
+    total = len(enc.encode(system_prompt["content"])) + len(enc.encode(user_msg["content"]))
+    max_tokens = 7000
+    if total > max_tokens:
+        over = total - max_tokens
+        trimmed = enc.decode(enc.encode(user_msg["content"])[over:])
+        user_msg["content"] = trimmed
 
     # 6) call OpenAI
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4",
-            messages=messages,
-            max_tokens=600,
-            temperature=0.7
-        )
-        ai_reply = resp.choices[0].message.content.strip()
-    except Exception as e:
-        print("OpenAI error:",e)
-        ai_reply = f"❌ Internal error: {e}"
+    resp = client.chat.completions.create(
+        model="gpt-4",
+        messages=[system_prompt, user_msg],
+        max_tokens=1024,
+        temperature=0.2
+    )
 
-    return jsonify({'response':ai_reply})
+    # 7) return only the assistant’s reply
+    answer = resp.choices[0].message.content
+    return jsonify({"reply": answer})
 
-if __name__=='__main__':
-    app.run(debug=True)
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)

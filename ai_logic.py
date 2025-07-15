@@ -1,8 +1,12 @@
+# ai_logic.py
+
 import json
+import re
+import difflib
 from typing import List, Dict, Any
 
 # —————————————————————————————————————————————————————————————————————
-# Load JSON data once at import time
+# Load JSON data once
 # —————————————————————————————————————————————————————————————————————
 with open("accounts.json", "r", encoding="utf-8") as f:
     accounts_raw = json.load(f)
@@ -24,7 +28,6 @@ def get_customer_context(customer_name: str) -> str:
     profile = accounts_data.get(key)
     if not profile:
         return ""
-    # Normalize SIC code to integer if possible
     raw_sic = profile.get("SIC Code", "N/A")
     try:
         sic_code = str(int(raw_sic))
@@ -43,47 +46,51 @@ def get_customer_context(customer_name: str) -> str:
 
 
 def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Keyword-based filter on your exact models.json fields."""
+    """Comprehensive filter over all models.json entries."""
     ui = user_input.lower()
-    filtered = models_list[:]
+    candidates = models_list[:]
 
-    # Narrow aisle
+    # keyword filters
     if "narrow aisle" in ui:
-        filtered = [m for m in filtered if "narrow" in str(m.get("Type","")).lower()]
+        candidates = [m for m in candidates if "narrow" in str(m.get("Type", "")).lower()]
 
-    # Rough terrain
     if "rough terrain" in ui:
-        filtered = [m for m in filtered if "rough" in str(m.get("Type","")).lower()]
+        candidates = [m for m in candidates if "rough" in str(m.get("Type", "")).lower()]
 
-    # Electric / lithium
     if "electric" in ui or "lithium" in ui:
-        filtered = [
-            m for m in filtered
-            if "electric" in str(m.get("Power","")).lower() 
-            or "lithium" in str(m.get("Power","")).lower()
+        candidates = [
+            m for m in candidates
+            if "electric" in str(m.get("Power", "")).lower()
+            or "lithium" in str(m.get("Power", "")).lower()
         ]
 
-    # Exact capacity requests (e.g. “5000 lb”)
-    if "5000" in ui and "lb" in ui:
-        def ok(c):
-            try:
-                return float(str(c).split()[0].replace(",", "")) >= 5000
-            except:
-                return False
-        filtered = [m for m in filtered if ok(m.get("Capacity_lbs", 0))]
+    # capacity filter for ANY “### lb” or bare numbers
+    weights = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,5})\s*(?:lb|lbs)?", ui)]
+    if weights:
+        min_cap = max(weights)
+        candidates = [m for m in candidates if float(m.get("Capacity_lbs", 0)) >= min_cap]
 
-    return filtered[:5]
+    # exact model‑name mention
+    exact_hits = [m for m in models_list if m.get("Model", "").lower() in ui]
+    if exact_hits:
+        candidates = exact_hits
+
+    # fuzzy match on model names if nothing else matched
+    if not candidates:
+        all_names = [m.get("Model", "") for m in models_list]
+        close = difflib.get_close_matches(user_input, all_names, n=5, cutoff=0.6)
+        candidates = [m for m in models_list if m.get("Model", "") in close]
+
+    # finally cap at 5
+    return candidates[:5]
 
 
-def generate_forklift_context(
-    user_input: str,
-    customer_name: str
-) -> str:
+def generate_forklift_context(user_input: str, customer_name: str) -> str:
     """
     Build the AI context:
-      1) Customer Profile (if any)
-      2) Recommended Heli Models block from models_data
-      3) Finally the raw user question
+      1) Customer Profile
+      2) Recommended Heli Models
+      3) Raw user question
     """
     cust_ctx = get_customer_context(customer_name)
     hits = filter_models(user_input, models_data)
@@ -115,6 +122,5 @@ def generate_forklift_context(
     else:
         lines.append("No matching models found in the provided data.\n")
 
-    # Always finish with the raw user question
     lines.append(user_input)
     return "\n".join(lines)
