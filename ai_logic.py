@@ -1,5 +1,3 @@
-# ai_logic.py
-
 import json
 from typing import List, Dict, Any
 
@@ -14,18 +12,27 @@ accounts_data: Dict[str, Dict[str, Any]] = {
     if "Account Name" in acct
 }
 
+
 def get_customer_context(customer_name: str) -> str:
+    """
+    Return a formatted Customer Profile block, or empty if no match.
+    """
     if not customer_name:
         return ""
     key = customer_name.strip().lower().replace(" ", "_")
+    print(f"[DEBUG] get_customer_context: lookup key = '{key}'")
     profile = accounts_data.get(key)
     if not profile:
+        print(f"[DEBUG] get_customer_context: no profile for '{key}'")
         return ""
+
+    print(f"[DEBUG] get_customer_context: found profile for '{profile['Account Name']}'")
     raw_sic = profile.get("SIC Code", "N/A")
     try:
         sic_code = str(int(raw_sic))
     except:
         sic_code = str(raw_sic)
+
     lines = [
         "<span class=\"section-label\">Customer Profile:</span>",
         f"- Company: {profile['Account Name']}",
@@ -37,17 +44,29 @@ def get_customer_context(customer_name: str) -> str:
     lines.append("")  # blank line
     return "\n".join(lines)
 
+
 def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Keyword‐based filtering on the exact JSON fields.
+    """
     ui = user_input.lower()
     filtered = models_list[:]
 
-    # Filter by type keywords
+    # Narrow aisle
     if "narrow aisle" in ui:
-        filtered = [m for m in filtered if "narrow" in str(m.get("Type", "")).lower()]
-    if "rough terrain" in ui:
-        filtered = [m for m in filtered if "rough" in str(m.get("Type", "")).lower()]
+        filtered = [
+            m for m in filtered
+            if "narrow" in str(m.get("Type", "")).lower()
+        ]
 
-    # Filter by power source
+    # Rough terrain
+    if "rough terrain" in ui:
+        filtered = [
+            m for m in filtered
+            if "rough" in str(m.get("Type", "")).lower()
+        ]
+
+    # Electric / Lithium
     if "electric" in ui or "lithium" in ui:
         filtered = [
             m for m in filtered
@@ -62,15 +81,26 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
                 return float(str(c).split()[0].replace(",", "")) >= 5000
             except:
                 return False
-        filtered = [m for m in filtered if ok(m.get("Capacity_lbs", 0))]
+        filtered = [
+            m for m in filtered
+            if ok(m.get("Capacity_lbs", 0))
+        ]
 
     return filtered[:5]
+
 
 def generate_forklift_context(
     user_input: str,
     customer_name: str,
     models_list: List[Dict[str, Any]]
 ) -> str:
+    """
+    Build the chunk of context: 
+      - Optional Customer Profile 
+      - Recommended Heli Models block
+      - Finally the raw user question
+    """
+    print(f"[DEBUG] generate_forklift_context: customer_name = '{customer_name}'")
     cust_ctx = get_customer_context(customer_name)
     hits = filter_models(user_input, models_list)
 
@@ -96,7 +126,7 @@ def generate_forklift_context(
                 f"- L: {m.get('Length_in', 'N/A')}",
                 "<span class=\"section-label\">Max Lifting Height (in):</span>",
                 f"- {m.get('LiftHeight_in', 'N/A')}",
-                ""  # blank line
+                ""  # blank line between models
             ]
     else:
         lines.append("No matching models found in the provided data.\n")
