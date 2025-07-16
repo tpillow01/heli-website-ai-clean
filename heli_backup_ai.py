@@ -1,3 +1,5 @@
+# heli_backup_ai.py
+
 import os
 import json
 import difflib
@@ -11,16 +13,16 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ─── Password Authentication ─────────────────────────────────────────────
+
 def check_auth(username, password):
     return (
-        username == os.getenv("RENDER_USERNAME")
-        and password == os.getenv("RENDER_PASSWORD")
+        username == os.getenv('RENDER_USERNAME')
+        and password == os.getenv('RENDER_PASSWORD')
     )
 
 def authenticate():
     return Response(
-        'Authentication required.',
-        401,
+        'Authentication required.', 401,
         {'WWW-Authenticate': 'Basic realm="Login Required"'}
     )
 
@@ -46,14 +48,13 @@ print(f"✅ Loaded {len(model_data)} models from JSON")
 conversation_history = []
 
 # Helper: substring-first then fuzzy match company name
+
 def find_account_by_name(text: str):
     lower = text.lower()
-    # 1) substring match
     for acct in account_data:
         name = acct["Account Name"].lower()
         if name in lower:
             return acct
-    # 2) fuzzy fallback
     names = [acct["Account Name"] for acct in account_data]
     match = difflib.get_close_matches(text, names, n=1, cutoff=0.7)
     if match:
@@ -75,69 +76,67 @@ def chat():
 
     account = find_account_by_name(user_question)
 
-    # Build a context_input that includes the profile markup
+    # Build context_input with profile
     context_input = user_question
     if account:
         profile = account
         profile_ctx = (
-            "<span class=\"section-label\">Customer Profile:</span>\n"
-            f"- Company: {profile.get('Account Name')}\n"
-            f"- Industry: {profile.get('Industry','N/A')}\n"
-            f"- SIC Code: {profile.get('SIC Code','N/A')}\n"
-            f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}\n"
-            f"- Truck Types: {profile.get('Truck Types at Location','N/A')}\n\n"
+            "<span class=\"section-label\">Customer Profile:</span>
+"
+            f"- Company: {profile.get('Account Name')}
+"
+            f"- Industry: {profile.get('Industry','N/A')}
+"
+            f"- SIC Code: {profile.get('SIC Code','N/A')}
+"
+            f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}
+"
+            f"- Truck Types: {profile.get('Truck Types at Location','N/A')}
+
+"
         )
         context_input = profile_ctx + user_question
 
-    # Pass the full account dict (or None) into the AI logic
+    # Generate prompt context
     prompt_ctx = generate_forklift_context(context_input, account)
 
-    # Build messages: system + single user turn
+    # System prompt (exact as specified)
     system_prompt = {
-        "role": "system",
-        "content": (
-            "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "When providing customer-specific data, wrap it in a "
-            "<span class=\"section-label\">Customer Profile:</span> section.\n"
-            "When recommending models, wrap section headers in a "
-            "<span class=\"section-label\">...</span> tag.\n"
-            "Use these sections in order if present:\n"
-            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
-            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
-            "List details underneath using hyphens and indent subpoints for clarity.\n\n"
-            "At the end, include:\n"
-            "- <span class=\"section-label\">Sales Pitch Techniques:</span> 1–2 persuasive points.\n"
-            "- <span class=\"section-label\">Common Objections:</span> 1–2 common concerns and how to address them.\n\n"
-            "Example:\n"
-            "<span class=\"section-label\">Customer Profile:</span>\n"
-            "- Company: Acme Co\n"
-            "- Industry: Retail\n"
-            "- SIC Code: 5311\n\n"
-            "<span class=\"section-label\">Model:</span>\n"
-            "- Heli H2000 Series 5-7T Electric Forklift\n\n"
-            "<span class=\"section-label\">Power:</span>\n"
-            "- Diesel\n\n"
-            "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
-            "- Emphasize reliability.\n\n"
-            "<span class=\"section-label\">Common Objections:</span>\n"
-            "- \"Why not Toyota?\"\n"
-            "  → Heli offers faster part availability.\n"
-        )
-    }
-    messages = [
-        system_prompt,
-        {"role": "user", "content": prompt_ctx}
-    ]
+    "role": "system",
+    "content": '''You are a helpful, detailed Heli Forklift sales assistant. When recommending models, format your response as plain text but wrap section headers in a <span class="section-label">...</span> tag. Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. List details underneath using hyphens. Leave a blank line between sections. Indent subpoints for clarity.
 
-    # Trim tokens if necessary
+At the end, include:
+- Sales Pitch Techniques: 1–2 persuasive points.
+- Common Objections: 1–2 common concerns and how to address them.
+
+<span class="section-label">Example:</span>
+<span class="section-label">Model:</span>
+- Heli H2000 Series 5-7T
+- Designed for heavy-duty applications
+
+<span class="section-label">Power:</span>
+- Diesel
+- Provides high torque and durability
+
+<span class="section-label">Sales Pitch Techniques:</span>
+- Emphasize Heli’s lower total cost of ownership.
+- Highlight that standard features are optional on other brands.
+
+<span class="section-label">Common Objections:</span>
+- "Why not Toyota or Crown?"
+  → Heli offers similar quality at a better price with faster part availability.
+'''  }
+messages = [system_prompt, {"role": "user", "content": prompt_ctx}] = [system_prompt, {"role": "user", "content": prompt_ctx}]
+
+    # Trim tokens
     enc = tiktoken.encoding_for_model("gpt-4")
-    def count_tokens(msgs):
-        return sum(len(enc.encode(m["content"])) for m in msgs)
+    def count_tokens(msgs): return sum(len(enc.encode(m["content"])) for m in msgs)
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
-    # Call OpenAI
+    # OpenAI call
     try:
+        ai_reply = ""  # initialize
         resp = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
