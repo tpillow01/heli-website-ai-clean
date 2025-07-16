@@ -22,7 +22,8 @@ def check_auth(username, password):
 
 def authenticate():
     return Response(
-        'Authentication required.', 401,
+        'Authentication required.',
+        401,
         {'WWW-Authenticate': 'Basic realm="Login Required"'}
     )
 
@@ -52,13 +53,13 @@ conversation_history = []
 def find_account_by_name(text: str):
     lower = text.lower()
     for acct in account_data:
-        name = acct["Account Name"].lower()
+        name = acct.get("Account Name", "").lower()
         if name in lower:
             return acct
-    names = [acct["Account Name"] for acct in account_data]
+    names = [acct.get("Account Name", "") for acct in account_data]
     match = difflib.get_close_matches(text, names, n=1, cutoff=0.7)
     if match:
-        return next(a for a in account_data if a["Account Name"] == match[0])
+        return next(a for a in account_data if a.get("Account Name") == match[0])
     return None
 
 @app.route('/')
@@ -74,36 +75,30 @@ def chat():
     if not user_question:
         return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
 
+    # Find matching account
     account = find_account_by_name(user_question)
 
-    # Build context_input with profile
+    # Build context input including profile if available
     context_input = user_question
     if account:
         profile = account
         profile_ctx = (
-            "<span class=\"section-label\">Customer Profile:</span>
-"
-            f"- Company: {profile.get('Account Name')}
-"
-            f"- Industry: {profile.get('Industry','N/A')}
-"
-            f"- SIC Code: {profile.get('SIC Code','N/A')}
-"
-            f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}
-"
-            f"- Truck Types: {profile.get('Truck Types at Location','N/A')}
-
-"
+            "<span class=\"section-label\">Customer Profile:</span>\n"
+            f"- Company: {profile.get('Account Name','N/A')}\n"
+            f"- Industry: {profile.get('Industry','N/A')}\n"
+            f"- SIC Code: {profile.get('SIC Code','N/A')}\n"
+            f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}\n"
+            f"- Truck Types: {profile.get('Truck Types at Location','N/A')}\n\n"
         )
         context_input = profile_ctx + user_question
 
-    # Generate prompt context
+    # Generate the AI context
     prompt_ctx = generate_forklift_context(context_input, account)
 
-    # System prompt (exact as specified)
-    system_prompt = {
-    "role": "system",
-    "content": '''You are a helpful, detailed Heli Forklift sales assistant. When recommending models, format your response as plain text but wrap section headers in a <span class="section-label">...</span> tag. Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. List details underneath using hyphens. Leave a blank line between sections. Indent subpoints for clarity.
+    # System prompt
+        system_prompt = {
+        "role": "system",
+        "content": '''You are a helpful, detailed Heli Forklift sales assistant. When recommending models, format your response as plain text but wrap section headers in a <span class="section-label">...</span> tag. Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. List details underneath using hyphens. Leave a blank line between sections. Indent subpoints for clarity.
 
 At the end, include:
 - Sales Pitch Techniques: 1–2 persuasive points.
@@ -126,17 +121,17 @@ At the end, include:
 - "Why not Toyota or Crown?"
   → Heli offers similar quality at a better price with faster part availability.
 '''  }
-messages = [system_prompt, {"role": "user", "content": prompt_ctx}] = [system_prompt, {"role": "user", "content": prompt_ctx}]
-
-    # Trim tokens
+    # Build messages and trim tokens
+    messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
     enc = tiktoken.encoding_for_model("gpt-4")
-    def count_tokens(msgs): return sum(len(enc.encode(m["content"])) for m in msgs)
+    def count_tokens(msgs):
+        return sum(len(enc.encode(m["content"])) for m in msgs)
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
-    # OpenAI call
+    # Call OpenAI
+    ai_reply = ""  # initialize
     try:
-        ai_reply = ""  # initialize
         resp = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
