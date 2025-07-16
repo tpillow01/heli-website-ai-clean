@@ -1,5 +1,3 @@
-# heli_backup_ai.py
-
 import os
 import json
 import difflib
@@ -13,13 +11,16 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ─── Password Authentication ─────────────────────────────────────────────
-
 def check_auth(username, password):
-    return (username == os.getenv('RENDER_USERNAME') and password == os.getenv('RENDER_PASSWORD'))
+    return (
+        username == os.getenv("RENDER_USERNAME")
+        and password == os.getenv("RENDER_PASSWORD")
+    )
 
 def authenticate():
     return Response(
-        'Authentication required.', 401,
+        'Authentication required.',
+        401,
         {'WWW-Authenticate': 'Basic realm="Login Required"'}
     )
 
@@ -44,12 +45,19 @@ print(f"✅ Loaded {len(model_data)} models from JSON")
 # Store conversation history
 conversation_history = []
 
-# Helper: fuzzy match company name
-def find_account_by_name(name):
-    names = [acct.get("Account Name", "") for acct in account_data]
-    match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
+# Helper: substring-first then fuzzy match company name
+def find_account_by_name(text: str):
+    lower = text.lower()
+    # 1) substring match
+    for acct in account_data:
+        name = acct["Account Name"].lower()
+        if name in lower:
+            return acct
+    # 2) fuzzy fallback
+    names = [acct["Account Name"] for acct in account_data]
+    match = difflib.get_close_matches(text, names, n=1, cutoff=0.7)
     if match:
-        return next(acct for acct in account_data if acct["Account Name"] == match[0])
+        return next(a for a in account_data if a["Account Name"] == match[0])
     return None
 
 @app.route('/')
@@ -67,12 +75,12 @@ def chat():
 
     account = find_account_by_name(user_question)
 
-    # Build context_input with profile if available
+    # Build a context_input that includes the profile markup
     context_input = user_question
     if account:
         profile = account
         profile_ctx = (
-            f"<span class=\"section-label\">Customer Profile:</span>\n"
+            "<span class=\"section-label\">Customer Profile:</span>\n"
             f"- Company: {profile.get('Account Name')}\n"
             f"- Industry: {profile.get('Industry','N/A')}\n"
             f"- SIC Code: {profile.get('SIC Code','N/A')}\n"
@@ -81,13 +89,13 @@ def chat():
         )
         context_input = profile_ctx + user_question
 
-    # Pass the full account dict and the composite context into AI logic
+    # Pass the full account dict (or None) into the AI logic
     prompt_ctx = generate_forklift_context(context_input, account)
 
-    # Prepare messages: system prompt + single user message with prompt_ctx
+    # Build messages: system + single user turn
     system_prompt = {
-        "role":"system",
-        "content":(
+        "role": "system",
+        "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
             "When providing customer-specific data, wrap it in a "
             "<span class=\"section-label\">Customer Profile:</span> section.\n"
@@ -121,7 +129,7 @@ def chat():
         {"role": "user", "content": prompt_ctx}
     ]
 
-    # Trim tokens if needed
+    # Trim tokens if necessary
     enc = tiktoken.encoding_for_model("gpt-4")
     def count_tokens(msgs):
         return sum(len(enc.encode(m["content"])) for m in msgs)
@@ -139,11 +147,6 @@ def chat():
         ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
-
-    # Append AI reply to history if you still need history
-    conversation_history.append({"role": "assistant", "content": ai_reply})
-    if len(conversation_history) > 4:
-        conversation_history.pop(0)
 
     return jsonify({'response': ai_reply})
 
