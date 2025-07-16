@@ -2,7 +2,6 @@
 
 import json
 import re
-import difflib
 from typing import List, Dict, Any
 
 # —————————————————————————————————————————————————————————————————————
@@ -10,39 +9,19 @@ from typing import List, Dict, Any
 # —————————————————————————————————————————————————————————————————————
 with open("accounts.json", "r", encoding="utf-8") as f:
     accounts_raw = json.load(f)
-accounts_data = {
-    acct["Account Name"].lower(): acct
-    for acct in accounts_raw
-    if "Account Name" in acct
-}
+# Build a lookup if you need to fuzzy-find elsewhere
+accounts_lookup = {acct["Account Name"].lower(): acct for acct in accounts_raw}
 
 with open("models.json", "r", encoding="utf-8") as f:
-    models_data = json.load(f)
+    models_data: List[Dict[str, Any]] = json.load(f)
 
 
-def get_customer_context(customer_name: str) -> str:
+def filter_models(user_input: str) -> List[Dict[str, Any]]:
     """
-    Pulls the exact profile fields out of accounts.json,
-    including SIC Code, Industry, etc.
-    """
-    acct = accounts_data.get(customer_name.lower()) if customer_name else None
-    if not acct:
-        return ""
-    lines = ["<span class=\"section-label\">Customer Profile:</span>"]
-    for field in ("Company", "Industry", "SIC Code",
-                  "Total Company Fleet Size", "Truck Types at Location"):
-        val = acct.get(field, "N/A")
-        lines.append(f"- {field}: {val}")
-    lines.append("")  # blank line
-    return "\n".join(lines)
-
-
-def filter_models_for_account(user_input: str) -> List[Dict[str, Any]]:
-    """
-    Exactly the same 3‑model filter you were using:
+    Return up to 3 models from models_data:
       • keyword filters (narrow aisle, rough terrain, electric)
       • capacity hints like “3000 lb”
-      • fallback to top 3 by Capacity_lbs
+      • fallback: top 3 by Capacity_lbs
     """
     ui = user_input.lower()
     cands = models_data[:]
@@ -55,8 +34,8 @@ def filter_models_for_account(user_input: str) -> List[Dict[str, Any]]:
     if "electric" in ui:
         cands = [m for m in cands if "electric" in m.get("Power", "").lower()]
 
-    # capacity hints
-    caps = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,5})\s*lbs?", ui)]
+    # capacity hints (lb only)
+    caps = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,6})\s*lbs?", ui)]
     if caps:
         min_cap = max(caps)
         cands = [
@@ -65,7 +44,7 @@ def filter_models_for_account(user_input: str) -> List[Dict[str, Any]]:
                and m["Capacity_lbs"] >= min_cap
         ]
 
-    # fallback to top 3 by capacity
+    # fallback: top 3 by Capacity_lbs
     if not cands:
         cands = sorted(
             models_data,
@@ -76,24 +55,32 @@ def filter_models_for_account(user_input: str) -> List[Dict[str, Any]]:
     return cands[:3]
 
 
-def generate_forklift_context(user_input: str, customer_name: str) -> str:
+def generate_forklift_context(user_input: str, account: Dict[str, Any] = None) -> str:
     """
-    1) Customer Profile block from accounts.json
-    2) 3 matching models (same logic as before)
-    3) Raw user question appended
+    Build the AI context:
+      1) Customer Profile from the full account dict
+      2) Up to 3 matching models (using models_data)
+      3) Append the raw user question
     """
-    ctx_lines: List[str] = []
+    lines: List[str] = []
 
     # 1) Customer Profile
-    cust_intro = get_customer_context(customer_name)
-    if cust_intro:
-        ctx_lines.append(cust_intro)
+    if account:
+        lines.append("<span class=\"section-label\">Customer Profile:</span>")
+        # Use the exact fields from accounts.json
+        for field in ("Account Name", "Industry", "SIC Code",
+                      "Total Company Fleet Size", "Truck Types at Location"):
+            val = account.get(field, "N/A")
+            # Rename "Account Name" to "Company" in output
+            label = "Company" if field == "Account Name" else field
+            lines.append(f"- {label}: {val}")
+        lines.append("")  # blank line
 
     # 2) Model recommendations
-    matches = filter_models_for_account(user_input)
+    matches = filter_models(user_input)
     if matches:
         for m in matches:
-            ctx_lines += [
+            lines += [
                 "<span class=\"section-label\">Model:</span>",
                 f"- {m.get('Model','N/A')}",
                 "<span class=\"section-label\">Power:</span>",
@@ -105,12 +92,12 @@ def generate_forklift_context(user_input: str, customer_name: str) -> str:
                 ""  # blank line
             ]
     else:
-        ctx_lines.append(
+        lines.append(
             "You are a forklift expert assistant. No models matched the filters; "
-            "please provide a professional recommendation based on the user's requirements."
+            "please provide a professional recommendation based on the user's requirements.\n"
         )
-        ctx_lines.append("")
 
-    # 3) Raw question
-    ctx_lines.append(user_input)
-    return "\n".join(ctx_lines)
+    # 3) Raw question at the end
+    lines.append(user_input)
+
+    return "\n".join(lines)

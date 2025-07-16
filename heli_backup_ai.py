@@ -80,7 +80,7 @@ def chat():
         )
         context_input = profile_ctx + user_question
 
-    prompt_ctx = generate_forklift_context(context_input, account.get('Account Name') if account else "")
+    prompt_ctx = generate_forklift_context(user_question, account)
 
     conversation_history.append({"role": "user", "content": context_input})
     if len(conversation_history) > 4:
