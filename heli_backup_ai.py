@@ -1,19 +1,21 @@
+# heli_backup_ai.py
+
+import os
 import json
 import difflib
 import tiktoken
-import os
 from flask import Flask, render_template, request, jsonify, Response
 from functools import wraps
 from openai import OpenAI
 from ai_logic import generate_forklift_context
 
 app = Flask(__name__)
-client = OpenAI()  # uses OPENAI_API_KEY env
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ─── Password Authentication ─────────────────────────────────────────────
 
 def check_auth(username, password):
-    return username == os.getenv('RENDER_USERNAME') and password == os.getenv('RENDER_PASSWORD')
+    return (username == os.getenv('RENDER_USERNAME') and password == os.getenv('RENDER_PASSWORD'))
 
 def authenticate():
     return Response(
@@ -30,64 +32,63 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
-# ─── Load accounts.json ──────────────────────────────────────────────────
+# ─── Load customer and model data ─────────────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
     account_data = json.load(f)
-print(f"✅ Loaded {len(account_data)} accounts")
+print(f"✅ Loaded {len(account_data)} accounts from JSON")
 
-# ─── Load models.json ───────────────────────────────────────────────────
 with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
-print(f"✅ Loaded {len(model_data)} models")
+print(f"✅ Loaded {len(model_data)} models from JSON")
 
+# Store conversation history
 conversation_history = []
 
+# Helper: fuzzy match company name
 
-def find_account_by_name(text: str):
-    lower_text = text.lower()
-    for acct in account_data:
-        if acct["Account Name"].lower() in lower_text:
-            return acct
-    names = [a["Account Name"] for a in account_data]
-    match = difflib.get_close_matches(text, names, n=1, cutoff=0.6)
+def find_account_by_name(name):
+    names = [acct.get("Account Name", "") for acct in account_data]
+    match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
     if match:
-        return next(a for a in account_data if a["Account Name"] == match[0])
+        return next(acct for acct in account_data if acct["Account Name"] == match[0])
     return None
-
 
 @app.route('/')
 @requires_auth
 def home():
     return render_template('chat.html')
 
-
 @app.route('/api/chat', methods=['POST'])
 def chat():
     global conversation_history
-
     data = request.get_json() or {}
-    user_q = data.get('question', '').strip()
-    if not user_q:
-        return jsonify({'response': 'Please describe the customer’s needs.'}), 400
+    user_question = data.get('question', '').strip()
+    if not user_question:
+        return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
 
-    acct = find_account_by_name(user_q)
-    cust_name = acct["Account Name"] if acct else ""
-    print(f"🔍 find_account_by_name: matched = '{cust_name}'")
+    account = find_account_by_name(user_question)
+    context_input = user_question
+    if account:
+        profile = account
+        profile_ctx = (
+            f"<span class=\"section-label\">Customer Profile:</span>\n"
+            f"- Company: {profile.get('Account Name')}\n"
+            f"- Industry: {profile.get('Industry','N/A')}\n"
+            f"- SIC Code: {profile.get('SIC Code','N/A')}\n"
+            f"- Fleet Size: {profile.get('Total Company Fleet Size','N/A')}\n"
+            f"- Truck Types: {profile.get('Truck Types at Location','N/A')}\n\n"
+        )
+        context_input = profile_ctx + user_question
 
-    # ←— here’s the only change: pass just (user_q, cust_name)
-    prompt_context = generate_forklift_context(user_q, cust_name)
+    prompt_ctx = generate_forklift_context(context_input, account.get('Account Name') if account else "")
 
-    print("=== PROMPT CONTEXT ===")
-    print(prompt_context)
-    print("======================")
-
-    conversation_history.append({"role": "user", "content": user_q})
+    conversation_history.append({"role": "user", "content": context_input})
     if len(conversation_history) > 4:
         conversation_history.pop(0)
 
     system_prompt = {
-        "role": "system",
-        "content": (
+        "role":"system",
+        "content":(
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
             "When providing customer-specific data, wrap it in a "
             "<span class=\"section-label\">Customer Profile:</span> section.\n"
@@ -95,20 +96,18 @@ def chat():
             "<span class=\"section-label\">...</span> tag.\n"
             "Use these sections in order if present:\n"
             "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
-            "Attachments:, Comparison:, Sales Pitch Techniques:, "
-            "Common Objections:.\n"
-            "List details underneath using hyphens and indent subpoints. "
-            "Leave a blank line between sections.\n\n"
+            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
+            "List details underneath using hyphens and indent subpoints for clarity.\n\n"
             "At the end, include:\n"
             "- <span class=\"section-label\">Sales Pitch Techniques:</span> 1–2 persuasive points.\n"
             "- <span class=\"section-label\">Common Objections:</span> 1–2 common concerns and how to address them.\n\n"
             "Example:\n"
             "<span class=\"section-label\">Customer Profile:</span>\n"
-            "- Company: Acme Corp\n"
+            "- Company: Acme Co\n"
             "- Industry: Retail\n"
             "- SIC Code: 5311\n\n"
             "<span class=\"section-label\">Model:</span>\n"
-            "- Heli H2000 Series 5-7T\n\n"
+            "- Heli H2000 Series 5-7T Electric Forklift\n\n"
             "<span class=\"section-label\">Power:</span>\n"
             "- Diesel\n\n"
             "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
@@ -119,14 +118,9 @@ def chat():
         )
     }
 
-    messages = [
-        system_prompt,
-        {"role": "user", "content": prompt_context}
-    ]
-
-    encoding = tiktoken.encoding_for_model("gpt-4")
-    def count_tokens(msgs):
-        return sum(len(encoding.encode(m["content"])) for m in msgs)
+    messages = [system_prompt] + conversation_history
+    enc = tiktoken.encoding_for_model("gpt-4")
+    def count_tokens(msgs): return sum(len(enc.encode(m["content"])) for m in msgs)
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
@@ -140,11 +134,9 @@ def chat():
         ai_reply = resp.choices[0].message.content.strip()
         conversation_history.append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        print("OpenAI error:", e)
         ai_reply = f"❌ Internal error: {e}"
 
     return jsonify({'response': ai_reply})
 
-
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=int(os.getenv('PORT', 5000)))
