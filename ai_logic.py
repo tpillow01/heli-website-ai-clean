@@ -1,97 +1,136 @@
-import json
-import re
-from typing import List, Dict, Any
+# ai_logic.py
+import json, re, difflib
+from typing import List, Dict, Any, Optional, Tuple
 
-# —————————————————————————————————————————————————————————————————————
-# Load JSON data once
-# —————————————————————————————————————————————————————————————————————
+# ────────────────────────────────────────────────────────────────
+# Load JSON once at import
+# ────────────────────────────────────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
-    accounts_raw = json.load(f)
-accounts_data = {
-    acct["Account Name"].lower(): acct
-    for acct in accounts_raw
-    if "Account Name" in acct
-}
+    _accounts_raw = json.load(f)
 
 with open("models.json", "r", encoding="utf-8") as f:
     models_data: List[Dict[str, Any]] = json.load(f)
 
+# Account lookup map keyed by normalized company name
+_accounts_map = {
+    a["Account Name"].strip().lower(): a for a in _accounts_raw if "Account Name" in a
+}
+
+# ────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────
+_CAP_RE = re.compile(r"([\d\.,]+)\s*(kg|kilogram|lbs?|pounds?)?", re.I)
+
+def _to_lbs(num: float, unit: str) -> float:
+    return num * 2.20462 if unit.lower().startswith("kg") else num
+
+def _capacity_from_str(s: str) -> float:
+    """Extract first number from a capacity string & convert to lbs."""
+    if not s:
+        return 0.0
+    m = _CAP_RE.search(str(s))
+    if not m:
+        return 0.0
+    num = float(m.group(1).replace(",", ""))
+    unit = m.group(2) or "lbs"
+    return _to_lbs(num, unit)
+
+def capacity_of(model: Dict[str, Any]) -> float:
+    """Return model capacity in **pounds** (search a few common fields)."""
+    for k in ("Capacity_lbs", "Load Capacity", "Capacity"):
+        if k in model and model[k]:
+            return _capacity_from_str(model[k])
+    return 0.0
+
+def _keyword_filter(ui: str, cand: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Apply keyword filters for narrow‑aisle, rough‑terrain, power, etc."""
+    if "narrow aisle" in ui:
+        cand = [m for m in cand if "narrow" in str(m.get("Type", "")).lower()]
+    if "rough terrain" in ui:
+        cand = [m for m in cand if "rough" in str(m.get("Workplace", "")).lower()
+                                 or "rough" in str(m.get("Type", "")).lower()]
+    if "electric" in ui or "lithium" in ui:
+        cand = [m for m in cand if "electric" in str(m.get("Power", "")).lower()
+                               or "lithium"  in str(m.get("Power", "")).lower()]
+    if "diesel" in ui:
+        cand = [m for m in cand if "diesel" in str(m.get("Power", "")).lower()]
+    return cand
+
+def _requested_capacity(ui: str) -> Optional[int]:
+    """Return largest capacity mentioned by user (lbs), or None."""
+    nums = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,6})\s*lbs?", ui)]
+    return max(nums) if nums else None
+
+# ────────────────────────────────────────────────────────────────
+# Public API
+# ────────────────────────────────────────────────────────────────
+def get_account(company_text: str) -> Optional[Dict[str, Any]]:
+    """Best‑effort substring first, then fuzzy match."""
+    lc = company_text.lower()
+    for name, acc in _accounts_map.items():
+        if name in lc:
+            return acc
+
+    names = list(_accounts_map.keys())
+    fuzzy = difflib.get_close_matches(company_text.lower(), names, n=1, cutoff=0.7)
+    return _accounts_map.get(fuzzy[0]) if fuzzy else None
+
+def get_customer_profile_block(acc: Optional[Dict[str, Any]]) -> str:
+    if not acc:
+        return ""
+    sic = acc.get("SIC Code", "N/A")
+    return (
+        "<span class=\"section-label\">Customer Profile:</span>\n"
+        f"- Company: {acc['Account Name']}\n"
+        f"- Industry: {acc.get('Industry', 'N/A')}\n"
+        f"- SIC Code: {sic}\n"
+        f"- Fleet Size: {acc.get('Total Company Fleet Size', 'N/A')}\n"
+        f"- Truck Types: {acc.get('Truck Types at Location', 'N/A')}\n\n"
+    )
 
 def filter_models(user_input: str) -> List[Dict[str, Any]]:
-    """
-    Return up to 3 models from the full catalog:
-      • filter by keywords (narrow aisle, rough terrain, electric)
-      • filter by capacity hints (e.g. “5000 lb”)
-      • fallback: top 3 by Capacity_lbs
-    """
     ui = user_input.lower()
-    cands = models_data[:]  # start with entire catalog
+    cand = models_data[:]  # start with every model
 
-    # keyword filters
-    if "narrow aisle" in ui:
-        cands = [m for m in cands if "narrow" in m.get("Type", "").lower()]
-    if "rough terrain" in ui:
-        cands = [m for m in cands if "rough" in m.get("Type", "").lower()]
-    if "electric" in ui:
-        cands = [m for m in cands if "electric" in m.get("Power", "").lower()]
+    # keyword trims
+    cand = _keyword_filter(ui, cand)
 
-    # capacity hints
-    nums = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,6})\s*lbs?", ui)]
-    if nums:
-        min_cap = max(nums)
-        cands = [
-            m for m in cands
-            if isinstance(m.get("Capacity_lbs"), (int, float))
-               and m["Capacity_lbs"] >= min_cap
-        ]
+    # capacity trim
+    req_cap = _requested_capacity(ui)
+    if req_cap:
+        cand = [m for m in cand if capacity_of(m) >= req_cap]
 
-    # fallback sorting
-    if not cands:
-        cands = sorted(
-            models_data,
-            key=lambda m: m.get("Capacity_lbs", 0),
-            reverse=True
+    # sort by closeness to requested capacity (if any), else by capacity ascending
+    cand.sort(
+        key=lambda m: (
+            abs(capacity_of(m) - req_cap) if req_cap else capacity_of(m),
+            m.get("Model")
         )
+    )
+    return cand[:5]  # top 5
 
-    return cands[:3]
+def generate_forklift_context(user_input: str, acc: Optional[Dict[str, Any]]) -> str:
+    profile = get_customer_profile_block(acc)
+    models = filter_models(user_input)
 
-
-def generate_forklift_context(user_input: str, account: Dict[str, Any] = None) -> str:
-    """
-    1) Customer Profile (from the JSON record)
-    2) Up to 3 matching models (with full details)
-    3) Raw user question
-    """
     lines: List[str] = []
+    if profile:
+        lines.append(profile)
 
-    # 1) Customer Profile block
-    if account:
-        lines.append("<span class=\"section-label\">Customer Profile:</span>")
-        lines.append(f"- Company: {account.get('Account Name','N/A')}")
-        lines.append(f"- Industry: {account.get('Industry','N/A')}")
-        lines.append(f"- SIC Code: {account.get('SIC Code','N/A')}")
-        lines.append(f"- Fleet Size: {account.get('Total Company Fleet Size','N/A')}")
-        lines.append(f"- Truck Types: {account.get('Truck Types at Location','N/A')}")
-        lines.append("")
-
-    # 2) Model recommendations
-    matches = filter_models(user_input)
-    if matches:
-        for m in matches:
+    if models:
+        lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
+        for m in models:
             lines += [
                 "<span class=\"section-label\">Model:</span>",
                 f"- {m.get('Model','N/A')}",
                 "<span class=\"section-label\">Power:</span>",
                 f"- {m.get('Power','N/A')}",
-                "<span class=\"section-label\">Capacity (lbs):</span>",
-                f"- {m.get('Capacity_lbs','N/A')}",
-                "<span class=\"section-label\">Type:</span>",
-                f"- {m.get('Type','N/A')}",
-                ""  # blank line
+                "<span class=\"section-label\">Capacity:</span>",
+                f"- {int(capacity_of(m)):,} lbs",
+                ""  # blank line between models
             ]
     else:
         lines.append("No matching models found in the provided data.\n")
 
-    # 3) Raw user question
-    lines.append(user_input)
+    lines.append(user_input)   # always end with raw question
     return "\n".join(lines)
