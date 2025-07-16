@@ -69,31 +69,8 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
     ui = user_input.lower()
     candidates = models_list[:]
 
-    # 1) Keyword filters
-    if "narrow aisle" in ui:
-        candidates = [
-            m for m in candidates
-            if "narrow" in str(m.get("Type", "")).lower()
-        ]
-
-    if "rough terrain" in ui:
-        candidates = [
-            m for m in candidates
-            if "rough" in str(m.get("Type", "")).lower()
-        ]
-
-    if "electric" in ui or "lithium" in ui:
-        candidates = [
-            m for m in candidates
-            if "electric" in str(m.get("Power", "")).lower()
-            or "lithium" in str(m.get("Power", "")).lower()
-        ]
-
-    # 2) Capacity filter for ANY “### lb” or bare numbers in user input
-    weights = [
-        int(n.replace(",", ""))
-        for n in re.findall(r"(\d{3,5})\s*(?:lb|lbs)?", ui)
-    ]
+    # 1) Capacity filter if user mentions “### lb”
+    weights = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,5})\s*(?:lb|lbs)?", ui)]
     if weights:
         min_cap = max(weights)
         candidates = [
@@ -101,36 +78,62 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
             if _parse_capacity(m.get("Capacity_lbs", 0)) >= min_cap
         ]
 
-    # 3) Exact model-name mention
-    exact_hits = [
-        m for m in models_list
-        if m.get("Model", "").lower() in ui
-    ]
-    if exact_hits:
-        candidates = exact_hits
+    # 2) Keyword filters
+    if "narrow aisle" in ui:
+        candidates = [m for m in candidates if "narrow" in str(m.get("Type", "")).lower()]
+    if "rough terrain" in ui:
+        candidates = [m for m in candidates if "rough" in str(m.get("Type", "")).lower()]
+    if "electric" in ui or "lithium" in ui:
+        candidates = [
+            m for m in candidates
+            if "electric" in str(m.get("Power", "")).lower()
+            or "lithium" in str(m.get("Power", "")).lower()
+        ]
 
-    # 4) Fuzzy match on model names if nothing else matched
+    # 3) Exact model-code mention
+    exact_hits = [m for m in models_list if m.get("Model", "").lower() in ui]
+    if exact_hits:
+        return exact_hits[:5]
+
+    # 4) Fuzzy match on model codes if still empty
     if not candidates:
         all_names = [m.get("Model", "") for m in models_list]
         close = difflib.get_close_matches(user_input, all_names, n=5, cutoff=0.6)
-        candidates = [
-            m for m in models_list
-            if m.get("Model", "") in close
-        ]
+        if close:
+            return [m for m in models_list if m.get("Model", "") in close]
 
-    # 5) Finally cap at 5
+    # 5) If still nothing (i.e. user gave no hints), default to top 5 by capacity
+    if not candidates:
+        candidates = sorted(
+            models_list,
+            key=lambda m: _parse_capacity(m.get("Capacity_lbs", 0)),
+            reverse=True
+        )
+
+    # Finally, cap at 5
     return candidates[:5]
 
 
 def generate_forklift_context(user_input: str, customer_name: str) -> str:
     """
     Build the AI context:
-      1) Customer Profile
-      2) Recommended Heli Models
+      1) Customer Profile (if any)
+      2) <span class="section-label">Recommended Heli Models:</span>
+         – for each model, list Model, Power, Capacity, Tire Type, Attachments, Comparison
       3) Raw user question
     """
     cust_ctx = get_customer_context(customer_name)
     hits = filter_models(user_input, models_data)
+
+    # Define the exact sections your system prompt expects
+    SECTION_FIELDS = [
+        ("Model", "Model"),
+        ("Power", "Power"),
+        ("Capacity", "Capacity_lbs"),
+        ("Tire Type", "Tire Type"),
+        ("Attachments", "Attachments"),
+        ("Comparison", "Comparison"),
+    ]
 
     lines: List[str] = []
     if cust_ctx:
@@ -139,23 +142,14 @@ def generate_forklift_context(user_input: str, customer_name: str) -> str:
     if hits:
         lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
         for m in hits:
-            lines += [
-                "<span class=\"section-label\">Model:</span>",
-                f"- {m.get('Model','N/A')}",
-                "<span class=\"section-label\">Type:</span>",
-                f"- {m.get('Type','N/A')}",
-                "<span class=\"section-label\">Power:</span>",
-                f"- {m.get('Power','N/A')}",
-                "<span class=\"section-label\">Capacity (lbs):</span>",
-                f"- {m.get('Capacity_lbs','N/A')}",
-                "<span class=\"section-label\">Dimensions (in):</span>",
-                f"- H: {m.get('Height_in','N/A')}",
-                f"- W: {m.get('Width_in','N/A')}",
-                f"- L: {m.get('Length_in','N/A')}",
-                "<span class=\"section-label\">Max Lifting Height (in):</span>",
-                f"- {m.get('LiftHeight_in','N/A')}",
-                ""  # blank line
-            ]
+            for label, field in SECTION_FIELDS:
+                lines.append(f"<span class=\"section-label\">{label}:</span>")
+                if field == "Capacity_lbs":
+                    cap = _parse_capacity(m.get(field, 0))
+                    lines.append(f"- {cap} lbs")
+                else:
+                    lines.append(f"- {m.get(field, 'N/A')}")
+            lines.append("")  # blank line between models
     else:
         lines.append("No matching models found in the provided data.\n")
 
