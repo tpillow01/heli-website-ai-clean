@@ -96,7 +96,7 @@ def chat():
     prompt_ctx = generate_forklift_context(context_input, account)
 
     # System prompt
-        system_prompt = {
+    system_prompt = {
         "role": "system",
         "content": '''You are a helpful, detailed Heli Forklift sales assistant. When recommending models, format your response as plain text but wrap section headers in a <span class="section-label">...</span> tag. Use the following sections: Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:. List details underneath using hyphens. Leave a blank line between sections. Indent subpoints for clarity.
 
@@ -121,7 +121,8 @@ At the end, include:
 - "Why not Toyota or Crown?"
   → Heli offers similar quality at a better price with faster part availability.
 '''  }
-    # Build messages and trim tokens
+
+    # Build messages and trim tokens and trim tokens
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
     enc = tiktoken.encoding_for_model("gpt-4")
     def count_tokens(msgs):
