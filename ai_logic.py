@@ -45,17 +45,42 @@ def get_customer_context(customer_name: str) -> str:
     return "\n".join(lines)
 
 
+def _parse_capacity(value: Any) -> float:
+    """
+    Normalize capacity values into a float.
+    Handles ints, floats, and strings like "1700 lbs", "2,500", etc.
+    Non-numeric or missing → 0.0
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value)
+    m = re.search(r"[\d,.]+", s)
+    if not m:
+        return 0.0
+    num = m.group(0).replace(",", "")
+    try:
+        return float(num)
+    except:
+        return 0.0
+
+
 def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Comprehensive filter over all models.json entries."""
     ui = user_input.lower()
     candidates = models_list[:]
 
-    # keyword filters
+    # 1) Keyword filters
     if "narrow aisle" in ui:
-        candidates = [m for m in candidates if "narrow" in str(m.get("Type", "")).lower()]
+        candidates = [
+            m for m in candidates
+            if "narrow" in str(m.get("Type", "")).lower()
+        ]
 
     if "rough terrain" in ui:
-        candidates = [m for m in candidates if "rough" in str(m.get("Type", "")).lower()]
+        candidates = [
+            m for m in candidates
+            if "rough" in str(m.get("Type", "")).lower()
+        ]
 
     if "electric" in ui or "lithium" in ui:
         candidates = [
@@ -64,24 +89,36 @@ def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Di
             or "lithium" in str(m.get("Power", "")).lower()
         ]
 
-    # capacity filter for ANY “### lb” or bare numbers
-    weights = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,5})\s*(?:lb|lbs)?", ui)]
+    # 2) Capacity filter for ANY “### lb” or bare numbers in user input
+    weights = [
+        int(n.replace(",", ""))
+        for n in re.findall(r"(\d{3,5})\s*(?:lb|lbs)?", ui)
+    ]
     if weights:
         min_cap = max(weights)
-        candidates = [m for m in candidates if float(m.get("Capacity_lbs", 0)) >= min_cap]
+        candidates = [
+            m for m in candidates
+            if _parse_capacity(m.get("Capacity_lbs", 0)) >= min_cap
+        ]
 
-    # exact model‑name mention
-    exact_hits = [m for m in models_list if m.get("Model", "").lower() in ui]
+    # 3) Exact model-name mention
+    exact_hits = [
+        m for m in models_list
+        if m.get("Model", "").lower() in ui
+    ]
     if exact_hits:
         candidates = exact_hits
 
-    # fuzzy match on model names if nothing else matched
+    # 4) Fuzzy match on model names if nothing else matched
     if not candidates:
         all_names = [m.get("Model", "") for m in models_list]
         close = difflib.get_close_matches(user_input, all_names, n=5, cutoff=0.6)
-        candidates = [m for m in models_list if m.get("Model", "") in close]
+        candidates = [
+            m for m in models_list
+            if m.get("Model", "") in close
+        ]
 
-    # finally cap at 5
+    # 5) Finally cap at 5
     return candidates[:5]
 
 
@@ -122,5 +159,6 @@ def generate_forklift_context(user_input: str, customer_name: str) -> str:
     else:
         lines.append("No matching models found in the provided data.\n")
 
+    # Always finish with the raw user question
     lines.append(user_input)
     return "\n".join(lines)
