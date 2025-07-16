@@ -74,7 +74,9 @@ def chat():
     cust_name = acct["Account Name"] if acct else ""
     print(f"🔍 find_account_by_name: matched = '{cust_name}'")
 
-    prompt_context = generate_forklift_context(user_q, cust_name, model_data)
+    # ←— here’s the only change: pass just (user_q, cust_name)
+    prompt_context = generate_forklift_context(user_q, cust_name)
+
     print("=== PROMPT CONTEXT ===")
     print(prompt_context)
     print("======================")
