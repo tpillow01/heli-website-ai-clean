@@ -45,7 +45,6 @@ print(f"✅ Loaded {len(model_data)} models from JSON")
 conversation_history = []
 
 # Helper: fuzzy match company name
-
 def find_account_by_name(name):
     names = [acct.get("Account Name", "") for acct in account_data]
     match = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
@@ -67,6 +66,8 @@ def chat():
         return jsonify({'response': 'Please enter a description of the customer’s needs.'}), 400
 
     account = find_account_by_name(user_question)
+
+    # Build context_input with profile if available
     context_input = user_question
     if account:
         profile = account
@@ -80,12 +81,10 @@ def chat():
         )
         context_input = profile_ctx + user_question
 
-    prompt_ctx = generate_forklift_context(user_question, account)
+    # Pass the full account dict and the composite context into AI logic
+    prompt_ctx = generate_forklift_context(context_input, account)
 
-    conversation_history.append({"role": "user", "content": context_input})
-    if len(conversation_history) > 4:
-        conversation_history.pop(0)
-
+    # Prepare messages: system prompt + single user message with prompt_ctx
     system_prompt = {
         "role":"system",
         "content":(
@@ -117,13 +116,19 @@ def chat():
             "  → Heli offers faster part availability.\n"
         )
     }
+    messages = [
+        system_prompt,
+        {"role": "user", "content": prompt_ctx}
+    ]
 
-    messages = [system_prompt] + conversation_history
+    # Trim tokens if needed
     enc = tiktoken.encoding_for_model("gpt-4")
-    def count_tokens(msgs): return sum(len(enc.encode(m["content"])) for m in msgs)
+    def count_tokens(msgs):
+        return sum(len(enc.encode(m["content"])) for m in msgs)
     while count_tokens(messages) > 7000 and len(messages) > 2:
         messages.pop(1)
 
+    # Call OpenAI
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
@@ -132,9 +137,13 @@ def chat():
             temperature=0.7
         )
         ai_reply = resp.choices[0].message.content.strip()
-        conversation_history.append({"role": "assistant", "content": ai_reply})
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
+
+    # Append AI reply to history if you still need history
+    conversation_history.append({"role": "assistant", "content": ai_reply})
+    if len(conversation_history) > 4:
+        conversation_history.pop(0)
 
     return jsonify({'response': ai_reply})
 
