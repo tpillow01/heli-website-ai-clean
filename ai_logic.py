@@ -2,7 +2,6 @@
 
 import json
 import re
-import difflib
 from typing import List, Dict, Any
 
 # —————————————————————————————————————————————————————————————————————
@@ -45,114 +44,36 @@ def get_customer_context(customer_name: str) -> str:
     return "\n".join(lines)
 
 
-def _parse_capacity(value: Any) -> float:
-    """
-    Normalize capacity values into a float.
-    Handles ints, floats, and strings like "1700 lbs", "2,500", etc.
-    Non-numeric or missing → 0.0
-    """
-    if isinstance(value, (int, float)):
-        return float(value)
-    s = str(value)
-    m = re.search(r"[\d,.]+", s)
-    if not m:
-        return 0.0
-    num = m.group(0).replace(",", "")
-    try:
-        return float(num)
-    except:
-        return 0.0
-
-
-def filter_models(user_input: str, models_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Comprehensive filter over all models.json entries."""
-    ui = user_input.lower()
-    candidates = models_list[:]
-
-    # 1) Capacity filter if user mentions “### lb”
-    weights = [int(n.replace(",", "")) for n in re.findall(r"(\d{3,5})\s*(?:lb|lbs)?", ui)]
-    if weights:
-        min_cap = max(weights)
-        candidates = [
-            m for m in candidates
-            if _parse_capacity(m.get("Capacity_lbs", 0)) >= min_cap
-        ]
-
-    # 2) Keyword filters
-    if "narrow aisle" in ui:
-        candidates = [m for m in candidates if "narrow" in str(m.get("Type", "")).lower()]
-    if "rough terrain" in ui:
-        candidates = [m for m in candidates if "rough" in str(m.get("Type", "")).lower()]
-    if "electric" in ui or "lithium" in ui:
-        candidates = [
-            m for m in candidates
-            if "electric" in str(m.get("Power", "")).lower()
-            or "lithium" in str(m.get("Power", "")).lower()
-        ]
-
-    # 3) Exact model-code mention
-    exact_hits = [m for m in models_list if m.get("Model", "").lower() in ui]
-    if exact_hits:
-        return exact_hits[:5]
-
-    # 4) Fuzzy match on model codes if still empty
-    if not candidates:
-        all_names = [m.get("Model", "") for m in models_list]
-        close = difflib.get_close_matches(user_input, all_names, n=5, cutoff=0.6)
-        if close:
-            return [m for m in models_list if m.get("Model", "") in close]
-
-    # 5) If still nothing (i.e. user gave no hints), default to top 5 by capacity
-    if not candidates:
-        candidates = sorted(
-            models_list,
-            key=lambda m: _parse_capacity(m.get("Capacity_lbs", 0)),
-            reverse=True
-        )
-
-    # Finally, cap at 5
-    return candidates[:5]
-
-
 def generate_forklift_context(user_input: str, customer_name: str) -> str:
     """
     Build the AI context:
       1) Customer Profile (if any)
-      2) <span class="section-label">Recommended Heli Models:</span>
-         – for each model, list Model, Power, Capacity, Tire Type, Attachments, Comparison
+      2) Full Models Data block
       3) Raw user question
+
+    GPT will then choose the best model based on profile + requirements.
     """
     cust_ctx = get_customer_context(customer_name)
-    hits = filter_models(user_input, models_data)
 
-    # Define the exact sections your system prompt expects
-    SECTION_FIELDS = [
-        ("Model", "Model"),
-        ("Power", "Power"),
-        ("Capacity", "Capacity_lbs"),
-        ("Tire Type", "Tire Type"),
-        ("Attachments", "Attachments"),
-        ("Comparison", "Comparison"),
-    ]
+    # 2) Build a compact Models Data list for GPT
+    model_lines = ["<span class=\"section-label\">Available Models:</span>"]
+    for m in models_data:
+        model_lines.append(
+            f"- {m.get('Model','N/A')} | "
+            f"Type: {m.get('Type','N/A')} | "
+            f"Power: {m.get('Power','N/A')} | "
+            f"Capacity_lbs: {m.get('Capacity_lbs','N/A')} | "
+            f"Height_in: {m.get('Height_in','N/A')} | "
+            f"LiftHeight_in: {m.get('LiftHeight_in','N/A')}"
+        )
+    model_block = "\n".join(model_lines)
 
-    lines: List[str] = []
+    # 3) Assemble final context
+    parts: List[str] = []
     if cust_ctx:
-        lines.append(cust_ctx)
+        parts.append(cust_ctx)
+    parts.append(model_block)
+    parts.append("")           # blank line
+    parts.append(user_input)   # the user's actual question
 
-    if hits:
-        lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
-        for m in hits:
-            for label, field in SECTION_FIELDS:
-                lines.append(f"<span class=\"section-label\">{label}:</span>")
-                if field == "Capacity_lbs":
-                    cap = _parse_capacity(m.get(field, 0))
-                    lines.append(f"- {cap} lbs")
-                else:
-                    lines.append(f"- {m.get(field, 'N/A')}")
-            lines.append("")  # blank line between models
-    else:
-        lines.append("No matching models found in the provided data.\n")
-
-    # Always finish with the raw user question
-    lines.append(user_input)
-    return "\n".join(lines)
+    return "\n".join(parts)
