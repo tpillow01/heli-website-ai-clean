@@ -5,6 +5,17 @@
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+
+  <!-- PWA Manifest and Service Worker -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#cc0000">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('{{ url_for('static', filename='service-worker.js') }}')
+        .then(reg => console.log("✅ Service Worker registered", reg))
+        .catch(err => console.error("❌ SW registration failed:", err));
+    }
+  </script>
 </head>
 <body>
   <div class="chat-container">
@@ -61,10 +72,7 @@
     }
 
     function renderBubble(text, sender = 'ai') {
-      // only stop animation when rendering the AI response
-      if (sender === 'ai') {
-        stopAnimation();
-      }
+      if (sender === 'ai') stopAnimation();
       const bubble = document.createElement('div');
       bubble.className = `response-bubble ${sender}`;
       bubble.innerHTML = formatLabels(text)
@@ -83,7 +91,6 @@
     }
 
     function animateForklift() {
-      // move to the opposite side based on its width
       const moveDistance = `calc(100% - ${forkliftUnit.offsetWidth}px)`;
       forkliftUnit.style.left = isForward ? moveDistance : '0';
       isForward = !isForward;
@@ -98,12 +105,8 @@
       e.preventDefault();
       const q = input.value.trim();
       if (!q) return;
-
-      // render user bubble without stopping animation
       renderBubble(q, 'user');
       input.value = '';
-
-      // kick off the forklift thinking animation
       startAnimationLoop();
 
       try {
@@ -114,7 +117,6 @@
         });
         if (res.ok) {
           const { response } = await res.json();
-          // this will stop the animation inside renderBubble
           renderBubble(response, 'ai');
         } else {
           renderBubble('❌ Error contacting server.', 'ai');
