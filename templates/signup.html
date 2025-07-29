@@ -6,58 +6,59 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-<header class="top-header">
-  <img src="{{ url_for('static', filename='tynan_logo.png') }}" class="logo">
-  <h1>Heli AI</h1>
-  <img src="{{ url_for('static', filename='tynan_logo.png') }}" class="logo">
-</header>
 
-<div class="auth-wrap">
-  <div class="auth-card">
-    <h2 class="auth-title">Create account</h2>
-    <div class="auth-subtitle">Join with your work email to access Heli AI</div>
+<div class="auth-screen">
+  <div class="auth-wrap">
+    <div class="auth-brand">
+      <img src="{{ url_for('static', filename='tynan_logo.png') }}" class="auth-logo" alt="Heli AI">
+    </div>
 
-    {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+    <div class="auth-card">
+      <h2 class="auth-title">Create account</h2>
+      <div class="auth-subtitle">Join with your work email to access Heli AI</div>
 
-    <form method="post" action="{{ url_for('signup') }}">
-      <div class="auth-field">
-        <label for="email">Email</label>
-        <div class="auth-input-wrap">
-          <input id="email" name="email" type="email"
-                 class="auth-input" value="{{ email or '' }}"
-                 required autocomplete="email" placeholder="you@company.com">
+      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+
+      <form method="post" action="{{ url_for('signup') }}">
+        <div class="auth-field">
+          <label for="email">Email</label>
+          <div class="auth-input-wrap">
+            <input id="email" name="email" type="email"
+                   class="auth-input" value="{{ email or '' }}"
+                   required autocomplete="email" placeholder="you@company.com">
+          </div>
         </div>
-      </div>
 
-      <div class="auth-field">
-        <label for="password">Password</label>
-        <div class="auth-input-wrap">
-          <input id="password" name="password" type="password"
-                 class="auth-input" required autocomplete="new-password"
-                 placeholder="Create a password">
-          <button type="button" class="toggle-eye" aria-label="Show password"
-                  onclick="togglePw('password', this)">Show</button>
+        <div class="auth-field">
+          <label for="password">Password</label>
+          <div class="auth-input-wrap">
+            <input id="password" name="password" type="password"
+                   class="auth-input" required autocomplete="new-password"
+                   placeholder="Create a password">
+            <button type="button" class="toggle-eye" aria-label="Show password"
+                    onclick="togglePw('password', this)">Show</button>
+          </div>
         </div>
-      </div>
 
-      <div class="auth-field">
-        <label for="confirm">Confirm Password</label>
-        <div class="auth-input-wrap">
-          <input id="confirm" name="confirm" type="password"
-                 class="auth-input" required autocomplete="new-password"
-                 placeholder="Repeat password">
-          <button type="button" class="toggle-eye" aria-label="Show password"
-                  onclick="togglePw('confirm', this)">Show</button>
+        <div class="auth-field">
+          <label for="confirm">Confirm Password</label>
+          <div class="auth-input-wrap">
+            <input id="confirm" name="confirm" type="password"
+                   class="auth-input" required autocomplete="new-password"
+                   placeholder="Repeat password">
+            <button type="button" class="toggle-eye" aria-label="Show password"
+                    onclick="togglePw('confirm', this)">Show</button>
+          </div>
         </div>
-      </div>
 
-      <div class="auth-actions">
-        <button class="btn primary" type="submit">Sign up</button>
-      </div>
-    </form>
+        <div class="auth-actions">
+          <button class="btn primary" type="submit">Sign up</button>
+        </div>
+      </form>
 
-    <div class="auth-footer">
-      Already have an account? <a href="{{ url_for('login') }}">Log in</a>
+      <div class="auth-footer">
+        Already have an account? <a href="{{ url_for('login') }}">Log in</a>
+      </div>
     </div>
   </div>
 </div>
