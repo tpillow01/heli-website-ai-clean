@@ -2,20 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Sign up</title>
+  <title>Sign up • Heli AI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  <style>
-    .auth-card{max-width:420px;margin:48px auto;background:#111;border:1px solid #222;border-radius:10px;padding:18px}
-    .auth-card h1{margin:0 0 12px 0;text-align:center}
-    .field{display:flex;flex-direction:column;margin:10px 0}
-    .field label{color:#aaa;font-size:.9rem;margin-bottom:6px}
-    .field input{padding:10px;border-radius:6px;border:1px solid #333;background:#000;color:#fff}
-    .btn{width:100%;padding:10px 14px;border-radius:6px;border:1px solid #cc0000;background:#cc0000;color:#fff;font-weight:600;cursor:pointer}
-    .btn:hover{background:#a00000}
-    .error{background:#2a0000;border:1px solid #550000;color:#ffb3b3;border-radius:6px;padding:8px 10px;margin-bottom:10px}
-    .muted{color:#bbb;text-align:center;margin-top:10px}
-    a{color:#fff;text-decoration:underline}
-  </style>
 </head>
 <body>
 <header class="top-header">
@@ -24,25 +12,63 @@
   <img src="{{ url_for('static', filename='tynan_logo.png') }}" class="logo">
 </header>
 
-<div class="auth-card">
-  <h1>Create account</h1>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  <form method="post" action="{{ url_for('signup') }}">
-    <div class="field">
-      <label for="email">Email</label>
-      <input id="email" name="email" type="email" value="{{ email or '' }}" required autocomplete="email">
+<div class="auth-wrap">
+  <div class="auth-card">
+    <h2 class="auth-title">Create account</h2>
+    <div class="auth-subtitle">Join with your work email to access Heli AI</div>
+
+    {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+
+    <form method="post" action="{{ url_for('signup') }}">
+      <div class="auth-field">
+        <label for="email">Email</label>
+        <div class="auth-input-wrap">
+          <input id="email" name="email" type="email"
+                 class="auth-input" value="{{ email or '' }}"
+                 required autocomplete="email" placeholder="you@company.com">
+        </div>
+      </div>
+
+      <div class="auth-field">
+        <label for="password">Password</label>
+        <div class="auth-input-wrap">
+          <input id="password" name="password" type="password"
+                 class="auth-input" required autocomplete="new-password"
+                 placeholder="Create a password">
+          <button type="button" class="toggle-eye" aria-label="Show password"
+                  onclick="togglePw('password', this)">Show</button>
+        </div>
+      </div>
+
+      <div class="auth-field">
+        <label for="confirm">Confirm Password</label>
+        <div class="auth-input-wrap">
+          <input id="confirm" name="confirm" type="password"
+                 class="auth-input" required autocomplete="new-password"
+                 placeholder="Repeat password">
+          <button type="button" class="toggle-eye" aria-label="Show password"
+                  onclick="togglePw('confirm', this)">Show</button>
+        </div>
+      </div>
+
+      <div class="auth-actions">
+        <button class="btn primary" type="submit">Sign up</button>
+      </div>
+    </form>
+
+    <div class="auth-footer">
+      Already have an account? <a href="{{ url_for('login') }}">Log in</a>
     </div>
-    <div class="field">
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" required autocomplete="new-password">
-    </div>
-    <div class="field">
-      <label for="confirm">Confirm Password</label>
-      <input id="confirm" name="confirm" type="password" required autocomplete="new-password">
-    </div>
-    <button class="btn" type="submit">Sign up</button>
-  </form>
-  <div class="muted">Already have an account? <a href="{{ url_for('login') }}">Log in</a></div>
+  </div>
 </div>
+
+<script>
+  function togglePw(id, btn){
+    const inp = document.getElementById(id);
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    btn.textContent = show ? 'Hide' : 'Show';
+  }
+</script>
 </body>
 </html>
