@@ -159,7 +159,7 @@ def chat():
 
         qnorm = _norm_name(user_q)
 
-        # 1) Try to lock onto a known customer label present in the question
+        # try to lock onto a known label present in the question
         chosen_name = None
         try:
             for it in make_inquiry_targets():
@@ -170,9 +170,7 @@ def chat():
         except Exception as e:
             app.logger.warning(f"scan targets failed: {e}")
 
-        # 2) Fallback: use the raw question (name-first matching inside brief)
         probe = chosen_name or user_q
-
         brief = build_inquiry_brief(probe)
         if not brief:
             return jsonify({
@@ -181,6 +179,18 @@ def chat():
                     "Please include the company name as it appears in your system."
                 )
             })
+
+        # If the rep asked for recent invoices, attach a compact listing
+        want_recent = any(k in qnorm for k in (
+            "recent invoice", "recent invoices", "last invoices", "latest invoices", "most recent invoices"
+        ))
+        recent_block = ""
+        if want_recent and brief.get("recent_invoices"):
+            lines = ["<CONTEXT:RECENT_INVOICES>"]
+            for inv in brief["recent_invoices"]:
+                lines.append(f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f} | {inv.get('Description','')}")
+            lines.append("</CONTEXT:RECENT_INVOICES>")
+            recent_block = "\n".join(lines)
 
         system_prompt = {
             "role": "system",
@@ -193,6 +203,7 @@ def chat():
                 "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why.\n"
                 "4) Next Level — Explain how to move from the current tier (e.g., D3) to the next better tier only (e.g., D2), listing concrete steps and missing offerings.\n"
                 "5) Next Actions — 3 short, specific tasks to do today.\n"
+                "If a <CONTEXT:RECENT_INVOICES> block is present, add a short 'Recent Invoices' section showing what was last touched on.\n"
                 "Be practical. Prefer bullet points."
             )
         }
@@ -200,14 +211,16 @@ def chat():
         messages = [
             system_prompt,
             {"role": "system", "content": brief["context_block"]},
-            {"role": "user",   "content": user_q}
         ]
+        if recent_block:
+            messages.append({"role": "system", "content": recent_block})
+        messages.append({"role": "user", "content": user_q})
 
         try:
             resp = client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                max_tokens=700,
+                max_tokens=900,
                 temperature=0.4
             )
             ai_reply = resp.choices[0].message.content.strip()
@@ -323,6 +336,7 @@ def inquiry_preview():
         "matched_names": list({ _pick_name(r) for r in (rep_rows + bil_rows) })[:5],
         "billing_agg": _aggregate_billing(bil_rows),
         "report_agg": _aggregate_report_r12(rep_rows),
+        "recent_invoices": brief.get("recent_invoices", []),
         "context_block": brief.get("context_block", "")
     })
 

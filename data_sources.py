@@ -1,12 +1,13 @@
 # data_sources.py
 """
-Utilities for Inquiry mode:
-- Robust CSV loading (encodings; keep text; strip header whitespace)
-- Name-first customer matching with normalization (exact → loose → ID)
-- Billing aggregation (what/when/how often + last-365 total)
-- Segmentation & next-step guidance (size A/B/C/D, relationship P/3/2/1)
-- Build a <CONTEXT:INQUIRY> block for the model
-- Debug helpers exposing headers for quick verification
+Inquiry-mode data utilities.
+
+What this module does:
+- Robustly load customer_report.csv and customer_billing.csv (handles encodings).
+- Normalize and match customer names across both files (exact → loose → ID).
+- Aggregate report R12 (with header-variant detection) and billing patterns.
+- Use the segment printed in the report (e.g., 'C2') when present.
+- Provide recent-invoice lists for the UI/AI when the rep asks.
 """
 
 from __future__ import annotations
@@ -32,15 +33,12 @@ CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
 def _norm_name(s: str) -> str:
     if not s:
         return ""
-    # normalize unicode (é -> e), collapse whitespace, lower
     s = unicodedata.normalize("NFKD", str(s))
-    s = s.replace("\u00a0", " ")                 # NBSP → space
+    s = s.replace("\u00a0", " ")
     s = re.sub(r"\s+", " ", s).strip().lower()
-    # keep letters/numbers/&/spaces, expand &
     s = re.sub(r"[^\w\s&]", "", s)
     s = s.replace("&", " and ")
     s = re.sub(r"\s+", " ", s).strip()
-    # drop common company suffixes
     for suf in (" inc", " llc", " co", " corp", " corporation", " company", " ltd", " limited"):
         if s.endswith(suf):
             s = s[: -len(suf)].strip()
@@ -67,17 +65,14 @@ def _read_csv(path: str) -> pd.DataFrame:
                 keep_default_na=False,
                 **opts
             ).fillna("")
-            df.columns = [str(c).strip() for c in df.columns]  # " CUSTOMER " -> "CUSTOMER"
+            df.columns = [str(c).strip() for c in df.columns]
             return df
         except Exception as e:
             last_err = e
-    # final attempt
-    try:
-        df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
-    except Exception:
-        raise RuntimeError(f"Failed to read CSV {path}: {last_err}")
+    # final best-effort
+    df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
 
 # -------------------------------------------------------------------------
 @lru_cache(maxsize=1)
@@ -90,15 +85,13 @@ def load_customer_billing() -> List[Dict]:
 
 # Debug header helpers
 def get_report_headers() -> List[str]:
-    df = _read_csv(CUSTOMER_REPORT_CSV)
-    return [str(c) for c in df.columns]
+    return [str(c) for c in _read_csv(CUSTOMER_REPORT_CSV).columns]
 
 def get_billing_headers() -> List[str]:
-    df = _read_csv(CUSTOMER_BILLING_CSV)
-    return [str(c) for c in df.columns]
+    return [str(c) for c in _read_csv(CUSTOMER_BILLING_CSV).columns]
 
 # -------------------------------------------------------------------------
-# Helpers to pull ID / Name from rows (when present)
+# Helpers to pull ID / Name from rows
 def _pick_id(row: Dict, fallback_index: int) -> str:
     for key in ("Ship to ID", "Sold to ID", "Ship to ID ", "Sold To BP", "Ship to code"):
         val = str(row.get(key, "")).strip()
@@ -111,13 +104,12 @@ def _pick_name(row: Dict) -> str:
         val = str(row.get(key, "")).strip()
         if val:
             return val
-    # last resort: first non-empty value
     for v in row.values():
         if str(v).strip():
             return str(v).strip()
     return "Unnamed"
 
-# For the (now-removed) UI dropdown; kept for completeness
+# For (optional) UI target lists
 def make_inquiry_targets() -> List[Dict]:
     targets: Dict[str, Dict[str, str]] = {}
     combined = load_customer_report() + load_customer_billing()
@@ -135,15 +127,12 @@ def find_customer_id_by_name(name: str) -> Optional[str]:
         return None
     want = _norm_name(name)
     labels = make_inquiry_targets()
-    # exact normalized
     for item in labels:
         if _norm_name(item["label"]) == want:
             return item["id"]
-    # normalized substring
     for item in labels:
         if want and want in _norm_name(item["label"]):
             return item["id"]
-    # fuzzy fallback
     options = [it["label"] for it in labels]
     match = difflib.get_close_matches(name, options, n=1, cutoff=0.6)
     if match:
@@ -154,10 +143,9 @@ def find_customer_id_by_name(name: str) -> Optional[str]:
     return None
 
 # -------------------------------------------------------------------------
-# Name-first row lookup across both files; exact → loose → ID
+# Name-first row lookup across both files; exact → loose → ID fallback
 def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
                                customer_name: Optional[str] = None) -> Dict[str, List[Dict]]:
-    """Prefer exact normalized name matches across BOTH CSVs; if none, try loose matches; finally fallback to ID."""
     want = _norm_name(customer_name or "")
     id_val = (customer_id or "").strip()
 
@@ -174,12 +162,12 @@ def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
     report_hits: List[Dict] = []
     billing_hits: List[Dict] = []
 
-    # 1) EXACT normalized name match
+    # 1) exact normalized name
     if want:
         report_hits = [r for r in rep_all if norm_of(r) == want]
         billing_hits = [r for r in bil_all if norm_of(r) == want]
 
-    # 2) LOOSE match (only if nothing found): substring / token-subset
+    # 2) loose if nothing found: substring / token-subset
     if not report_hits and not billing_hits and want:
         def loose_match(row: Dict) -> bool:
             cand = norm_of(row)
@@ -193,7 +181,7 @@ def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
         report_hits = [r for r in rep_all if loose_match(r)]
         billing_hits = [r for r in bil_all if loose_match(r)]
 
-    # 3) Fallback: ID match (least preferred)
+    # 3) id fallback
     if not report_hits and not billing_hits and id_val:
         for idx, r in enumerate(rep_all):
             if _pick_id(r, idx) == id_val:
@@ -265,11 +253,9 @@ def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
     - Keep Equipment R36 as context only (not counted in R12 total).
     """
     def pick(row: Dict, candidates: List[str]) -> float:
-        # exact key
         for c in candidates:
             if c in row:
                 return _to_float(row.get(c))
-        # case-insensitive / stripped
         lowmap = {str(k).strip().lower(): k for k in row.keys()}
         for c in candidates:
             key = lowmap.get(c.strip().lower())
@@ -281,7 +267,6 @@ def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
     total_r12_aftermarket = 0.0
     saw_aftermarket_total = False
 
-    # Likely header variants
     AM_R12 = [
         "Revenue Rolling 12 Months - Aftermarket",
         "R12 Aftermarket Revenue",
@@ -297,18 +282,15 @@ def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
     USED_R36 = ["Used Equip R36 Revenue", "R36 Used Equipment Revenue", "Used Equipment R36"]
 
     for r in report_rows:
-        # Prefer a single Aftermarket R12 total if present
         am_total = pick(r, AM_R12)
         if am_total:
             saw_aftermarket_total = True
             total_r12_aftermarket += am_total
 
-        # Buckets (Parts/Service/Rental) for display
         buckets["PARTS"]   += pick(r, PARTS_R12)
         buckets["SERVICE"] += pick(r, SERVICE_R12)
         buckets["RENTAL"]  += pick(r, RENTAL_R12)
 
-        # Equipment R36 for context only
         buckets["NEW_EQUIP"]  += pick(r, NEW_R36)
         buckets["USED_EQUIP"] += pick(r, USED_R36)
 
@@ -364,7 +346,7 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
         "offerings_count": offerings_count,
         "top_months": top_months,
         "top_offerings": top_offerings,
-        "total_last_365": last_365_total,   # used to fallback R12
+        "total_last_365": last_365_total,
     }
 
 # -------------------------------------------------------------------------
@@ -395,7 +377,7 @@ def relationship_requirements_for_next(current: str, offerings_count: int) -> Tu
     if not nxt:
         return ("1", 0)
     if current == "P":
-        return ("3", 1)  # first revenue
+        return ("3", 1)
     if current == "3":
         need = max(0, 3 - offerings_count)
         return ("2", max(1, need))
@@ -405,12 +387,13 @@ def relationship_requirements_for_next(current: str, offerings_count: int) -> Tu
     return (nxt, 0)
 
 def next_size_letter(current: str) -> Optional[str]:
+    # Better sizes move toward the left on the grid: D → C → B → A
     order = ["D", "C", "B", "A"]
     try:
         i = order.index(current)
     except ValueError:
         return None
-    return order[i-1] if i > 0 else None
+    return order[i + 1] if i + 1 < len(order) else None
 
 def size_target_revenue(letter: str) -> Optional[int]:
     return {"D": 10_000, "C": 80_000, "B": 200_000}.get(letter)
@@ -460,16 +443,37 @@ def _actions_next_level(size_letter: str, rel_code: str, offerings_count: int, b
     return actions
 
 # -------------------------------------------------------------------------
+# Recent invoices helper
+def recent_invoices(billing_rows: List[Dict], limit: int = 10) -> List[Dict]:
+    records = []
+    for r in billing_rows:
+        d = _to_date(r.get("Date") or r.get("Doc. Date"))
+        if not d:
+            continue
+        records.append({
+            "date": d,
+            "type": (r.get("Type") or r.get("Department") or "").strip(),
+            "amount": _to_float(r.get("REVENUE")),
+            "desc": r.get("Description", "").strip() if r.get("Description") else "",
+            "row": r
+        })
+    records.sort(key=lambda x: x["date"], reverse=True)
+    out = []
+    for it in records[:limit]:
+        out.append({
+            "Date": it["date"].strftime("%Y-%m-%d"),
+            "Type": it["type"],
+            "REVENUE": it["amount"],
+            "Description": it["desc"]
+        })
+    return out
+
+# -------------------------------------------------------------------------
 # Main entry: build inquiry brief (name-first; ID optional)
 def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
-    """
-    Build a context block for Inquiry mode.
-    Prefer name-based matching because billing may not include stable IDs.
-    """
     probe_name = (name_or_id or "").strip()
     rows = find_inquiry_rows_flexible(customer_id=None, customer_name=probe_name)
 
-    # If nothing by name and user passed something else, try that as an ID
     if not rows["report"] and not rows["billing"]:
         cid_guess = (name_or_id or "").strip()
         if cid_guess:
@@ -497,23 +501,36 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         if display_id:
             break
 
+    # ── Pull SEGMENT from report if it exists (e.g., 'C2') ───────────────
+    seg_from_report = None
+    for r in report_rows:
+        for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
+            val = str(r.get(key, "")).strip()
+            if val:
+                seg_from_report = val.upper().replace(" ", "")
+                break
+        if seg_from_report:
+            break
+
     # Aggregations
     rep = _aggregate_report_r12(report_rows)
     bil = _aggregate_billing(billing_rows)
 
-    # Use both CSVs to decide Size:
-    # 1) prefer report's true R12 (aftermarket)
-    # 2) else fallback to billing last-365
-    total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
-
-    size_letter = classify_account_size(total_r12_for_size)
-    had_rev = (total_r12_for_size > 0) or any(v > 0 for v in bil["by_dept"].values())
-    rel_code = classify_relationship(bil["offerings_count"], had_rev)
+    # If report says "C2", honor it exactly; else compute from data
+    if seg_from_report and len(seg_from_report) == 2 and seg_from_report[0] in "ABCD":
+        size_letter = seg_from_report[0]
+        rel_code    = seg_from_report[1]
+        total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
+    else:
+        total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
+        size_letter = classify_account_size(total_r12_for_size)
+        had_rev     = (total_r12_for_size > 0) or any(v > 0 for v in bil["by_dept"].values())
+        rel_code    = classify_relationship(bil["offerings_count"], had_rev)
 
     visit_focus = _recommend_focus(bil["by_dept"], bil["last_invoice"])
     next_level_actions = _actions_next_level(size_letter, rel_code, bil["offerings_count"], bil["by_dept"])
 
-    # Build context
+    # Build context block for the AI
     lines: List[str] = []
     lines.append("<CONTEXT:INQUIRY>")
     lines.append(f"Customer: {disp_name} (ID: {display_id})")
@@ -532,15 +549,12 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         lines.append("Top Months: " + ", ".join([f"{m} ${v:,.0f}" for m, v in bil["top_months"]]))
     if bil["top_offerings"]:
         lines.append("Top Offerings: " + ", ".join([f"{NICE.get(k, k)} ${v:,.0f}" for k, v in bil["top_offerings"]]))
-    if visit_focus:
-        lines.append("Visit Focus Suggestions: " + " | ".join(visit_focus))
-    if next_level_actions:
-        lines.append("Next-Level Actions: " + " | ".join(next_level_actions))
     lines.append("</CONTEXT:INQUIRY>")
 
     return {
         "context_block": "\n".join(lines),
         "size_letter": size_letter,
         "relationship_code": rel_code,
-        "inferred_name": disp_name
+        "inferred_name": disp_name,
+        "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
     }
