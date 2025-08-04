@@ -160,10 +160,17 @@ def chat():
     # ───────────── INQUIRY MODE ─────────────
     if mode == "inquiry":
         from data_sources import build_inquiry_brief, find_customer_id_by_name
+        # Try to resolve a customer from the question; fall back to the raw text
         probe = find_customer_id_by_name(user_q) or user_q
         brief = build_inquiry_brief(probe)
+
         if not brief:
-            return jsonify({"response": "I couldn’t locate that customer in the report/billing data. Please include the company name as it appears in your system."})
+            return jsonify({
+                "response": (
+                    "I couldn’t locate that customer in the report/billing data. "
+                    "Please include the company name as it appears in your system."
+                )
+            })
 
         system_prompt = {
             "role": "system",
@@ -198,6 +205,7 @@ def chat():
 
         tag = f"[Segmentation: {brief['size_letter']}{brief['relationship_code']}]"
         return jsonify({"response": f"{tag}\n\n{ai_reply}"})
+
 
     # ───────── RECOMMENDATION MODE (existing flow) ─────────
     acct = find_account_by_name(user_q)
@@ -234,7 +242,7 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # Token guard (approx safe for gpt-4-8k)
+    # Optional token guard (safe for gpt-4-8k)
     enc = tiktoken.encoding_for_model("gpt-4")
     while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
         messages.pop(1)

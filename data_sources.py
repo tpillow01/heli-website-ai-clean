@@ -29,7 +29,7 @@ CUSTOMER_REPORT_CSV  = os.getenv("CUSTOMER_REPORT_CSV",  "customer_report.csv")
 CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
 
 # -------------------------------------------------------------------------
-# data_sources.py
+# Robust CSV reader (now strips header whitespace)
 def _read_csv(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -42,19 +42,23 @@ def _read_csv(path: str) -> pd.DataFrame:
     last_err = None
     for opts in attempts:
         try:
-            return pd.read_csv(
+            df = pd.read_csv(
                 path,
                 low_memory=False,
-                dtype=str,              # keep IDs/text as-is
-                keep_default_na=False,  # no NaN coercion
-                **opts                  # <-- pass encoding + encoding_errors
+                dtype=str,             # keep IDs and numerics as text
+                keep_default_na=False, # keep blanks as ""
+                **opts                  # pass encoding + encoding_errors
             ).fillna("")
+            # Normalize headers like " CUSTOMER "
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
         except Exception as e:
             last_err = e
             continue
-    # last resort
     try:
-        return pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
+        df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
     except Exception:
         raise RuntimeError(f"Failed to read CSV {path}: {last_err}")
 
@@ -202,7 +206,7 @@ OFFERING_KEYS = ["SERVICE", "PARTS", "RENTAL", "NEW_EQUIP", "USED_EQUIP"]
 NICE = {"SERVICE":"Service", "PARTS":"Parts", "RENTAL":"Rental", "NEW_EQUIP":"New Equipment", "USED_EQUIP":"Used Equipment"}
 
 # -------------------------------------------------------------------------
-# Aggregations
+# Aggregations (now prefer Date/Type; fallback to legacy columns)
 def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
     buckets = {
         "NEW_EQUIP": 0.0,
@@ -227,10 +231,12 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
     invoices = 0
     last_invoice = None
     for r in billing_rows:
-        dep = normalize_department(r.get("Department"))
+        # NEW: prefer new headers
+        dep = normalize_department(r.get("Type") or r.get("Department"))
         amt = _to_float(r.get("REVENUE"))
         by_dept[dep] += amt
-        d = _to_date(r.get("Doc. Date"))
+
+        d = _to_date(r.get("Date") or r.get("Doc. Date"))
         if d:
             dates.append(d)
             by_month[f"{d.year:04d}-{d.month:02d}"] += amt
@@ -279,7 +285,7 @@ def classify_relationship(offerings_count: int, had_revenue: bool) -> str:
     if offerings_count == 3:
         return "2"
     if offerings_count == 2:
-        return "2"   # closest to tier 2 per your grid intent
+        return "2"   # closest to tier 2
     return "3"       # 0–1 offering
 
 def next_relationship(current: str) -> Optional[str]:
