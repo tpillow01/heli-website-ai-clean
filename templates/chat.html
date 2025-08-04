@@ -11,17 +11,33 @@
   <meta name="theme-color" content="#cc0000">
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('{{ url_for("static", filename="service-worker.js") }}')
-        .then(reg => console.log("✅ Service Worker registered", reg))
-        .catch(err => console.error("❌ SW registration failed:", err));
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('✅ Service Worker registered:', reg.scope))
+          .catch(err => console.error('❌ SW registration failed:', err));
+      });
     }
   </script>
 
-  <!-- minimal inline styles for the new toolbar (optional) -->
+  <!-- Minimal toolbar styles to match your dark/red theme -->
   <style>
-    .toolbar{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px}
-    .toolbar label{color:#ccc;font-size:.9rem;display:flex;flex-direction:column}
-    .toolbar select{background:#111;color:#eee;border:1px solid #333;border-radius:6px;padding:6px 8px}
+    .toolbar{
+      display:flex; gap:12px; flex-wrap:wrap;
+      margin: 8px 0 12px;
+      padding: 8px 12px;               /* space from container edges */
+      background:#0b0b0b;              /* dark to match site */
+      border:1px solid #222;           /* subtle frame */
+      border-radius:10px;
+      box-shadow: 0 0 0 1px #000 inset;/* subtle inner depth */
+    }
+    .toolbar label{
+      color:#ccc; font-size:.9rem; display:flex; flex-direction:column;
+    }
+    .toolbar select{
+      background:#111; color:#eee; border:1px solid #333; border-radius:8px; padding:6px 8px;
+      outline:none;
+    }
+    .toolbar select:focus{ border-color:#cc0000; box-shadow:0 0 0 2px rgba(204,0,0,.25); }
   </style>
 </head>
 <body>
@@ -37,15 +53,11 @@
       </div>
     </div>
 
-    <!-- ▼ NEW: Mode/Target toolbar -->
+    <!-- Mode toolbar (Target removed) -->
     <div class="toolbar">
       <label>
         Mode
         <select id="modeSelect"></select>
-      </label>
-      <label>
-        Target
-        <select id="targetSelect"></select>
       </label>
     </div>
 
@@ -83,7 +95,7 @@
     const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
     let animationInterval, isForward = true;
 
-    // --- Dropdown data loaders ---
+    // --- Load modes for the dropdown (Target removed) ---
     async function loadModes() {
       try {
         const res = await fetch('/api/modes');
@@ -95,23 +107,7 @@
       }
     }
 
-    async function loadTargets() {
-      try {
-        const mode = document.getElementById('modeSelect').value || 'recommendation';
-        const res = await fetch(`/api/targets?mode=${encodeURIComponent(mode)}`);
-        const items = await res.json();
-        const sel = document.getElementById('targetSelect');
-        sel.innerHTML = items.map(i => `<option value="${i.id}">${i.label}</option>`).join('');
-      } catch (e) {
-        console.error('Failed to load targets', e);
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', async () => {
-      await loadModes();
-      await loadTargets();
-      document.getElementById('modeSelect').addEventListener('change', loadTargets);
-    });
+    document.addEventListener('DOMContentLoaded', loadModes);
 
     // --- UI helpers (existing) ---
     function formatLabels(text) {
@@ -151,14 +147,13 @@
       forkliftAnim.style.display = 'none';
     }
 
-    // --- Send handler (still posts to /api/chat, now includes mode + target_id) ---
+    // --- Send handler: includes mode only (no target_id) ---
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const q = input.value.trim();
       if (!q) return;
 
       const mode = (document.getElementById('modeSelect')?.value) || 'recommendation';
-      const target_id = (document.getElementById('targetSelect')?.value) || '';
 
       renderBubble(q, 'user');
       input.value = '';
@@ -168,7 +163,7 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q, mode, target_id })
+          body: JSON.stringify({ question: q, mode })
         });
         if (res.ok) {
           const { response } = await res.json();

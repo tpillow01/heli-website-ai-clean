@@ -299,3 +299,41 @@ body {
 }
 .auth-footer a{ color:#fff; text-decoration:underline; }
 
+/* Mode toolbar */
+.toolbar{
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px;              /* space from chat-container edges */
+  padding: 8px 12px;         /* inner padding */
+  background: #18191b;       /* matches site tones */
+  border: 1px solid #3e3f41; /* subtle frame like header/input bar */
+  border-radius: 8px;
+}
+
+.toolbar label{
+  color: #ccc;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar select{
+  background: #2e2f33;
+  color: #e4e6eb;
+  border: 1px solid #3e3f41;
+  border-radius: 8px;
+  padding: 6px 10px;
+  outline: none;
+}
+
+.toolbar select:focus{
+  border-color: #ff4c4c;
+  box-shadow: 0 0 0 2px rgba(255, 76, 76, 0.25);
+}
+
+/* Slightly scale for larger screens */
+@media (min-width: 768px){
+  .toolbar{ margin: 16px 16px 12px; padding: 10px 14px; }
+  .toolbar label{ font-size: 1rem; }
+}
