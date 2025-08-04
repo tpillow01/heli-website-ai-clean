@@ -347,8 +347,14 @@ def map_page():
 @app.route("/api/locations")
 @login_required
 def api_locations():
-    from data_sources import get_locations_with_geo
+    from data_sources import get_locations_with_geo, load_customer_report
     items = get_locations_with_geo()
+    if request.args.get("debug") == "1":
+        return jsonify({
+            "pins": len(items),
+            "example": items[:3],
+            "report_rows": len(load_customer_report()),
+        })
     return jsonify(items)
 
 @app.route('/service-worker.js')

@@ -674,33 +674,34 @@ def _locations_lookup_from_csv() -> Dict[str, Dict[str, Tuple[float, float]]]:
 
 def _unique_locations_from_report() -> List[Dict]:
     """
-    One row per unique physical address from customer_report.csv.
+    One row per unique customer entry from customer_report.csv.
+    If street address is missing, still keep an entry to allow name-based matching.
     """
     seen = set()
     uniq: List[Dict] = []
     for r in load_customer_report():
-        full = _build_full_address(r)
-        if not full:
-            continue
-        key = _addr_key(full)
+        label = _pick_name(r)
+        full = _build_full_address(r)  # may be empty if address is missing
+        # Use name as the dedupe key if we don't have a full address
+        key = _addr_key(full) if full else f"name::{_norm_name(label)}"
         if key in seen:
             continue
         seen.add(key)
         uniq.append({
-            "full_address": full,
-            "label": _pick_name(r),            # name for popup
-            "sales_rep": _sales_rep_of(r),     # used for color
-            "row": r,                           # keep raw row for inline lat/lon
+            "full_address": full or "",       # can be empty
+            "label": label,
+            "sales_rep": _sales_rep_of(r),
+            "row": r,
         })
     return uniq
 
 def get_locations_with_geo() -> List[Dict]:
     """
     Returns a list of dicts with: label, sales_rep, lat, lon, full_address.
-    Resolution order:
-      1) Lat/Lon present on the report row
-      2) Match full address in customer_location.csv
-      3) Match Account Name in customer_location.csv
+    Resolution order (more reliable first):
+      1) Account Name match in customer_location.csv
+      2) Lat/Lon present on the report row
+      3) Match full address in customer_location.csv
     """
     uniq = _unique_locations_from_report()
     lookups = _locations_lookup_from_csv()
@@ -711,20 +712,21 @@ def get_locations_with_geo() -> List[Dict]:
     for item in uniq:
         r = item["row"]
 
-        # 1) Inline lat/lon in report
-        latlon = _extract_latlon_from_row(r)
+        # 1) Match by account name
+        latlon = None
+        nkey = _norm_name(item["label"])
+        if nkey in by_name:
+            latlon = by_name[nkey]
 
-        # 2) Lookup by full address in locations file
+        # 2) If not found, use inline lat/lon from the report row
+        if not latlon:
+            latlon = _extract_latlon_from_row(r)
+
+        # 3) If still not found, match by full address
         if not latlon:
             key = _addr_key(item["full_address"])
             if key in by_addr:
                 latlon = by_addr[key]
-
-        # 3) Lookup by account name in locations file
-        if not latlon:
-            nkey = _norm_name(item["label"])
-            if nkey in by_name:
-                latlon = by_name[nkey]
 
         if not latlon:
             continue  # skip if still no coordinates
