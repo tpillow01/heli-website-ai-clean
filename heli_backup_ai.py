@@ -1,6 +1,7 @@
 # heli_backup_ai.py  — main web service (with signup/login)
 import os
 import json
+from data_sources import make_inquiry_targets
 import difflib
 import sqlite3
 from datetime import timedelta
@@ -221,6 +222,42 @@ def chat():
         ai_reply = f"❌ Internal error: {e}"
 
     return jsonify({"response": ai_reply})
+
+@app.route("/api/modes")
+def api_modes():
+    return jsonify([
+        {"id": "recommendation", "label": "Forklift Recommendation"},
+        {"id": "inquiry",        "label": "Customer Inquiry"}
+    ])
+
+@app.route("/api/targets")
+def api_targets():
+    """
+    Returns dropdown choices based on mode:
+      - ?mode=inquiry          -> customers built from the two CSVs
+      - ?mode=recommendation   -> accounts from accounts.json
+      - default (missing mode) -> recommendation
+    """
+    mode = (request.args.get("mode") or "recommendation").lower()
+
+    if mode == "inquiry":
+        return jsonify(make_inquiry_targets())
+
+    # recommendation: read accounts.json and expose minimal fields
+    try:
+        with open("accounts.json", "r", encoding="utf-8") as f:
+            accounts = json.load(f)
+    except Exception:
+        accounts = []
+
+    items = []
+    for i, a in enumerate(accounts):
+        label = a.get("name") or a.get("company") or f"Account {i+1}"
+        _id   = str(a.get("id", label))
+        items.append({"id": _id, "label": label})
+
+    return jsonify(items)
+
 
 # ─── Run locally (Render sets PORT env on deploy) ────────────────────────
 if __name__ == "__main__":
