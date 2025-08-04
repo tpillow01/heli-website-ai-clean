@@ -105,7 +105,7 @@ def home():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == "POST":
+    if request.method == "POST":   # <-- no trailing parenthesis here
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
         user = find_user_by_email(email)
@@ -115,11 +115,12 @@ def login():
         session["user_id"] = user["id"]
         session["email"] = user["email"]
         return redirect(request.args.get("next") or url_for("home"))
+    # GET
     return render_template("login.html")
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
-    if request.method == "POST"):
+    if request.method == "POST":   # <-- no trailing parenthesis here
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
         confirm = request.form.get("confirm") or ""
@@ -137,6 +138,7 @@ def signup():
         session["user_id"] = user["id"]
         session["email"] = user["email"]
         return redirect(url_for("home"))
+    # GET
     return render_template("signup.html")
 
 @app.route("/logout")
