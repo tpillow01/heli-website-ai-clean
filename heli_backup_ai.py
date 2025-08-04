@@ -1,12 +1,12 @@
 # heli_backup_ai.py  — main web service (with signup/login)
 import os
 import json
-from data_sources import make_inquiry_targets
+from data_sources import make_inquiry_targets, find_inquiry_rows
 import difflib
 import sqlite3
 from datetime import timedelta
-
 import tiktoken
+
 from flask import (
     Flask, render_template, request, jsonify, Response,
     redirect, url_for, session
@@ -68,7 +68,7 @@ def create_user(email: str, password: str):
     conn.commit()
     conn.close()
 
-# ─── Auth decorator (session‑based) ──────────────────────────────────────
+# ─── Auth decorator (session-based) ──────────────────────────────────────
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -91,13 +91,14 @@ def find_account_by_name(text: str):
     low = text.lower()
     # 1) direct substring
     for acct in account_data:
-        if acct["Account Name"].lower() in low:
+        name = str(acct.get("Account Name", "")).lower()
+        if name and name in low:
             return acct
     # 2) fuzzy fallback
-    names = [a["Account Name"] for a in account_data]
+    names = [a.get("Account Name", "") for a in account_data if a.get("Account Name")]
     match = difflib.get_close_matches(text, names, n=1, cutoff=0.7)
     if match:
-        return next(a for a in account_data if a["Account Name"] == match[0])
+        return next(a for a in account_data if a.get("Account Name") == match[0])
     return None
 
 # ─── Web routes (login/signup + app) ─────────────────────────────────────
@@ -114,14 +115,11 @@ def login():
         password = request.form.get("password") or ""
         user = find_user_by_email(email)
         if not user or not check_password_hash(user["password_hash"], password):
-            # Re-render with a simple error; reuse your template styling
             return render_template("login.html", error="Invalid email or password.", email=email), 401
-        # success
         session.permanent = True
         session["user_id"] = user["id"]
         session["email"] = user["email"]
         return redirect(request.args.get("next") or url_for("home"))
-    # GET
     return render_template("login.html")
 
 @app.route("/signup", methods=["GET", "POST"])
@@ -140,12 +138,10 @@ def signup():
             create_user(email, password)
         except Exception as e:
             return render_template("signup.html", error=f"Could not create user: {e}", email=email), 500
-        # auto-login after signup
         user = find_user_by_email(email)
         session["user_id"] = user["id"]
         session["email"] = user["email"]
         return redirect(url_for("home"))
-    # GET
     return render_template("signup.html")
 
 @app.route("/logout")
@@ -153,19 +149,33 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ─── Chat API (protect this too) ────────────────────────────────────────
+# ─── Chat API (now accepts mode/target_id; behavior unchanged) ───────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
     data = request.get_json() or {}
-    user_q = data.get("question", "").strip()
+    user_q   = (data.get("question")  or "").strip()
+    mode     = (data.get("mode")      or "recommendation").lower()
+    target_id= (data.get("target_id") or "").strip()
+
     if not user_q:
         return jsonify({"response": "Please enter a description of the customer’s needs."}), 400
 
-    # Look for a customer in the question
+    # Debug log (optional)
+    app.logger.info(f"/api/chat mode={mode} target_id={target_id} qlen={len(user_q)}")
+
+    # If inquiry mode, we can prefetch related rows now (not used yet)
+    inquiry_rows = {"report": [], "billing": []}
+    if mode == "inquiry" and target_id:
+        try:
+            inquiry_rows = find_inquiry_rows(target_id)
+        except Exception as e:
+            app.logger.warning(f"find_inquiry_rows failed: {e}")
+
+    # Existing behavior: try to match an account name from the question
     acct = find_account_by_name(user_q)
 
-    # Build Customer‑profile markup if we matched one
+    # Build Customer-profile markup if we matched one
     context_input = user_q
     if acct:
         profile_ctx = (
@@ -186,14 +196,14 @@ def chat():
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "When providing customer‑specific data, wrap it in a "
+            "When providing customer-specific data, wrap it in a "
             "<span class=\"section-label\">Customer Profile:</span> section.\n"
             "When recommending models, wrap section headers in a "
             "<span class=\"section-label\">...</span> tag.\n"
             "Use these sections in order if present:\n"
             "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
             "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
-            "List details underneath using hyphens and indent sub‑points for clarity.\n\n"
+            "List details underneath using hyphens and indent sub-points for clarity.\n\n"
             "Only cite forklift **Model** codes exactly as they appear in the data "
             "(e.g. CPD25, CQD16). Never use only the Series name.\n\n"
             "At the end, include:\n"
@@ -204,7 +214,7 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # ── Token‑limit guard (7000 ≈ safe for gpt‑4‑8k) ─────────────────────
+    # ── Token-limit guard (7000 ≈ safe for gpt-4-8k) ─────────────────────
     enc = tiktoken.encoding_for_model("gpt-4")
     while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
         messages.pop(1)
@@ -223,6 +233,7 @@ def chat():
 
     return jsonify({"response": ai_reply})
 
+# ─── Data for dropdowns ─────────────────────────────────────────────────
 @app.route("/api/modes")
 def api_modes():
     return jsonify([
@@ -243,21 +254,19 @@ def api_targets():
     if mode == "inquiry":
         return jsonify(make_inquiry_targets())
 
-    # recommendation: read accounts.json and expose minimal fields
-    try:
-        with open("accounts.json", "r", encoding="utf-8") as f:
-            accounts = json.load(f)
-    except Exception:
-        accounts = []
-
+    # recommendation: use already-loaded account_data, label from "Account Name"
     items = []
-    for i, a in enumerate(accounts):
-        label = a.get("name") or a.get("company") or f"Account {i+1}"
-        _id   = str(a.get("id", label))
+    for i, a in enumerate(account_data):
+        label = a.get("Account Name") or f"Account {i+1}"
+        _id   = str(a.get("Account Name", label))  # use name as id if no explicit id
         items.append({"id": _id, "label": label})
 
     return jsonify(items)
 
+# ─── Service worker at site root (so scope is '/') ───────────────────────
+@app.route('/service-worker.js')
+def service_worker():
+    return app.send_static_file('service-worker.js')
 
 # ─── Run locally (Render sets PORT env on deploy) ────────────────────────
 if __name__ == "__main__":
