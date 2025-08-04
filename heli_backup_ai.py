@@ -352,9 +352,7 @@ def api_locations():
         items = get_locations_with_geo()
         return jsonify(items)
     except Exception as e:
-        # Log full stacktrace to Render logs
-        app.logger.exception("api_locations failed")
-        # Return JSON error so the client can display it
+        app.logger.exception("/api/locations failed")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/service-worker.js')

@@ -947,6 +947,7 @@ def get_locations_with_geo() -> List[Dict]:
     Returns pins with:
       label, sales_rep, lat, lon, full_address, state, county, zip,
       size_letter (A/B/C/D), segment (e.g., 'B2' if present), total_r12.
+    Any bad row is skipped (logged), so the API never 500s due to a single record.
     """
     uniq = _unique_locations_from_report()
     lookups = _locations_lookup_from_csv()
@@ -957,42 +958,64 @@ def get_locations_with_geo() -> List[Dict]:
     name_idx = _name_aggregate_index()
 
     out: List[Dict] = []
+    skipped = 0
+
     for item in uniq:
-        nkey = _norm_name(item["label"])
-        if not nkey:
-            continue
+        try:
+            nkey = _norm_name(item.get("label"))
+            if not nkey:
+                skipped += 1
+                continue
 
-        r = item["row"]
-        # Coordinates resolution (name → inline → full address)
-        latlon = by_name.get(nkey) or _extract_latlon_from_row(r)
-        if not latlon and item["full_address"]:
-            latlon = by_addr.get(_addr_key(item["full_address"]))
-        if not latlon:
-            continue
+            r = item.get("row", {})
+            # Coordinates resolution (name → inline → full address)
+            latlon = by_name.get(nkey) or _extract_latlon_from_row(r)
+            if not latlon and item.get("full_address"):
+                latlon = by_addr.get(_addr_key(item["full_address"]))
+            if not latlon:
+                skipped += 1
+                continue
+            lat, lon = float(latlon[0]), float(latlon[1])
 
-        # business rollup (precomputed)
-        agg = name_idx.get(nkey, {"total_r12_for_size": 0.0, "size_letter": "C"})
-        total_r12 = float(agg["total_r12_for_size"] or 0.0)
-        size_letter = agg["size_letter"]
+            # business rollup (precomputed)
+            agg = name_idx.get(nkey, {"total_r12_for_size": 0.0, "size_letter": "C"})
+            total_r12 = float(agg.get("total_r12_for_size") or 0.0)
+            size_letter = agg.get("size_letter") or "C"
 
-        # segment from report rows for same normalized name
-        report_rows_same = rep_by_norm.get(nkey, [])
-        seg = _segment_from_report_rows(report_rows_same)
+            # segment from report rows for same normalized name
+            report_rows_same = rep_by_norm.get(nkey, [])
+            seg = _segment_from_report_rows(report_rows_same)
 
-        st, county, zc = _state_county_zip_from_row(r)
-        lat, lon = latlon
+            st, county, zc = _state_county_zip_from_row(r)
 
-        out.append({
-            "label": item["label"],
-            "sales_rep": item["sales_rep"],
-            "lat": float(lat),
-            "lon": float(lon),
-            "full_address": item["full_address"],
-            "state": st or "",
-            "county": county or "",
-            "zip": zc or "",
-            "size_letter": size_letter,
-            "segment": seg,
-            "total_r12": round(total_r12, 2),
-        })
+            out.append({
+                "label": item.get("label") or "Unnamed",
+                "sales_rep": item.get("sales_rep") or "Unassigned",
+                "lat": lat,
+                "lon": lon,
+                "full_address": item.get("full_address") or "",
+                "state": st or "",
+                "county": county or "",
+                "zip": zc or "",
+                "size_letter": size_letter,
+                "segment": seg,
+                "total_r12": round(total_r12, 2),
+            })
+        except Exception as row_err:
+            # Best-effort logging; don’t crash the whole endpoint
+            try:
+                import logging
+                logging.getLogger(__name__).warning("Skipped bad location row: %s", row_err)
+            except Exception:
+                pass
+            skipped += 1
+
+    # Optional: log summary count to server logs
+    try:
+        import logging
+        logging.getLogger(__name__).info("Locations built: %d (skipped %d)", len(out), skipped)
+    except Exception:
+        pass
+
     return out
+

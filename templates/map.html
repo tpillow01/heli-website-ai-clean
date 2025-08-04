@@ -219,16 +219,16 @@
 
     // Load points
   // ...
-  fetch('{{ url_for("api_locations") }}')
+   fetch('{{ url_for("api_locations") }}')
     .then(async (r) => {
       if (!r.ok) {
-        // Try to read JSON error; fall back to text
+        const rc = r.clone(); // clone before consuming body
         let msg = `HTTP ${r.status}`;
         try {
-          const body = await r.json();
+          const body = await rc.json();
           if (body && body.error) msg += ` — ${body.error}`;
         } catch {
-          const text = await r.text();
+          const text = await r.text(); // safe now because we cloned
           msg += ` — ${text.slice(0, 300)}`;
         }
         throw new Error(msg);
@@ -245,6 +245,7 @@
       console.error(err);
       alert('Could not load locations:\n' + err.message);
     });
+  // ...
 
     // Events
     repFilter.addEventListener('change', render);
