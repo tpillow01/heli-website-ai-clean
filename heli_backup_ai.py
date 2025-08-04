@@ -184,18 +184,18 @@ def chat():
 
         system_prompt = {
             "role": "system",
-             "content": (
-                    "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
-                    f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
-                    "Output a concise, organized brief for a sales rep arriving on-site. Use these sections:\n"
-                    "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (P/3/2/1) and what each means.\n"
-                    "2) Current Pattern — When they spend (top months), what they buy (top offerings), and frequency.\n"
-                    "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why.\n"
-                    "4) Next Level — Explain how to move from the current tier (e.g., D3) to the next better tier only (e.g., D2), listing concrete steps and missing offerings.\n"
-                    "5) Next Actions — 3 short, specific tasks to do today.\n"
-                    "Be practical. Prefer bullet points."
-    )
-}
+            "content": (
+                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
+                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
+                "Output a concise, organized brief for a sales rep arriving on-site. Use these sections:\n"
+                "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (P/3/2/1) and what each means.\n"
+                "2) Current Pattern — When they spend (top months), what they buy (top offerings), and frequency.\n"
+                "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why.\n"
+                "4) Next Level — Explain how to move from the current tier (e.g., D3) to the next better tier only (e.g., D2), listing concrete steps and missing offerings.\n"
+                "5) Next Actions — 3 short, specific tasks to do today.\n"
+                "Be practical. Prefer bullet points."
+            )
+        }
 
         messages = [
             system_prompt,
@@ -301,21 +301,29 @@ def api_targets():
 def inquiry_preview():
     from data_sources import (
         build_inquiry_brief, find_inquiry_rows_flexible,
-        _aggregate_billing, _aggregate_report_r12
+        _aggregate_billing, _aggregate_report_r12,
+        get_report_headers, get_billing_headers, _pick_name
     )
     q = (request.args.get("q") or "").strip()
     if not q:
         return jsonify({"error": "pass ?q=Customer Name"}), 400
-    brief = build_inquiry_brief(q)
-    if not brief:
-        return jsonify({"error": "not found"}), 404
+
     rows = find_inquiry_rows_flexible(customer_name=q)
+    rep_rows = rows["report"]
+    bil_rows = rows["billing"]
+    if not rep_rows and not bil_rows:
+        return jsonify({"error": "not found"}), 404
+
+    brief = build_inquiry_brief(q) or {}
     return jsonify({
-        "name": brief["inferred_name"],
-        "counts": {"report": len(rows["report"]), "billing": len(rows["billing"])},
-        "billing_agg": _aggregate_billing(rows["billing"]),
-        "report_agg": _aggregate_report_r12(rows["report"]),
-        "context_block": brief["context_block"]
+        "name": brief.get("inferred_name"),
+        "counts": {"report": len(rep_rows), "billing": len(bil_rows)},
+        "report_headers": get_report_headers(),
+        "billing_headers": get_billing_headers(),
+        "matched_names": list({ _pick_name(r) for r in (rep_rows + bil_rows) })[:5],
+        "billing_agg": _aggregate_billing(bil_rows),
+        "report_agg": _aggregate_report_r12(rep_rows),
+        "context_block": brief.get("context_block", "")
     })
 
 @app.route('/service-worker.js')

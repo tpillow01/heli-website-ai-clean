@@ -2,16 +2,18 @@
 """
 Utilities for Inquiry mode:
 - Robust CSV loading (encodings; keep text; strip header whitespace)
-- Name-first customer matching with normalization
-- Billing aggregation (what/when/how often)
+- Name-first customer matching with normalization (exact → loose → ID)
+- Billing aggregation (what/when/how often + last-365 total)
 - Segmentation & next-step guidance (size A/B/C/D, relationship P/3/2/1)
 - Build a <CONTEXT:INQUIRY> block for the model
+- Debug helpers exposing headers for quick verification
 """
 
 from __future__ import annotations
 
 import os
 import re
+import unicodedata
 import difflib
 from functools import lru_cache
 from datetime import datetime
@@ -30,13 +32,16 @@ CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
 def _norm_name(s: str) -> str:
     if not s:
         return ""
-    s = str(s).strip().lower()
-    s = re.sub(r"\s+", " ", s)              # collapse whitespace
-    s = re.sub(r"[^\w\s&]", "", s)          # remove punctuation (keep &)
+    # normalize unicode (é -> e), collapse whitespace, lower
+    s = unicodedata.normalize("NFKD", str(s))
+    s = s.replace("\u00a0", " ")                 # NBSP → space
+    s = re.sub(r"\s+", " ", s).strip().lower()
+    # keep letters/numbers/&/spaces, expand &
+    s = re.sub(r"[^\w\s&]", "", s)
     s = s.replace("&", " and ")
     s = re.sub(r"\s+", " ", s).strip()
-    # drop common suffixes
-    for suf in [" inc", " llc", " co", " corp", " corporation", " company", " ltd", " limited"]:
+    # drop common company suffixes
+    for suf in (" inc", " llc", " co", " corp", " corporation", " company", " ltd", " limited"):
         if s.endswith(suf):
             s = s[: -len(suf)].strip()
     return s
@@ -66,7 +71,7 @@ def _read_csv(path: str) -> pd.DataFrame:
             return df
         except Exception as e:
             last_err = e
-    # final attempt (lets pandas choose)
+    # final attempt
     try:
         df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
         df.columns = [str(c).strip() for c in df.columns]
@@ -82,6 +87,15 @@ def load_customer_report() -> List[Dict]:
 @lru_cache(maxsize=1)
 def load_customer_billing() -> List[Dict]:
     return _read_csv(CUSTOMER_BILLING_CSV).to_dict(orient="records")
+
+# Debug header helpers
+def get_report_headers() -> List[str]:
+    df = _read_csv(CUSTOMER_REPORT_CSV)
+    return [str(c) for c in df.columns]
+
+def get_billing_headers() -> List[str]:
+    df = _read_csv(CUSTOMER_BILLING_CSV)
+    return [str(c) for c in df.columns]
 
 # -------------------------------------------------------------------------
 # Helpers to pull ID / Name from rows (when present)
@@ -103,7 +117,7 @@ def _pick_name(row: Dict) -> str:
             return str(v).strip()
     return "Unnamed"
 
-# For the now-removed UI dropdown; kept for completeness
+# For the (now-removed) UI dropdown; kept for completeness
 def make_inquiry_targets() -> List[Dict]:
     targets: Dict[str, Dict[str, str]] = {}
     combined = load_customer_report() + load_customer_billing()
@@ -140,10 +154,10 @@ def find_customer_id_by_name(name: str) -> Optional[str]:
     return None
 
 # -------------------------------------------------------------------------
-# Name-first row lookup across both files; fallback to ID
+# Name-first row lookup across both files; exact → loose → ID
 def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
                                customer_name: Optional[str] = None) -> Dict[str, List[Dict]]:
-    """Prefer exact normalized name matches across BOTH CSVs; only if none, try looser matches; finally fallback to ID."""
+    """Prefer exact normalized name matches across BOTH CSVs; if none, try loose matches; finally fallback to ID."""
     want = _norm_name(customer_name or "")
     id_val = (customer_id or "").strip()
 
@@ -246,40 +260,61 @@ NICE = {
 def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
     """
     Build an R12 view from the customer_report.csv:
-    - Prefer 'Revenue Rolling 12 Months - Aftermarket' if present.
-    - Otherwise sum Parts/Service/Rental R12.
-    - Keep buckets for reporting; New/Used R36 kept separate (not in R12 total).
+    - Prefer a precomputed Aftermarket R12 total if present (common variants).
+    - Otherwise sum Parts/Service/Rental R12 (common header variants).
+    - Keep Equipment R36 as context only (not counted in R12 total).
     """
-    # Buckets we display
-    buckets = {"SERVICE": 0.0, "PARTS": 0.0, "RENTAL": 0.0, "NEW_EQUIP": 0.0, "USED_EQUIP": 0.0}
+    def pick(row: Dict, candidates: List[str]) -> float:
+        # exact key
+        for c in candidates:
+            if c in row:
+                return _to_float(row.get(c))
+        # case-insensitive / stripped
+        lowmap = {str(k).strip().lower(): k for k in row.keys()}
+        for c in candidates:
+            key = lowmap.get(c.strip().lower())
+            if key:
+                return _to_float(row.get(key))
+        return 0.0
 
+    buckets = {"SERVICE": 0.0, "PARTS": 0.0, "RENTAL": 0.0, "NEW_EQUIP": 0.0, "USED_EQUIP": 0.0}
     total_r12_aftermarket = 0.0
-    seen_aftermarket_col = False
+    saw_aftermarket_total = False
+
+    # Likely header variants
+    AM_R12 = [
+        "Revenue Rolling 12 Months - Aftermarket",
+        "R12 Aftermarket Revenue",
+        "Aftermarket R12 Revenue",
+        "R12 Aftermarket",
+        "Aftermarket Rolling 12",
+    ]
+    PARTS_R12   = ["Parts Revenue R12", "R12 Parts Revenue"]
+    SERVICE_R12 = ["Service Revenue R12 (Includes GM)", "Service Revenue R12", "R12 Service Revenue"]
+    RENTAL_R12  = ["Rental Revenue R12", "R12 Rental Revenue"]
+
+    NEW_R36 = ["New Equip R36 Revenue", "R36 New Equipment Revenue", "New Equipment R36"]
+    USED_R36 = ["Used Equip R36 Revenue", "R36 Used Equipment Revenue", "Used Equipment R36"]
 
     for r in report_rows:
-        # Aftermarket buckets (true R12)
-        svc = _to_float(r.get("Service Revenue R12 (Includes GM)"))
-        prt = _to_float(r.get("Parts Revenue R12"))
-        rnt = _to_float(r.get("Rental Revenue R12"))
+        # Prefer a single Aftermarket R12 total if present
+        am_total = pick(r, AM_R12)
+        if am_total:
+            saw_aftermarket_total = True
+            total_r12_aftermarket += am_total
 
-        buckets["SERVICE"] += svc
-        buckets["PARTS"]   += prt
-        buckets["RENTAL"]  += rnt
+        # Buckets (Parts/Service/Rental) for display
+        buckets["PARTS"]   += pick(r, PARTS_R12)
+        buckets["SERVICE"] += pick(r, SERVICE_R12)
+        buckets["RENTAL"]  += pick(r, RENTAL_R12)
 
-        # If the report includes a single precomputed R12 aftermarket total, prefer that
-        if "Revenue Rolling 12 Months - Aftermarket" in r:
-            seen_aftermarket_col = True
-            total_r12_aftermarket += _to_float(r.get("Revenue Rolling 12 Months - Aftermarket"))
+        # Equipment R36 for context only
+        buckets["NEW_EQUIP"]  += pick(r, NEW_R36)
+        buckets["USED_EQUIP"] += pick(r, USED_R36)
 
-        # Equipment (R36) for context only (NOT added into R12 total)
-        buckets["NEW_EQUIP"] += _to_float(r.get("New Equip R36 Revenue"))
-        buckets["USED_EQUIP"] += _to_float(r.get("Used Equip R36 Revenue"))
-
-    # Decide R12 total (aftermarket)
-    if seen_aftermarket_col:
-        total_r12 = total_r12_aftermarket
-    else:
-        total_r12 = buckets["SERVICE"] + buckets["PARTS"] + buckets["RENTAL"]
+    total_r12 = total_r12_aftermarket if saw_aftermarket_total else (
+        buckets["PARTS"] + buckets["SERVICE"] + buckets["RENTAL"]
+    )
 
     return {"total_r12": total_r12, **buckets}
 
@@ -296,19 +331,17 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
     for r in billing_rows:
         dep = normalize_department(r.get("Type") or r.get("Department"))
         amt = _to_float(r.get("REVENUE"))
-        d   = _to_date(r.get("Date") or r.get("Doc. Date"))
-
         by_dept[dep] += amt
-        invoices += 1
 
+        d = _to_date(r.get("Date") or r.get("Doc. Date"))
         if d:
             dates.append(d)
             by_month[f"{d.year:04d}-{d.month:02d}"] += amt
             if (last_invoice is None) or (d > last_invoice):
                 last_invoice = d
-            # rolling 365 billing total (as a fallback if report lacks R12)
             if (now - d).days <= 365:
                 last_365_total += amt
+        invoices += 1
 
     avg_days = None
     if len(dates) >= 2:
@@ -331,7 +364,7 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
         "offerings_count": offerings_count,
         "top_months": top_months,
         "top_offerings": top_offerings,
-        "total_last_365": last_365_total,   # <-- NEW
+        "total_last_365": last_365_total,   # used to fallback R12
     }
 
 # -------------------------------------------------------------------------
@@ -343,7 +376,7 @@ def classify_account_size(total_r12: float) -> str:
     return "D"
 
 def classify_relationship(offerings_count: int, had_revenue: bool) -> str:
-    # Legend: 1 = 4+, 2 = 3, 3 = 1, P = No Revenue
+    # Legend: 1 = 4+, 2 = 3, 3 = 1–2, P = No Revenue
     if not had_revenue:
         return "P"
     if offerings_count >= 4:
@@ -352,7 +385,7 @@ def classify_relationship(offerings_count: int, had_revenue: bool) -> str:
         return "2"
     if offerings_count == 2:
         return "2"
-    return "3"  # 0–1 offering
+    return "3"
 
 def next_relationship(current: str) -> Optional[str]:
     return {"P": "3", "3": "2", "2": "1"}.get(current)
@@ -468,13 +501,12 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     rep = _aggregate_report_r12(report_rows)
     bil = _aggregate_billing(billing_rows)
 
-    # >>> Use both CSVs to decide Size (A/B/C/D):
+    # Use both CSVs to decide Size:
     # 1) prefer report's true R12 (aftermarket)
     # 2) else fallback to billing last-365
     total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
 
     size_letter = classify_account_size(total_r12_for_size)
-
     had_rev = (total_r12_for_size > 0) or any(v > 0 for v in bil["by_dept"].values())
     rel_code = classify_relationship(bil["offerings_count"], had_rev)
 
