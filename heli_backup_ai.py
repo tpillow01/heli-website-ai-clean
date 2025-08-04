@@ -156,26 +156,62 @@ def chat():
     data = request.get_json() or {}
     user_q   = (data.get("question")  or "").strip()
     mode     = (data.get("mode")      or "recommendation").lower()
-    target_id= (data.get("target_id") or "").strip()
 
     if not user_q:
         return jsonify({"response": "Please enter a description of the customer’s needs."}), 400
 
-    # Debug log (optional)
-    app.logger.info(f"/api/chat mode={mode} target_id={target_id} qlen={len(user_q)}")
+    app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
-    # If inquiry mode, we can prefetch related rows now (not used yet)
-    inquiry_rows = {"report": [], "billing": []}
-    if mode == "inquiry" and target_id:
+    # ───────────── INQUIRY MODE ─────────────
+    if mode == "inquiry":
+        from data_sources import build_inquiry_brief, find_customer_id_by_name
+        # Try to extract a customer name/id from the question
+        probe = find_customer_id_by_name(user_q) or user_q
+        brief = build_inquiry_brief(probe)
+
+        if not brief:
+            return jsonify({"response": "I couldn’t locate that customer in the report/billing data. Please mention the company name as it appears in your system (e.g., 'What’s the best strategy for Acme Steel?')."})
+
+        # Strong, structured system prompt for strategy brief
+        system_prompt = {
+            "role": "system",
+            "content": (
+                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers. "
+                "Output a concise, organized brief for a sales rep arriving on-site. Use these sections and keep each to a few bullet points:\n\n"
+                "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (1/2/3/P) and what each means.\n"
+                "2) Current Pattern — When they spend (top months), what they buy (top offerings), and how frequently (avg days between invoices).\n"
+                "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why, grounded in recent billing.\n"
+                "4) Move from X→Y — If they are, for example, B3, give concrete steps to reach B1: which additional offerings to add to reach 4+; quick wins this quarter.\n"
+                "5) Next Actions — 3 short, specific tasks to do today.\n\n"
+                "Be practical. Prefer checklists. If any data is missing, state that plainly and proceed with best-guess actions."
+            )
+        }
+
+        messages = [
+            system_prompt,
+            {"role": "system", "content": brief["context_block"]},
+            {"role": "user",   "content": user_q}
+        ]
+
+        # Call OpenAI
         try:
-            inquiry_rows = find_inquiry_rows(target_id)
+            resp = client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                max_tokens=700,
+                temperature=0.4
+            )
+            ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
-            app.logger.warning(f"find_inquiry_rows failed: {e}")
+            ai_reply = f"❌ Internal error: {e}"
 
-    # Existing behavior: try to match an account name from the question
+        # Tag response with current tier (handy for the rep)
+        tag = f"[Segmentation: {brief['size_letter']}{brief['relationship_code']}]"
+        return jsonify({"response": f"{tag}\n\n{ai_reply}"})
+
+    # ───────── RECOMMENDATION MODE (existing flow) ─────────
+    # your existing logic below remains as-is
     acct = find_account_by_name(user_q)
-
-    # Build Customer-profile markup if we matched one
     context_input = user_q
     if acct:
         profile_ctx = (
@@ -188,10 +224,8 @@ def chat():
         )
         context_input = profile_ctx + user_q
 
-    # Let ai_logic format models + profile into a single prompt block
     prompt_ctx = generate_forklift_context(context_input, acct)
 
-    # ── SYSTEM PROMPT ───────────────────────────────────────────────────
     system_prompt = {
         "role": "system",
         "content": (
@@ -214,12 +248,7 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # ── Token-limit guard (7000 ≈ safe for gpt-4-8k) ─────────────────────
-    enc = tiktoken.encoding_for_model("gpt-4")
-    while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
-        messages.pop(1)
-
-    # ── Call OpenAI ───────────────────────────────────────────────────────
+    # (keep your tiktoken guard if you want)
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
