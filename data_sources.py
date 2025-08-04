@@ -313,8 +313,13 @@ def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
 
 def _aggregate_billing(rows: List[Dict]) -> Dict:
     """
-    Summaries from billing rows (last 12 months by department, cadence, top months).
-    Always returns 'offerings_count' (number of distinct nonzero offerings in last 12 months).
+    Summaries from billing rows (last-12-months by department, cadence, top
+    months).  ALWAYS returns:
+
+      • offerings_present  – list[str]
+      • offerings_count    – int
+
+    so build_inquiry_brief never KeyErrors.
     """
     if not rows:
         return {
@@ -330,59 +335,46 @@ def _aggregate_billing(rows: List[Dict]) -> Dict:
         }
 
     from collections import defaultdict
-    by_dept = defaultdict(float)   # last 12 months only
-    by_month = defaultdict(float)  # all-time, grouped by YYYY-MM
+    by_dept  = defaultdict(float)               # last-12-months revenue
+    by_month = defaultdict(float)               # YYYY-MM totals (all time)
     dates: List[datetime] = []
-    amounts_last365: List[float] = []
 
-    now = datetime.utcnow()
-    try:
-        cutoff = now.replace(year=now.year - 1)
-    except ValueError:
-        # Dec 31 edge case; fallback to ~365 days
-        cutoff = now - pd.Timedelta(days=365)
+    now     = datetime.utcnow()
+    cutoff  = now.replace(year=now.year - 1)
 
     for r in rows:
         d_raw = (r.get("Date") or r.get("Doc. Date") or r.get("date") or "").strip()
-        d = _parse_date_fast(d_raw)
-        typ = (r.get("Type") or r.get("Department") or "").strip()
-        amt_raw = (r.get("REVENUE") or r.get("Revenue") or r.get("Amount") or "").strip()
+        d     = _parse_date_fast(d_raw)
+        typ   = (r.get("Type") or r.get("Department") or "").strip()
+        amt_r = (r.get("REVENUE") or r.get("Revenue") or r.get("Amount") or "").strip()
         try:
-            amt = float(str(amt_raw).replace(",", "").replace("$", "").replace("(", "-").replace(")", ""))
+            amt = float(str(amt_r).replace(",", "").replace("$", "").replace("(", "-").replace(")", ""))
         except Exception:
             amt = 0.0
 
         if d:
             dates.append(d)
-            ym = d.strftime("%Y-%m")
-            by_month[ym] += amt
-            if d >= cutoff:
-                if typ:
-                    by_dept[typ] += amt
-                amounts_last365.append(amt)
+            by_month[d.strftime("%Y-%m")] += amt
+            if d >= cutoff and typ:
+                by_dept[typ] += amt
 
-    dates_sorted = sorted(dates)
-    gaps = []
-    for i in range(1, len(dates_sorted)):
-        gaps.append((dates_sorted[i] - dates_sorted[i-1]).days)
-    avg_gap = sum(gaps)/len(gaps) if gaps else None
-    last_inv = dates_sorted[-1].strftime("%Y-%m-%d") if dates_sorted else None
+    # cadence
+    dates.sort()
+    gaps = [(dates[i] - dates[i - 1]).days for i in range(1, len(dates))]
+    avg_gap  = sum(gaps) / len(gaps) if gaps else None
+    last_inv = dates[-1].strftime("%Y-%m-%d") if dates else None
 
-    top_months = sorted(by_month.items(), key=lambda kv: kv[1], reverse=True)[:5]
-    top_off = sorted(by_dept.items(), key=lambda kv: kv[1], reverse=True)[:5]
-
-    # NEW: distinct offerings with nonzero spend in last 12 months
-    offerings_present = sorted([k for k, v in by_dept.items() if v > 0])
-    offerings_count = len(offerings_present)
+    offerings_present = sorted(k for k, v in by_dept.items() if v > 0)
+    offerings_count   = len(offerings_present)
 
     return {
         "invoice_count": len(rows),
         "by_dept": dict(by_dept),
-        "top_months": top_months,
-        "top_offerings": top_off,
+        "top_months": sorted(by_month.items(), key=lambda kv: kv[1], reverse=True)[:5],
+        "top_offerings": sorted(by_dept.items(),  key=lambda kv: kv[1], reverse=True)[:5],
         "avg_days_between_invoices": avg_gap,
         "last_invoice": last_inv,
-        "total_last_365": sum(amounts_last365),
+        "total_last_365": sum(by_dept.values()),
         "offerings_count": offerings_count,
         "offerings_present": offerings_present,
     }
@@ -505,18 +497,26 @@ def recent_invoices(billing_rows: List[Dict], limit: int = 10) -> List[Dict]:
         })
     return out
 
-# -------------------------------------------------------------------------
-# Build inquiry brief (name-first; ID optional)
+# ------------------------------------------------------------------
+# Main entry: build inquiry brief (name-first; ID optional)
+# ------------------------------------------------------------------
+from typing import Dict, List, Optional
+
 def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
+    """
+    Build a context block for Inquiry mode.
+    Prefer name-based matching because billing may not include stable IDs.
+    """
     probe_name = (name_or_id or "").strip()
     rows = find_inquiry_rows_flexible(customer_id=None, customer_name=probe_name)
 
+    # If nothing by name and user passed something else, try that as an ID
     if not rows["report"] and not rows["billing"]:
         cid_guess = (name_or_id or "").strip()
         if cid_guess:
             rows = find_inquiry_rows_flexible(customer_id=cid_guess, customer_name=None)
 
-    report_rows = rows["report"]
+    report_rows  = rows["report"]
     billing_rows = rows["billing"]
     if not report_rows and not billing_rows:
         return None
@@ -531,60 +531,55 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     if not disp_name:
         disp_name = probe_name or "Unnamed"
 
-    # Display ID
+    # Display ID if we can find one; otherwise "n/a"
     display_id = "n/a"
     for idx, r in enumerate(report_rows + billing_rows):
         display_id = _pick_id(r, idx)
         if display_id:
             break
 
-    # Pull SEGMENT from report if exists (e.g., 'C2')
-    seg_from_report = None
-    for r in report_rows:
-        for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
-            val = str(r.get(key, "")).strip()
-            if val:
-                seg_from_report = val.upper().replace(" ", "")
-                break
-        if seg_from_report:
-            break
-
     # Aggregations
     rep = _aggregate_report_r12(report_rows)
     bil = _aggregate_billing(billing_rows)
 
-    if seg_from_report and len(seg_from_report) == 2 and seg_from_report[0] in "ABCD":
-        size_letter = seg_from_report[0]
-        rel_code    = seg_from_report[1]
-        total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
-    else:
-        total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
-        size_letter = classify_account_size(total_r12_for_size)
-        had_rev     = (total_r12_for_size > 0) or any(v > 0 for v in bil["by_dept"].values())
-        rel_code    = classify_relationship(bil["offerings_count"], had_rev)
+    size_letter = classify_account_size(rep["total_r12"])
+    had_rev     = (rep["total_r12"] > 0) or any(v > 0 for v in bil["by_dept"].values())
+    rel_code    = classify_relationship(bil.get("offerings_count", 0), had_rev)
 
-    visit_focus = _recommend_focus(bil["by_dept"], bil["last_invoice"])
-    next_level_actions = _actions_next_level(size_letter, rel_code, bil["offerings_count"], bil["by_dept"])
+    visit_focus = _recommend_focus(bil.get("by_dept", {}), bil.get("last_invoice"))
+    next_level_actions = _actions_next_level(
+        size_letter,
+        rel_code,
+        bil.get("offerings_count", 0),   # <- safe default
+        bil.get("by_dept", {})           # <- safe default
+    )
 
-    # Build context block for the AI
+    # Build context
     lines: List[str] = []
     lines.append("<CONTEXT:INQUIRY>")
     lines.append(f"Customer: {disp_name} (ID: {display_id})")
     lines.append(f"Segmentation: Size={size_letter}  Relationship={rel_code}")
-    lines.append(f"R12 Revenue (approx): ${total_r12_for_size:,.0f}")
+    lines.append(f"R12 Revenue (approx): ${rep['total_r12']:,.0f}")
     lines.append(
         "By Offering (R12-ish): "
-        + ", ".join([f"{NICE[k]} ${rep.get(k, 0.0):,.0f}" for k in ["SERVICE", "PARTS", "RENTAL", "NEW_EQUIP", "USED_EQUIP"]])
+        + ", ".join(
+            f"{NICE[k]} ${rep.get(k, 0.0):,.0f}"
+            for k in ["SERVICE", "PARTS", "RENTAL", "NEW_EQUIP", "USED_EQUIP"]
+        )
     )
     lines.append(
         f"Billing: invoices={bil['invoice_count']}  "
-        f"last_invoice={bil['last_invoice'] or 'N/A'}  "
-        f"avg_days_between_invoices={bil['avg_days_between_invoices'] or 'N/A'}"
+        f"last_invoice={bil.get('last_invoice') or 'N/A'}  "
+        f"avg_days_between_invoices={bil.get('avg_days_between_invoices') or 'N/A'}"
     )
     if bil["top_months"]:
-        lines.append("Top Months: " + ", ".join([f"{m} ${v:,.0f}" for m, v in bil["top_months"]]))
+        lines.append("Top Months: " + ", ".join(f"{m} ${v:,.0f}" for m, v in bil["top_months"]))
     if bil["top_offerings"]:
-        lines.append("Top Offerings: " + ", ".join([f"{NICE.get(k, k)} ${v:,.0f}" for k, v in bil["top_offerings"]]))
+        lines.append("Top Offerings: " + ", ".join(f"{NICE.get(k, k)} ${v:,.0f}" for k, v in bil["top_offerings"]))
+    if visit_focus:
+        lines.append("Visit Focus Suggestions: " + " | ".join(visit_focus))
+    if next_level_actions:
+        lines.append("Next-Level Actions: " + " | ".join(next_level_actions))
     lines.append("</CONTEXT:INQUIRY>")
 
     return {
@@ -592,7 +587,6 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "size_letter": size_letter,
         "relationship_code": rel_code,
         "inferred_name": disp_name,
-        "recent_invoices": recent_invoices(billing_rows, limit=10),
     }
 
 # =========================
