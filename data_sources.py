@@ -21,11 +21,30 @@ CUSTOMER_REPORT_CSV  = os.getenv("CUSTOMER_REPORT_CSV",  "customer_report.csv")
 CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
 
 # ── helpers ───────────────────────────────────────────────────────────────
+# data_sources.py
 def _read_csv(path: str) -> pd.DataFrame:
-    """Return an empty DataFrame (not an error) if the file is missing."""
+    """Read CSV with encoding fallbacks; return empty DF if missing."""
     if not os.path.exists(path):
         return pd.DataFrame()
-    return pd.read_csv(path).fillna("")
+    last_err = None
+    # Try common encodings in order
+    attempts = [
+        {"encoding": "utf-8",     "encoding_errors": "strict"},
+        {"encoding": "utf-8-sig", "encoding_errors": "replace"},
+        {"encoding": "cp1252",    "encoding_errors": "replace"},  # Windows-1252
+        {"encoding": "latin1",    "encoding_errors": "replace"},
+    ]
+    for opts in attempts:
+        try:
+            return pd.read_csv(path, low_memory=False, **opts).fillna("")
+        except Exception as e:
+            last_err = e
+            continue
+    # Last resort: let pandas guess
+    try:
+        return pd.read_csv(path, low_memory=False).fillna("")
+    except Exception:
+        raise RuntimeError(f"Failed to read CSV {path}: {last_err}")
 
 def _pick_id(row: Dict, fallback_index: int) -> str:
     """Choose the best column to act as a unique customer ID."""
