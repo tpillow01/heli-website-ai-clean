@@ -11,11 +11,18 @@
   <meta name="theme-color" content="#cc0000">
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('{{ url_for('static', filename='service-worker.js') }}')
+      navigator.serviceWorker.register('{{ url_for("static", filename="service-worker.js") }}')
         .then(reg => console.log("✅ Service Worker registered", reg))
         .catch(err => console.error("❌ SW registration failed:", err));
     }
   </script>
+
+  <!-- minimal inline styles for the new toolbar (optional) -->
+  <style>
+    .toolbar{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px}
+    .toolbar label{color:#ccc;font-size:.9rem;display:flex;flex-direction:column}
+    .toolbar select{background:#111;color:#eee;border:1px solid #333;border-radius:6px;padding:6px 8px}
+  </style>
 </head>
 <body>
   <div class="chat-container">
@@ -28,6 +35,18 @@
       <div class="logo-wrapper">
         <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
       </div>
+    </div>
+
+    <!-- ▼ NEW: Mode/Target toolbar -->
+    <div class="toolbar">
+      <label>
+        Mode
+        <select id="modeSelect"></select>
+      </label>
+      <label>
+        Target
+        <select id="targetSelect"></select>
+      </label>
     </div>
 
     <!-- Forklift Animation (hidden until startAnimationLoop) -->
@@ -64,6 +83,37 @@
     const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
     let animationInterval, isForward = true;
 
+    // --- Dropdown data loaders ---
+    async function loadModes() {
+      try {
+        const res = await fetch('/api/modes');
+        const modes = await res.json();
+        const sel = document.getElementById('modeSelect');
+        sel.innerHTML = modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      } catch (e) {
+        console.error('Failed to load modes', e);
+      }
+    }
+
+    async function loadTargets() {
+      try {
+        const mode = document.getElementById('modeSelect').value || 'recommendation';
+        const res = await fetch(`/api/targets?mode=${encodeURIComponent(mode)}`);
+        const items = await res.json();
+        const sel = document.getElementById('targetSelect');
+        sel.innerHTML = items.map(i => `<option value="${i.id}">${i.label}</option>`).join('');
+      } catch (e) {
+        console.error('Failed to load targets', e);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadModes();
+      await loadTargets();
+      document.getElementById('modeSelect').addEventListener('change', loadTargets);
+    });
+
+    // --- UI helpers (existing) ---
     function formatLabels(text) {
       return text.replace(
         /(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:)/g,
@@ -101,10 +151,15 @@
       forkliftAnim.style.display = 'none';
     }
 
+    // --- Send handler (still posts to /api/chat, now includes mode + target_id) ---
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const q = input.value.trim();
       if (!q) return;
+
+      const mode = (document.getElementById('modeSelect')?.value) || 'recommendation';
+      const target_id = (document.getElementById('targetSelect')?.value) || '';
+
       renderBubble(q, 'user');
       input.value = '';
       startAnimationLoop();
@@ -113,11 +168,11 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q })
+          body: JSON.stringify({ question: q, mode, target_id })
         });
         if (res.ok) {
           const { response } = await res.json();
-          renderBubble(response, 'ai');
+          renderBubble(response || '✓', 'ai');
         } else {
           renderBubble('❌ Error contacting server.', 'ai');
         }
