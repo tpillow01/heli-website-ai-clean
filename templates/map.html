@@ -218,18 +218,33 @@
     }
 
     // Load points
-    fetch('{{ url_for("api_locations") }}')
-      .then(r => r.json())
-      .then(points => {
-        allPoints = points || [];
-        populateRepFilter(allPoints);
-        populateStateFilter(allPoints);
-        render();
-      })
-      .catch(err => {
-        console.error(err);
-        alert('Could not load locations.');
-      });
+  // ...
+  fetch('{{ url_for("api_locations") }}')
+    .then(async (r) => {
+      if (!r.ok) {
+        // Try to read JSON error; fall back to text
+        let msg = `HTTP ${r.status}`;
+        try {
+          const body = await r.json();
+          if (body && body.error) msg += ` — ${body.error}`;
+        } catch {
+          const text = await r.text();
+          msg += ` — ${text.slice(0, 300)}`;
+        }
+        throw new Error(msg);
+      }
+      return r.json();
+    })
+    .then(points => {
+      allPoints = points || [];
+      populateRepFilter(allPoints);
+      populateStateFilter(allPoints);
+      render();
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Could not load locations:\n' + err.message);
+    });
 
     // Events
     repFilter.addEventListener('change', render);

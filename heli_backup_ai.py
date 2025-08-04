@@ -347,15 +347,15 @@ def map_page():
 @app.route("/api/locations")
 @login_required
 def api_locations():
-    from data_sources import get_locations_with_geo, load_customer_report
-    items = get_locations_with_geo()
-    if request.args.get("debug") == "1":
-        return jsonify({
-            "pins": len(items),
-            "example": items[:3],
-            "report_rows": len(load_customer_report()),
-        })
-    return jsonify(items)
+    try:
+        from data_sources import get_locations_with_geo
+        items = get_locations_with_geo()
+        return jsonify(items)
+    except Exception as e:
+        # Log full stacktrace to Render logs
+        app.logger.exception("api_locations failed")
+        # Return JSON error so the client can display it
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/service-worker.js')
 def service_worker():
