@@ -1,27 +1,25 @@
 # heli_backup_ai.py  — main web service (with signup/login)
 import os
 import json
-from data_sources import make_inquiry_targets, find_inquiry_rows
 import difflib
 import sqlite3
 from datetime import timedelta
-import tiktoken
 
+import tiktoken
 from flask import (
-    Flask, render_template, request, jsonify, Response,
-    redirect, url_for, session
+    Flask, render_template, request, jsonify, redirect, url_for, session
 )
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
-from ai_logic import generate_forklift_context   # ← your helper file
+from data_sources import make_inquiry_targets  # for /api/targets
+from ai_logic import generate_forklift_context  # your existing helper
 
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-insecure")  # set in env for prod
 app.permanent_session_lifetime = timedelta(days=7)
-# Optional: tighten cookies a bit
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -68,7 +66,7 @@ def create_user(email: str, password: str):
     conn.commit()
     conn.close()
 
-# ─── Auth decorator (session-based) ──────────────────────────────────────
+# ─── Auth decorator ──────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -86,26 +84,23 @@ with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} models from JSON")
 
-# ─── Helper: substring first, then fuzzy company match  ──────────────────
+# Helper for recommendation mode
 def find_account_by_name(text: str):
     low = text.lower()
-    # 1) direct substring
     for acct in account_data:
         name = str(acct.get("Account Name", "")).lower()
         if name and name in low:
             return acct
-    # 2) fuzzy fallback
     names = [a.get("Account Name", "") for a in account_data if a.get("Account Name")]
     match = difflib.get_close_matches(text, names, n=1, cutoff=0.7)
     if match:
         return next(a for a in account_data if a.get("Account Name") == match[0])
     return None
 
-# ─── Web routes (login/signup + app) ─────────────────────────────────────
+# ─── Web routes ──────────────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def home():
-    # your chat UI
     return render_template("chat.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -149,13 +144,13 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ─── Chat API (now accepts mode/target_id; behavior unchanged) ───────────
+# ─── Chat API ────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
     data = request.get_json() or {}
-    user_q   = (data.get("question")  or "").strip()
-    mode     = (data.get("mode")      or "recommendation").lower()
+    user_q = (data.get("question") or "").strip()
+    mode   = (data.get("mode") or "recommendation").lower()
 
     if not user_q:
         return jsonify({"response": "Please enter a description of the customer’s needs."}), 400
@@ -165,25 +160,22 @@ def chat():
     # ───────────── INQUIRY MODE ─────────────
     if mode == "inquiry":
         from data_sources import build_inquiry_brief, find_customer_id_by_name
-        # Try to extract a customer name/id from the question
         probe = find_customer_id_by_name(user_q) or user_q
         brief = build_inquiry_brief(probe)
-
         if not brief:
-            return jsonify({"response": "I couldn’t locate that customer in the report/billing data. Please mention the company name as it appears in your system (e.g., 'What’s the best strategy for Acme Steel?')."})
+            return jsonify({"response": "I couldn’t locate that customer in the report/billing data. Please include the company name as it appears in your system."})
 
-        # Strong, structured system prompt for strategy brief
         system_prompt = {
             "role": "system",
             "content": (
-                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers. "
-                "Output a concise, organized brief for a sales rep arriving on-site. Use these sections and keep each to a few bullet points:\n\n"
-                "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (1/2/3/P) and what each means.\n"
-                "2) Current Pattern — When they spend (top months), what they buy (top offerings), and how frequently (avg days between invoices).\n"
-                "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why, grounded in recent billing.\n"
-                "4) Move from X→Y — If they are, for example, B3, give concrete steps to reach B1: which additional offerings to add to reach 4+; quick wins this quarter.\n"
-                "5) Next Actions — 3 short, specific tasks to do today.\n\n"
-                "Be practical. Prefer checklists. If any data is missing, state that plainly and proceed with best-guess actions."
+                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
+                "Output a concise, organized brief for a sales rep arriving on-site. Use these sections:\n"
+                "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (P/3/2/1) and what each means.\n"
+                "2) Current Pattern — When they spend (top months), what they buy (top offerings), and frequency.\n"
+                "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why.\n"
+                "4) Next Level — Explain how to move from the current tier (e.g., D3) to the next better tier only (e.g., D2), listing concrete steps and missing offerings.\n"
+                "5) Next Actions — 3 short, specific tasks to do today.\n"
+                "Be practical. Prefer bullet points."
             )
         }
 
@@ -193,7 +185,6 @@ def chat():
             {"role": "user",   "content": user_q}
         ]
 
-        # Call OpenAI
         try:
             resp = client.chat.completions.create(
                 model="gpt-4",
@@ -205,12 +196,10 @@ def chat():
         except Exception as e:
             ai_reply = f"❌ Internal error: {e}"
 
-        # Tag response with current tier (handy for the rep)
         tag = f"[Segmentation: {brief['size_letter']}{brief['relationship_code']}]"
         return jsonify({"response": f"{tag}\n\n{ai_reply}"})
 
     # ───────── RECOMMENDATION MODE (existing flow) ─────────
-    # your existing logic below remains as-is
     acct = find_account_by_name(user_q)
     context_input = user_q
     if acct:
@@ -237,18 +226,19 @@ def chat():
             "Use these sections in order if present:\n"
             "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
             "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
-            "List details underneath using hyphens and indent sub-points for clarity.\n\n"
-            "Only cite forklift **Model** codes exactly as they appear in the data "
-            "(e.g. CPD25, CQD16). Never use only the Series name.\n\n"
-            "At the end, include:\n"
-            "- <span class=\"section-label\">Sales Pitch Techniques:</span> 1–2 persuasive points.\n"
-            "- <span class=\"section-label\">Common Objections:</span> 1–2 common concerns and how to address them.\n"
+            "List details using hyphens and indent sub-points.\n"
+            "Only cite forklift **Model** codes exactly as in the data (e.g., CPD25, CQD16).\n"
+            "End with Sales Pitch Techniques and Common Objections."
         )
     }
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # (keep your tiktoken guard if you want)
+    # Token guard (approx safe for gpt-4-8k)
+    enc = tiktoken.encoding_for_model("gpt-4")
+    while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
+        messages.pop(1)
+
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
@@ -272,31 +262,21 @@ def api_modes():
 
 @app.route("/api/targets")
 def api_targets():
-    """
-    Returns dropdown choices based on mode:
-      - ?mode=inquiry          -> customers built from the two CSVs
-      - ?mode=recommendation   -> accounts from accounts.json
-      - default (missing mode) -> recommendation
-    """
     mode = (request.args.get("mode") or "recommendation").lower()
-
     if mode == "inquiry":
         return jsonify(make_inquiry_targets())
-
-    # recommendation: use already-loaded account_data, label from "Account Name"
     items = []
     for i, a in enumerate(account_data):
         label = a.get("Account Name") or f"Account {i+1}"
-        _id   = str(a.get("Account Name", label))  # use name as id if no explicit id
+        _id   = str(a.get("Account Name", label))
         items.append({"id": _id, "label": label})
-
     return jsonify(items)
 
-# ─── Service worker at site root (so scope is '/') ───────────────────────
+# Service worker at site root (so scope is '/')
 @app.route('/service-worker.js')
 def service_worker():
     return app.send_static_file('service-worker.js')
 
-# ─── Run locally (Render sets PORT env on deploy) ────────────────────────
+# ─── Run locally / Render ───────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
