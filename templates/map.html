@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Customer Heat Map</title>
+  <title>Customer Map (Segment / Territory / Geo Filters)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link
     rel="stylesheet"
@@ -31,10 +31,10 @@
     .controls select, .controls input[type="text"] {
       padding: 6px 10px; border-radius: 8px; border:1px solid #d0d0d5; background:#fff; font-size:14px;
     }
-    .controls button, .controls a {
+    .controls a {
       padding:6px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; text-decoration:none; color:var(--ink);
     }
-    .controls a:hover, .controls button:hover { border-color: var(--brand); color: var(--brand); }
+    .controls a:hover { border-color: var(--brand); color: var(--brand); }
     #map { height: calc(100vh - 60px); width: 100vw; }
     .legend {
       background: white; padding: 8px 10px; border-radius: 6px;
@@ -43,26 +43,16 @@
     }
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
-    .note { font-size: 12px; opacity: .7; margin-left:6px; }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <div class="title">Customer Heat Map <span class="note">(Hot=A/B, Cold=D)</span></div>
+    <div class="title">Customer Map</div>
     <div class="controls">
       <label>
         Territory
         <select id="repFilter">
           <option value="__ALL__">All</option>
-        </select>
-      </label>
-      <label>
-        Heat
-        <select id="heatFilter">
-          <option value="ALL">All</option>
-          <option value="HOT">Hot (A/B)</option>
-          <option value="NEUTRAL">Neutral (C)</option>
-          <option value="COLD">Cold (D)</option>
         </select>
       </label>
       <label>
@@ -129,42 +119,14 @@
 
     // Controls
     const repFilter    = document.getElementById('repFilter');
-    const heatFilter   = document.getElementById('heatFilter');
     const segFilter    = document.getElementById('segFilter');
     const stateFilter  = document.getElementById('stateFilter');
     const countyFilter = document.getElementById('countyFilter');
     const zipFilter    = document.getElementById('zipFilter');
 
-    const heatBucket = (size_letter) => {
-      if (size_letter === 'A' || size_letter === 'B') return 'HOT';
-      if (size_letter === 'D') return 'COLD';
-      return 'NEUTRAL';
-    };
-
-    function markerStyle(rep, size_letter) {
+    function markerStyle(rep) {
       const base = colorForRep(rep || 'Unassigned');
-      const bucket = heatBucket(size_letter || 'C');
-      let radius = 6, fillOpacity = 0.85, stroke = '#333';
-
-      if (bucket === 'HOT') { radius = 9; fillOpacity = 0.95; }
-      if (bucket === 'COLD') { radius = 5; fillOpacity = 0.6; }
-
-      return { radius, weight: 1, color: stroke, fillColor: base, fillOpacity };
-    }
-
-    function withinHeatFilter(pt) {
-      const want = heatFilter.value;
-      const b = heatBucket(pt.size_letter || 'C');
-      if (want === 'ALL') return true;
-      return want === b;
-    }
-
-    function withinSegFilter(pt) {
-      const want = segFilter.value;
-      if (want === '__ALL__') return true;
-      // segment can be explicit (e.g., 'B2') or inferred via size_letter
-      const segLetter = (pt.segment && /^[ABCD]/.test(pt.segment)) ? pt.segment[0] : (pt.size_letter || 'C');
-      return segLetter === want;
+      return { radius: 7, weight: 1, color: '#333', fillColor: base, fillOpacity: 0.9 };
     }
 
     function withinRepFilter(pt) {
@@ -172,16 +134,21 @@
       return want === '__ALL__' || (pt.sales_rep || 'Unassigned') === want;
     }
 
+    function withinSegFilter(pt) {
+      const want = segFilter.value;
+      if (want === '__ALL__') return true;
+      // Prefer explicit segment's letter; else fall back to size_letter
+      const segLetter = (pt.segment && /^[ABCD]/.test(pt.segment)) ? pt.segment[0] : (pt.size_letter || 'C');
+      return segLetter === want;
+    }
+
     function withinStateCountyZip(pt) {
-      // State
       const st = stateFilter.value;
       if (st !== '__ALL__' && (pt.state || '') !== st) return false;
 
-      // County (only if enabled)
       const cy = countyFilter.value;
       if (!countyFilter.disabled && cy !== '__ALL__' && (pt.county || '') !== cy) return false;
 
-      // ZIP (exact match if non-empty)
       const z = zipFilter.value.trim();
       if (z && (pt.zip || '') !== z) return false;
 
@@ -191,16 +158,16 @@
     function render() {
       layerGroup.clearLayers();
       const toShow = allPoints.filter(p =>
-        withinRepFilter(p) && withinHeatFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
+        withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
       );
 
       const group = L.featureGroup();
       toShow.forEach(p => {
-        const style = markerStyle(p.sales_rep, p.size_letter);
+        const style = markerStyle(p.sales_rep);
         const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
           `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
            State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-           Size: ${p.size_letter || 'C'} | Segment: ${p.segment || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}`
+           Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}`
         );
         marker.addTo(group);
       });
@@ -227,10 +194,6 @@
           row.innerHTML = `<span class="swatch" style="background:${color}"></span><span>${rep}</span>`;
           div.appendChild(row);
         });
-        const note = document.createElement('div');
-        note.style.marginTop = '6px';
-        note.innerHTML = '<b>Heat</b>: Hot=A/B, Neutral=C, Cold=D';
-        div.appendChild(note);
         return div;
       };
       legendControl.addTo(map);
@@ -244,7 +207,6 @@
     function populateStateFilter(points) {
       const states = Array.from(new Set(points.map(p => p.state).filter(Boolean))).sort();
       stateFilter.innerHTML = `<option value="__ALL__">All</option>` + states.map(s => `<option value="${s}">${s}</option>`).join('');
-      // Reset county
       countyFilter.innerHTML = `<option value="__ALL__">All</option>`;
       countyFilter.disabled = true;
     }
@@ -271,14 +233,11 @@
 
     // Events
     repFilter.addEventListener('change', render);
-    heatFilter.addEventListener('change', render);
     segFilter.addEventListener('change', render);
     zipFilter.addEventListener('input', () => {
-      // Debounce mildly
       clearTimeout(zipFilter._t);
       zipFilter._t = setTimeout(render, 200);
     });
-
     stateFilter.addEventListener('change', () => {
       const st = stateFilter.value;
       if (st === '__ALL__') {
@@ -289,7 +248,6 @@
       }
       render();
     });
-
     countyFilter.addEventListener('change', render);
   </script>
 </body>
