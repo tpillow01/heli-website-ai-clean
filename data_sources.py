@@ -143,27 +143,43 @@ def find_customer_id_by_name(name: str) -> Optional[str]:
 # Name-first row lookup across both files; fallback to ID
 def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
                                customer_name: Optional[str] = None) -> Dict[str, List[Dict]]:
+    """Prefer exact normalized name matches across BOTH CSVs; only if none, try looser matches; finally fallback to ID."""
     want = _norm_name(customer_name or "")
     id_val = (customer_id or "").strip()
 
     rep_all = load_customer_report()
     bil_all = load_customer_billing()
+
+    def norm_of(row: Dict) -> str:
+        for k in ("CUSTOMER", "Customer", "Ship to Name", "Sold to Name"):
+            v = row.get(k, "")
+            if v:
+                return _norm_name(v)
+        return ""
+
     report_hits: List[Dict] = []
     billing_hits: List[Dict] = []
 
-    def name_matches(row: Dict) -> bool:
-        for k in ("CUSTOMER", "Customer", "Ship to Name", "Sold to Name"):
-            v = _norm_name(row.get(k, ""))
-            if v and (v == want or (want and want in v)):
-                return True
-        return False
-
-    # Name first (handles billing where no ID exists)
+    # 1) EXACT normalized name match
     if want:
-        report_hits = [r for r in rep_all if name_matches(r)]
-        billing_hits = [r for r in bil_all if name_matches(r)]
+        report_hits = [r for r in rep_all if norm_of(r) == want]
+        billing_hits = [r for r in bil_all if norm_of(r) == want]
 
-    # If name failed and ID provided, try ID
+    # 2) LOOSE match (only if nothing found): substring / token-subset
+    if not report_hits and not billing_hits and want:
+        def loose_match(row: Dict) -> bool:
+            cand = norm_of(row)
+            if not cand:
+                return False
+            if cand == want or want in cand or cand in want:
+                return True
+            wt = {t for t in want.split() if len(t) > 1}
+            ct = {t for t in cand.split() if len(t) > 1}
+            return wt.issubset(ct)
+        report_hits = [r for r in rep_all if loose_match(r)]
+        billing_hits = [r for r in bil_all if loose_match(r)]
+
+    # 3) Fallback: ID match (least preferred)
     if not report_hits and not billing_hits and id_val:
         for idx, r in enumerate(rep_all):
             if _pick_id(r, idx) == id_val:

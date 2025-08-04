@@ -184,17 +184,18 @@ def chat():
 
         system_prompt = {
             "role": "system",
-            "content": (
-                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
-                "Output a concise, organized brief for a sales rep arriving on-site. Use these sections:\n"
-                "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (P/3/2/1) and what each means.\n"
-                "2) Current Pattern — When they spend (top months), what they buy (top offerings), and frequency.\n"
-                "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why.\n"
-                "4) Next Level — Explain how to move from the current tier (e.g., D3) to the next better tier only (e.g., D2), listing concrete steps and missing offerings.\n"
-                "5) Next Actions — 3 short, specific tasks to do today.\n"
-                "Be practical. Prefer bullet points."
-            )
-        }
+             "content": (
+                    "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
+                    f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
+                    "Output a concise, organized brief for a sales rep arriving on-site. Use these sections:\n"
+                    "1) Segmentation — Show Account Size (A/B/C/D) and Relationship (P/3/2/1) and what each means.\n"
+                    "2) Current Pattern — When they spend (top months), what they buy (top offerings), and frequency.\n"
+                    "3) Visit Plan — What to lead with (Service / Parts / Rental / New/Used) and why.\n"
+                    "4) Next Level — Explain how to move from the current tier (e.g., D3) to the next better tier only (e.g., D2), listing concrete steps and missing offerings.\n"
+                    "5) Next Actions — 3 short, specific tasks to do today.\n"
+                    "Be practical. Prefer bullet points."
+    )
+}
 
         messages = [
             system_prompt,
