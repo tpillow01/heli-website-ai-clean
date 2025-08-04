@@ -23,13 +23,17 @@
       padding: 8px 12px; background: var(--card); border-bottom: 1px solid #e6e6e8;
     }
     .title { font-weight: 600; }
-    .actions a, .actions button {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd;
-      background: #fff; text-decoration: none; color: var(--ink); font-size: 14px;
+    .controls {
+      display:flex; gap:8px; align-items:center; flex-wrap:wrap;
     }
-    .actions a:hover { border-color: var(--brand); color: var(--brand); }
-    #map { height: calc(100vh - 48px); width: 100vw; }
+    .controls select {
+      padding: 6px 10px; border-radius: 8px; border:1px solid #d0d0d5; background:#fff; font-size:14px;
+    }
+    .controls button, .controls a {
+      padding:6px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; text-decoration:none; color:var(--ink);
+    }
+    .controls a:hover, .controls button:hover { border-color: var(--brand); color: var(--brand); }
+    #map { height: calc(100vh - 56px); width: 100vw; }
     .legend {
       background: white; padding: 8px 10px; border-radius: 6px;
       box-shadow: 0 1px 4px rgba(0,0,0,0.2); font: 12px/1.1 system-ui, sans-serif;
@@ -37,12 +41,28 @@
     }
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
+    .note { font-size: 12px; opacity: .7; margin-left:6px; }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <div class="title">Customer Heat Map</div>
-    <div class="actions">
+    <div class="title">Customer Heat Map <span class="note">(Hot=A/B, Cold=D)</span></div>
+    <div class="controls">
+      <label>
+        Territory
+        <select id="repFilter">
+          <option value="__ALL__">All</option>
+        </select>
+      </label>
+      <label>
+        Heat
+        <select id="heatFilter">
+          <option value="ALL">All</option>
+          <option value="HOT">Hot (A/B)</option>
+          <option value="NEUTRAL">Neutral (C)</option>
+          <option value="COLD">Cold (D)</option>
+        </select>
+      </label>
       <a href="{{ url_for('home') }}" aria-label="Back to Chat">← Back to Chat</a>
     </div>
   </div>
@@ -62,60 +82,122 @@
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
-    function hashColor(str) {
-      let h = 0;
-      for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
-      const r = 150 + (h & 0x3F);
-      const g = 150 + ((h >> 6) & 0x3F);
-      const b = 150 + ((h >> 12) & 0x3F);
-      return `rgb(${r},${g},${b})`;
+    // Distinct palette (Tableau-like 20)
+    const palette = [
+      '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+      '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
+      '#393b79','#637939','#8c6d31','#843c39','#7b4173',
+      '#3182bd','#e6550d','#31a354','#756bb1','#969696'
+    ];
+    const colorForRep = (rep, indexMap) => {
+      if (!indexMap.has(rep)) indexMap.set(rep, indexMap.size % palette.length);
+      return palette[indexMap.get(rep)];
+    };
+
+    const repIndex = new Map();
+    let allPoints = [];
+    let layerGroup = L.featureGroup().addTo(map);
+    let legendControl;
+
+    const repFilter = document.getElementById('repFilter');
+    const heatFilter = document.getElementById('heatFilter');
+
+    const heatBucket = (size_letter) => {
+      if (size_letter === 'A' || size_letter === 'B') return 'HOT';
+      if (size_letter === 'D') return 'COLD';
+      return 'NEUTRAL'; // C
+    };
+
+    function markerStyle(rep, size_letter) {
+      const base = colorForRep(rep || 'Unassigned', repIndex);
+      const bucket = heatBucket(size_letter || 'C');
+      let radius = 6, fillOpacity = 0.85, stroke = '#333';
+
+      if (bucket === 'HOT') { radius = 9; fillOpacity = 0.95; }
+      if (bucket === 'COLD') { radius = 5; fillOpacity = 0.6; }
+
+      return { radius, weight: 1, color: stroke, fillColor: base, fillOpacity };
     }
 
-    const repColors = new Map();
+    function withinHeatFilter(pt) {
+      const want = heatFilter.value;
+      const b = heatBucket(pt.size_letter || 'C');
+      if (want === 'ALL') return true;
+      return want === b;
+    }
 
+    function withinRepFilter(pt) {
+      const want = repFilter.value;
+      return want === '__ALL__' || (pt.sales_rep || 'Unassigned') === want;
+    }
+
+    function render() {
+      layerGroup.clearLayers();
+      const toShow = allPoints.filter(p => withinRepFilter(p) && withinHeatFilter(p));
+
+      const group = L.featureGroup();
+      toShow.forEach(p => {
+        const style = markerStyle(p.sales_rep, p.size_letter);
+        const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
+          `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
+           Size: ${p.size_letter || 'C'} &nbsp; | &nbsp; R12: $${(p.total_r12 ?? 0).toLocaleString()}`
+        );
+        marker.addTo(group);
+      });
+      group.addTo(layerGroup);
+
+      if (toShow.length) {
+        map.fitBounds(group.getBounds().pad(0.2));
+      }
+
+      updateLegend();
+    }
+
+    function updateLegend() {
+      if (legendControl) {
+        map.removeControl(legendControl);
+      }
+      const entries = Array.from(new Set(allPoints.map(p => p.sales_rep || 'Unassigned'))).sort();
+      legendControl = L.control({ position: 'bottomright' });
+      legendControl.onAdd = () => {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = '<b>Sales Rep / Territory</b>';
+        entries.forEach(rep => {
+          const color = colorForRep(rep, repIndex);
+          const row = document.createElement('div');
+          row.className = 'row';
+          row.innerHTML = `<span class="swatch" style="background:${color}"></span><span>${rep}</span>`;
+          div.appendChild(row);
+        });
+        const note = document.createElement('div');
+        note.style.marginTop = '6px';
+        note.innerHTML = '<b>Heat key</b>: <span style="font-weight:600">Hot</span>=A/B, Neutral=C, Cold=D';
+        div.appendChild(note);
+        return div;
+      };
+      legendControl.addTo(map);
+    }
+
+    function populateRepFilter(points) {
+      const reps = Array.from(new Set(points.map(p => p.sales_rep || 'Unassigned'))).sort();
+      repFilter.innerHTML = `<option value="__ALL__">All</option>` + reps.map(r => `<option>${r}</option>`).join('');
+    }
+
+    // Load points
     fetch('{{ url_for("api_locations") }}')
       .then(r => r.json())
       .then(points => {
-        const group = L.featureGroup();
-        points.forEach(p => {
-          const rep = p.sales_rep || 'Unassigned';
-          if (!repColors.has(rep)) repColors.set(rep, hashColor(rep));
-          const color = repColors.get(rep);
-          const marker = L.circleMarker([p.lat, p.lon], {
-            radius: 6,
-            weight: 1,
-            color: '#333',
-            fillColor: color,
-            fillOpacity: 0.85
-          }).bindPopup(
-            `<b>${p.label}</b><br/>${p.full_address}<br/><i>${rep}</i>`
-          );
-          marker.addTo(group);
-        });
-        group.addTo(map);
-        if (points.length) map.fitBounds(group.getBounds().pad(0.2));
-        addLegend();
+        allPoints = points || [];
+        populateRepFilter(allPoints);
+        render();
       })
       .catch(err => {
         console.error(err);
         alert('Could not load locations.');
       });
 
-    function addLegend() {
-      const legend = L.control({ position: 'bottomright' });
-      legend.onAdd = () => {
-        const div = L.DomUtil.create('div', 'legend');
-        div.innerHTML = '<b>Sales Rep / Territory</b>';
-        for (const [rep, color] of repColors.entries()) {
-          const row = document.createElement('div');
-          row.className = 'row';
-          row.innerHTML = `<span class="swatch" style="background:${color}"></span><span>${rep}</span>`;
-          div.appendChild(row);
-        }
-        return div;
-      };
-      legend.addTo(map);
-    }
+    repFilter.addEventListener('change', render);
+    heatFilter.addEventListener('change', render);
   </script>
 </body>
 </html>

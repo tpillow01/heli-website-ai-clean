@@ -697,11 +697,13 @@ def _unique_locations_from_report() -> List[Dict]:
 
 def get_locations_with_geo() -> List[Dict]:
     """
-    Returns a list of dicts with: label, sales_rep, lat, lon, full_address.
-    Resolution order (more reliable first):
+    Returns pins: label, sales_rep, lat, lon, full_address, plus:
+      - size_letter: 'A'/'B'/'C'/'D' (from report R12 or billing last_365)
+      - total_r12: numeric revenue used for size classification
+    Resolution order for coordinates:
       1) Account Name match in customer_location.csv
       2) Lat/Lon present on the report row
-      3) Match full address in customer_location.csv
+      3) Full address match in customer_location.csv
     """
     uniq = _unique_locations_from_report()
     lookups = _locations_lookup_from_csv()
@@ -712,24 +714,31 @@ def get_locations_with_geo() -> List[Dict]:
     for item in uniq:
         r = item["row"]
 
-        # 1) Match by account name
+        # --- Coordinate resolution ---
         latlon = None
+        # 1) by account name
         nkey = _norm_name(item["label"])
         if nkey in by_name:
             latlon = by_name[nkey]
-
-        # 2) If not found, use inline lat/lon from the report row
+        # 2) inline on report row
         if not latlon:
             latlon = _extract_latlon_from_row(r)
-
-        # 3) If still not found, match by full address
+        # 3) by full address
         if not latlon:
             key = _addr_key(item["full_address"])
             if key in by_addr:
                 latlon = by_addr[key]
-
         if not latlon:
-            continue  # skip if still no coordinates
+            continue
+
+        # --- Business heat info (size letter / total_r12) ---
+        rows = find_inquiry_rows_flexible(customer_id=None, customer_name=item["label"])
+        report_rows = rows.get("report", [])
+        billing_rows = rows.get("billing", [])
+        rep = _aggregate_report_r12(report_rows)
+        bil = _aggregate_billing(billing_rows)
+        total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
+        size_letter = classify_account_size(total_r12_for_size)
 
         lat, lon = latlon
         out.append({
@@ -737,7 +746,10 @@ def get_locations_with_geo() -> List[Dict]:
             "sales_rep": item["sales_rep"],
             "lat": float(lat),
             "lon": float(lon),
-            "full_address": item["full_address"]
+            "full_address": item["full_address"],
+            "size_letter": size_letter,
+            "total_r12": round(float(total_r12_for_size or 0.0), 2),
         })
 
     return out
+
