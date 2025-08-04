@@ -228,15 +228,44 @@ NICE = {
 # -------------------------------------------------------------------------
 # Aggregations
 def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
-    buckets = {"NEW_EQUIP": 0.0, "USED_EQUIP": 0.0, "PARTS": 0.0, "SERVICE": 0.0, "RENTAL": 0.0}
+    """
+    Build an R12 view from the customer_report.csv:
+    - Prefer 'Revenue Rolling 12 Months - Aftermarket' if present.
+    - Otherwise sum Parts/Service/Rental R12.
+    - Keep buckets for reporting; New/Used R36 kept separate (not in R12 total).
+    """
+    # Buckets we display
+    buckets = {"SERVICE": 0.0, "PARTS": 0.0, "RENTAL": 0.0, "NEW_EQUIP": 0.0, "USED_EQUIP": 0.0}
+
+    total_r12_aftermarket = 0.0
+    seen_aftermarket_col = False
+
     for r in report_rows:
+        # Aftermarket buckets (true R12)
+        svc = _to_float(r.get("Service Revenue R12 (Includes GM)"))
+        prt = _to_float(r.get("Parts Revenue R12"))
+        rnt = _to_float(r.get("Rental Revenue R12"))
+
+        buckets["SERVICE"] += svc
+        buckets["PARTS"]   += prt
+        buckets["RENTAL"]  += rnt
+
+        # If the report includes a single precomputed R12 aftermarket total, prefer that
+        if "Revenue Rolling 12 Months - Aftermarket" in r:
+            seen_aftermarket_col = True
+            total_r12_aftermarket += _to_float(r.get("Revenue Rolling 12 Months - Aftermarket"))
+
+        # Equipment (R36) for context only (NOT added into R12 total)
         buckets["NEW_EQUIP"] += _to_float(r.get("New Equip R36 Revenue"))
         buckets["USED_EQUIP"] += _to_float(r.get("Used Equip R36 Revenue"))
-        buckets["PARTS"]      += _to_float(r.get("Parts Revenue R12"))
-        buckets["SERVICE"]    += _to_float(r.get("Service Revenue R12 (Includes GM)"))
-        buckets["RENTAL"]     += _to_float(r.get("Rental Revenue R12"))
-    tot = sum(buckets.values())
-    return {"total_r12": tot, **buckets}
+
+    # Decide R12 total (aftermarket)
+    if seen_aftermarket_col:
+        total_r12 = total_r12_aftermarket
+    else:
+        total_r12 = buckets["SERVICE"] + buckets["PARTS"] + buckets["RENTAL"]
+
+    return {"total_r12": total_r12, **buckets}
 
 def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
     by_dept: Dict[str, float] = defaultdict(float)
@@ -245,18 +274,25 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
     invoices = 0
     last_invoice: Optional[datetime] = None
 
+    now = datetime.utcnow()
+    last_365_total = 0.0
+
     for r in billing_rows:
         dep = normalize_department(r.get("Type") or r.get("Department"))
         amt = _to_float(r.get("REVENUE"))
-        by_dept[dep] += amt
+        d   = _to_date(r.get("Date") or r.get("Doc. Date"))
 
-        d = _to_date(r.get("Date") or r.get("Doc. Date"))
+        by_dept[dep] += amt
+        invoices += 1
+
         if d:
             dates.append(d)
             by_month[f"{d.year:04d}-{d.month:02d}"] += amt
             if (last_invoice is None) or (d > last_invoice):
                 last_invoice = d
-        invoices += 1
+            # rolling 365 billing total (as a fallback if report lacks R12)
+            if (now - d).days <= 365:
+                last_365_total += amt
 
     avg_days = None
     if len(dates) >= 2:
@@ -266,7 +302,6 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
             avg_days = sum(deltas) / len(deltas)
 
     offerings_count = sum(1 for k in OFFERING_KEYS if by_dept.get(k, 0.0) > 0)
-
     top_months = sorted(by_month.items(), key=lambda kv: kv[1], reverse=True)[:3]
     top_offerings = sorted([(k, v) for k, v in by_dept.items() if k in OFFERING_KEYS],
                            key=lambda kv: kv[1], reverse=True)[:3]
@@ -280,6 +315,7 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
         "offerings_count": offerings_count,
         "top_months": top_months,
         "top_offerings": top_offerings,
+        "total_last_365": last_365_total,   # <-- NEW
     }
 
 # -------------------------------------------------------------------------
@@ -416,8 +452,14 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     rep = _aggregate_report_r12(report_rows)
     bil = _aggregate_billing(billing_rows)
 
-    size_letter = classify_account_size(rep["total_r12"])
-    had_rev = (rep["total_r12"] > 0) or any(v > 0 for v in bil["by_dept"].values())
+    # >>> Use both CSVs to decide Size (A/B/C/D):
+    # 1) prefer report's true R12 (aftermarket)
+    # 2) else fallback to billing last-365
+    total_r12_for_size = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
+
+    size_letter = classify_account_size(total_r12_for_size)
+
+    had_rev = (total_r12_for_size > 0) or any(v > 0 for v in bil["by_dept"].values())
     rel_code = classify_relationship(bil["offerings_count"], had_rev)
 
     visit_focus = _recommend_focus(bil["by_dept"], bil["last_invoice"])
@@ -428,7 +470,7 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     lines.append("<CONTEXT:INQUIRY>")
     lines.append(f"Customer: {disp_name} (ID: {display_id})")
     lines.append(f"Segmentation: Size={size_letter}  Relationship={rel_code}")
-    lines.append(f"R12 Revenue (approx): ${rep['total_r12']:,.0f}")
+    lines.append(f"R12 Revenue (approx): ${total_r12_for_size:,.0f}")
     lines.append(
         "By Offering (R12-ish): "
         + ", ".join([f"{NICE[k]} ${rep.get(k, 0.0):,.0f}" for k in ["SERVICE", "PARTS", "RENTAL", "NEW_EQUIP", "USED_EQUIP"]])
