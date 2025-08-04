@@ -5,14 +5,13 @@ import difflib
 import sqlite3
 from datetime import timedelta
 
-import tiktoken
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
 from ai_logic import generate_forklift_context
-from data_sources import make_inquiry_targets  # for /api/targets
+from data_sources import make_inquiry_targets  # used by /api/targets
 
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
 app = Flask(__name__)
@@ -104,7 +103,7 @@ def home():
 def login():
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
-        password = request.form.get("password") or ""
+        password = (request.form.get("password") or "")
         user = find_user_by_email(email)
         if not user or not check_password_hash(user["password_hash"], password):
             return render_template("login.html", error="Invalid email or password.", email=email), 401
@@ -145,7 +144,7 @@ def logout():
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
-    data = request.get_json() or {}
+    data   = request.get_json(force=True) or {}
     user_q = (data.get("question") or "").strip()
     mode   = (data.get("mode") or "recommendation").lower()
 
@@ -156,12 +155,32 @@ def chat():
 
     # ───────── Inquiry mode ─────────
     if mode == "inquiry":
-        from data_sources import build_inquiry_brief, find_customer_id_by_name
-        probe = find_customer_id_by_name(user_q) or user_q
-        brief = build_inquiry_brief(probe)
+        from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
 
+        qnorm = _norm_name(user_q)
+
+        # 1) Try to lock onto a known customer label present in the question
+        chosen_name = None
+        try:
+            for it in make_inquiry_targets():
+                lbl_norm = _norm_name(it.get("label", ""))
+                if lbl_norm and lbl_norm in qnorm:
+                    chosen_name = it["label"]
+                    break
+        except Exception as e:
+            app.logger.warning(f"scan targets failed: {e}")
+
+        # 2) Fallback: use the raw question (name-first matching inside brief)
+        probe = chosen_name or user_q
+
+        brief = build_inquiry_brief(probe)
         if not brief:
-            return jsonify({"response": "I couldn’t locate that customer in the report/billing data. Please include the company name as it appears in your system."})
+            return jsonify({
+                "response": (
+                    "I couldn’t locate that customer in the report/billing data. "
+                    "Please include the company name as it appears in your system."
+                )
+            })
 
         system_prompt = {
             "role": "system",
@@ -233,10 +252,14 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # Token guard
-    enc = tiktoken.encoding_for_model("gpt-4")
-    while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
-        messages.pop(1)
+    # Optional token guard — skip if tiktoken missing
+    try:
+        import tiktoken
+        enc = tiktoken.encoding_for_model("gpt-4")
+        while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
+            messages.pop(1)
+    except Exception:
+        pass
 
     try:
         resp = client.chat.completions.create(
