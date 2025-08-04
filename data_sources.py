@@ -311,53 +311,80 @@ def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
 
     return {"total_r12": total_r12, **buckets}
 
-def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
-    by_dept: Dict[str, float] = defaultdict(float)
-    by_month: Dict[str, float] = defaultdict(float)
+def _aggregate_billing(rows: List[Dict]) -> Dict:
+    """
+    Summaries from billing rows (last 12 months by department, cadence, top months).
+    Always returns 'offerings_count' (number of distinct nonzero offerings in last 12 months).
+    """
+    if not rows:
+        return {
+            "invoice_count": 0,
+            "by_dept": {},
+            "top_months": [],
+            "top_offerings": [],
+            "avg_days_between_invoices": None,
+            "last_invoice": None,
+            "total_last_365": 0.0,
+            "offerings_count": 0,
+            "offerings_present": [],
+        }
+
+    from collections import defaultdict
+    by_dept = defaultdict(float)   # last 12 months only
+    by_month = defaultdict(float)  # all-time, grouped by YYYY-MM
     dates: List[datetime] = []
-    invoices = 0
-    last_invoice: Optional[datetime] = None
+    amounts_last365: List[float] = []
 
     now = datetime.utcnow()
-    last_365_total = 0.0
+    try:
+        cutoff = now.replace(year=now.year - 1)
+    except ValueError:
+        # Dec 31 edge case; fallback to ~365 days
+        cutoff = now - pd.Timedelta(days=365)
 
-    for r in billing_rows:
-        dep = normalize_department(r.get("Type") or r.get("Department"))
-        amt = _to_float(r.get("REVENUE"))
-        by_dept[dep] += amt
+    for r in rows:
+        d_raw = (r.get("Date") or r.get("Doc. Date") or r.get("date") or "").strip()
+        d = _parse_date_fast(d_raw)
+        typ = (r.get("Type") or r.get("Department") or "").strip()
+        amt_raw = (r.get("REVENUE") or r.get("Revenue") or r.get("Amount") or "").strip()
+        try:
+            amt = float(str(amt_raw).replace(",", "").replace("$", "").replace("(", "-").replace(")", ""))
+        except Exception:
+            amt = 0.0
 
-        d = _to_date(r.get("Date") or r.get("Doc. Date"))
         if d:
             dates.append(d)
-            by_month[f"{d.year:04d}-{d.month:02d}"] += amt
-            if (last_invoice is None) or (d > last_invoice):
-                last_invoice = d
-            if (now - d).days <= 365:
-                last_365_total += amt
-        invoices += 1
+            ym = d.strftime("%Y-%m")
+            by_month[ym] += amt
+            if d >= cutoff:
+                if typ:
+                    by_dept[typ] += amt
+                amounts_last365.append(amt)
 
-    avg_days = None
-    if len(dates) >= 2:
-        ds = sorted(dates)
-        deltas = [(ds[i] - ds[i-1]).days for i in range(1, len(ds))]
-        if deltas:
-            avg_days = sum(deltas) / len(deltas)
+    dates_sorted = sorted(dates)
+    gaps = []
+    for i in range(1, len(dates_sorted)):
+        gaps.append((dates_sorted[i] - dates_sorted[i-1]).days)
+    avg_gap = sum(gaps)/len(gaps) if gaps else None
+    last_inv = dates_sorted[-1].strftime("%Y-%m-%d") if dates_sorted else None
 
-    offerings_count = sum(1 for k in OFFERING_KEYS if by_dept.get(k, 0.0) > 0)
-    top_months = sorted(by_month.items(), key=lambda kv: kv[1], reverse=True)[:3]
-    top_offerings = sorted([(k, v) for k, v in by_dept.items() if k in OFFERING_KEYS],
-                           key=lambda kv: kv[1], reverse=True)[:3]
+    top_months = sorted(by_month.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    top_off = sorted(by_dept.items(), key=lambda kv: kv[1], reverse=True)[:5]
+
+    # NEW: distinct offerings with nonzero spend in last 12 months
+    offerings_present = sorted([k for k, v in by_dept.items() if v > 0])
+    offerings_count = len(offerings_present)
 
     return {
+        "invoice_count": len(rows),
         "by_dept": dict(by_dept),
-        "by_month": dict(by_month),
-        "last_invoice": last_invoice.isoformat() if last_invoice else "",
-        "invoice_count": invoices,
-        "avg_days_between_invoices": avg_days,
-        "offerings_count": offerings_count,
         "top_months": top_months,
-        "top_offerings": top_offerings,
-        "total_last_365": last_365_total,
+        "top_offerings": top_off,
+        "avg_days_between_invoices": avg_gap,
+        "last_invoice": last_inv,
+        "total_last_365": sum(amounts_last365),
+        "offerings_count": offerings_count,
+        "offerings_present": offerings_present,
     }
 
 # -------------------------------------------------------------------------
