@@ -337,3 +337,51 @@ body {
   .toolbar{ margin: 16px 16px 12px; padding: 10px 14px; }
   .toolbar label{ font-size: 1rem; }
 }
+
+/* Top controls row */
+.top-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 8px 0 12px 0;
+  background: #fff;
+  border: 1px solid #e6e6e8;
+  border-radius: 10px;
+}
+
+.top-controls .left {
+  display: flex; align-items: center; gap: 8px;
+}
+
+.mode-label {
+  font-size: 14px;
+  color: #333;
+}
+
+.mode-select {
+  appearance: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d0d0d5;
+  background: #fafafa;
+  font-size: 14px;
+}
+
+.map-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #d0d0d5;
+  background: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  color: #cc0000;           /* on-brand */
+}
+
+.map-btn:hover {
+  border-color: #cc0000;
+  background: #fff5f5;
+}

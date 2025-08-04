@@ -339,6 +339,17 @@ def inquiry_preview():
         "recent_invoices": brief.get("recent_invoices", []),
         "context_block": brief.get("context_block", "")
     })
+@app.route("/map")
+@login_required
+def map_page():
+    return render_template("map.html")
+
+@app.route("/api/locations")
+@login_required
+def api_locations():
+    from data_sources import get_locations_with_geo
+    items = get_locations_with_geo()
+    return jsonify(items)
 
 @app.route('/service-worker.js')
 def service_worker():
