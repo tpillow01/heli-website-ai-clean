@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Customer Heat Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    :root {
+      --brand: #cc0000;
+      --ink: #1f1f1f;
+      --bg: #f7f7f8;
+      --card: #ffffff;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; background: var(--card); border-bottom: 1px solid #e6e6e8;
+    }
+    .title { font-weight: 600; }
+    .actions a, .actions button {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd;
+      background: #fff; text-decoration: none; color: var(--ink); font-size: 14px;
+    }
+    .actions a:hover { border-color: var(--brand); color: var(--brand); }
+    #map { height: calc(100vh - 48px); width: 100vw; }
+    .legend {
+      background: white; padding: 8px 10px; border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2); font: 12px/1.1 system-ui, sans-serif;
+      max-height: 30vh; overflow: auto;
+    }
+    .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
+    .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="title">Customer Heat Map</div>
+    <div class="actions">
+      <a href="{{ url_for('home') }}" aria-label="Back to Chat">← Back to Chat</a>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const map = L.map('map', { scrollWheelZoom: true }).setView([39.8, -98.6], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    function hashColor(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+      const r = 150 + (h & 0x3F);
+      const g = 150 + ((h >> 6) & 0x3F);
+      const b = 150 + ((h >> 12) & 0x3F);
+      return `rgb(${r},${g},${b})`;
+    }
+
+    const repColors = new Map();
+
+    fetch('{{ url_for("api_locations") }}')
+      .then(r => r.json())
+      .then(points => {
+        const group = L.featureGroup();
+        points.forEach(p => {
+          const rep = p.sales_rep || 'Unassigned';
+          if (!repColors.has(rep)) repColors.set(rep, hashColor(rep));
+          const color = repColors.get(rep);
+          const marker = L.circleMarker([p.lat, p.lon], {
+            radius: 6,
+            weight: 1,
+            color: '#333',
+            fillColor: color,
+            fillOpacity: 0.85
+          }).bindPopup(
+            `<b>${p.label}</b><br/>${p.full_address}<br/><i>${rep}</i>`
+          );
+          marker.addTo(group);
+        });
+        group.addTo(map);
+        if (points.length) map.fitBounds(group.getBounds().pad(0.2));
+        addLegend();
+      })
+      .catch(err => {
+        console.error(err);
+        alert('Could not load locations.');
+      });
+
+    function addLegend() {
+      const legend = L.control({ position: 'bottomright' });
+      legend.onAdd = () => {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = '<b>Sales Rep / Territory</b>';
+        for (const [rep, color] of repColors.entries()) {
+          const row = document.createElement('div');
+          row.className = 'row';
+          row.innerHTML = `<span class="swatch" style="background:${color}"></span><span>${rep}</span>`;
+          div.appendChild(row);
+        }
+        return div;
+      };
+      legend.addTo(map);
+    }
+  </script>
+</body>
+</html>

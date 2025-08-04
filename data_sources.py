@@ -1,13 +1,15 @@
 # data_sources.py
 """
-Inquiry-mode data utilities.
+Inquiry-mode data utilities + map helpers (NO external APIs).
 
-What this module does:
 - Robustly load customer_report.csv and customer_billing.csv (handles encodings).
 - Normalize and match customer names across both files (exact → loose → ID).
 - Aggregate report R12 (with header-variant detection) and billing patterns.
-- Use the segment printed in the report (e.g., 'C2') when present.
-- Provide recent-invoice lists for the UI/AI when the rep asks.
+- Honor the segment printed in the report (e.g., 'C2') when present.
+- Provide recent-invoice lists.
+- Map helpers: unique location extraction from report + coordinates from
+  customer_location.csv (columns: Account Name, City, Address, County State,
+  Zip Code, Min of Latitude, Min of Longitude). No Mapbox needed.
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ import pandas as pd
 # File paths (override via env if needed)
 CUSTOMER_REPORT_CSV  = os.getenv("CUSTOMER_REPORT_CSV",  "customer_report.csv")
 CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
+
+# Locations (local CSV with lat/lon; rename via env if needed)
+LOCATIONS_CSV = os.getenv("LOCATIONS_CSV", "customer_location.csv")
 
 # -------------------------------------------------------------------------
 # Text normalization (names)
@@ -69,7 +74,7 @@ def _read_csv(path: str) -> pd.DataFrame:
             return df
         except Exception as e:
             last_err = e
-    # final best-effort
+    # final attempt, surface error if any
     df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
     df.columns = [str(c).strip() for c in df.columns]
     return df
@@ -100,7 +105,7 @@ def _pick_id(row: Dict, fallback_index: int) -> str:
     return str(fallback_index)
 
 def _pick_name(row: Dict) -> str:
-    for key in ("Ship to Name", "Sold to Name", "CUSTOMER", "Customer", "account_name", "company"):
+    for key in ("Ship to Name", "Sold to Name", "CUSTOMER", "Customer", "account_name", "company", "Account Name"):
         val = str(row.get(key, "")).strip()
         if val:
             return val
@@ -127,12 +132,15 @@ def find_customer_id_by_name(name: str) -> Optional[str]:
         return None
     want = _norm_name(name)
     labels = make_inquiry_targets()
+    # exact
     for item in labels:
         if _norm_name(item["label"]) == want:
             return item["id"]
+    # substring
     for item in labels:
         if want and want in _norm_name(item["label"]):
             return item["id"]
+    # fuzzy
     options = [it["label"] for it in labels]
     match = difflib.get_close_matches(name, options, n=1, cutoff=0.6)
     if match:
@@ -153,7 +161,7 @@ def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
     bil_all = load_customer_billing()
 
     def norm_of(row: Dict) -> str:
-        for k in ("CUSTOMER", "Customer", "Ship to Name", "Sold to Name"):
+        for k in ("CUSTOMER", "Customer", "Ship to Name", "Sold to Name", "Account Name"):
             v = row.get(k, "")
             if v:
                 return _norm_name(v)
@@ -167,7 +175,7 @@ def find_inquiry_rows_flexible(customer_id: Optional[str] = None,
         report_hits = [r for r in rep_all if norm_of(r) == want]
         billing_hits = [r for r in bil_all if norm_of(r) == want]
 
-    # 2) loose if nothing found: substring / token-subset
+    # 2) loose if nothing found
     if not report_hits and not billing_hits and want:
         def loose_match(row: Dict) -> bool:
             cand = norm_of(row)
@@ -358,7 +366,6 @@ def classify_account_size(total_r12: float) -> str:
     return "D"
 
 def classify_relationship(offerings_count: int, had_revenue: bool) -> str:
-    # Legend: 1 = 4+, 2 = 3, 3 = 1–2, P = No Revenue
     if not had_revenue:
         return "P"
     if offerings_count >= 4:
@@ -387,7 +394,7 @@ def relationship_requirements_for_next(current: str, offerings_count: int) -> Tu
     return (nxt, 0)
 
 def next_size_letter(current: str) -> Optional[str]:
-    # Better sizes move toward the left on the grid: D → C → B → A
+    # Improve toward A: D → C → B → A
     order = ["D", "C", "B", "A"]
     try:
         i = order.index(current)
@@ -458,7 +465,7 @@ def recent_invoices(billing_rows: List[Dict], limit: int = 10) -> List[Dict]:
             "row": r
         })
     records.sort(key=lambda x: x["date"], reverse=True)
-    out = []
+    out: List[Dict] = []
     for it in records[:limit]:
         out.append({
             "Date": it["date"].strftime("%Y-%m-%d"),
@@ -469,7 +476,7 @@ def recent_invoices(billing_rows: List[Dict], limit: int = 10) -> List[Dict]:
     return out
 
 # -------------------------------------------------------------------------
-# Main entry: build inquiry brief (name-first; ID optional)
+# Build inquiry brief (name-first; ID optional)
 def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     probe_name = (name_or_id or "").strip()
     rows = find_inquiry_rows_flexible(customer_id=None, customer_name=probe_name)
@@ -494,14 +501,14 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     if not disp_name:
         disp_name = probe_name or "Unnamed"
 
-    # Display ID if we can find one; otherwise "n/a"
+    # Display ID
     display_id = "n/a"
     for idx, r in enumerate(report_rows + billing_rows):
         display_id = _pick_id(r, idx)
         if display_id:
             break
 
-    # ── Pull SEGMENT from report if it exists (e.g., 'C2') ───────────────
+    # Pull SEGMENT from report if exists (e.g., 'C2')
     seg_from_report = None
     for r in report_rows:
         for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
@@ -516,7 +523,6 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     rep = _aggregate_report_r12(report_rows)
     bil = _aggregate_billing(billing_rows)
 
-    # If report says "C2", honor it exactly; else compute from data
     if seg_from_report and len(seg_from_report) == 2 and seg_from_report[0] in "ABCD":
         size_letter = seg_from_report[0]
         rel_code    = seg_from_report[1]
@@ -556,5 +562,180 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "size_letter": size_letter,
         "relationship_code": rel_code,
         "inferred_name": disp_name,
-        "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
+        "recent_invoices": recent_invoices(billing_rows, limit=10),
     }
+
+# =========================
+# MAP / GEO HELPERS (USE LOCAL customer_location.csv — NO API)
+# =========================
+def _guess_state(row: Dict) -> str:
+    for k in ("State", "STATE", "County State", "County/State", "CountyState"):
+        v = str(row.get(k, "")).strip()
+        if not v:
+            continue
+        m = re.findall(r"\b([A-Z]{2})\b", v.upper())
+        if m:
+            return m[-1]
+    return ""
+
+def _zip_of(row: Dict) -> str:
+    for k in ("Zip Code", "ZIP", "Zip", "Postal Code"):
+        v = str(row.get(k, "")).strip()
+        if v:
+            v = re.sub(r"[^\d]", "", v)
+            if len(v) >= 5:
+                return v[:5]
+    return ""
+
+def _build_full_address(r: Dict) -> str:
+    addr = str(r.get("Address", "")).strip()
+    city = str(r.get("City", "")).strip()
+    state = _guess_state(r)
+    zc = _zip_of(r)
+    parts = [p for p in [addr, city, state, zc, "USA"] if p]
+    return ", ".join(parts)
+
+def _sales_rep_of(r: Dict) -> str:
+    return (str(r.get("Sales Rep Name", "")).strip()
+            or str(r.get("Sales Rep", "")).strip()
+            or "Unassigned")
+
+def _addr_key(full_address: str) -> str:
+    return re.sub(r"\s+", " ", (full_address or "").strip().lower())
+
+def _get_first_nonempty(row: Dict, keys: List[str]) -> str:
+    for k in keys:
+        v = str(row.get(k, "")).strip()
+        if v:
+            return v
+    return ""
+
+def _extract_latlon_from_row(row: Dict) -> Optional[Tuple[float, float]]:
+    """
+    Try common header variants for latitude/longitude present in the same row.
+    Supports your file's: 'Min of Latitude' / 'Min of Longitude'.
+    """
+    lat_keys = ["Min of Latitude", "Latitude", "LAT", "Lat", "latitude", "lat", "Y", "y"]
+    lon_keys = ["Min of Longitude", "Longitude", "LON", "Lng", "longitude", "lon", "X", "x"]
+
+    lat_s = _get_first_nonempty(row, lat_keys)
+    lon_s = _get_first_nonempty(row, lon_keys)
+    if not lat_s or not lon_s:
+        return None
+    try:
+        lat = float(str(lat_s).replace(",", ""))
+        lon = float(str(lon_s).replace(",", ""))
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return (lat, lon)
+    except Exception:
+        return None
+    return None
+
+@lru_cache(maxsize=1)
+def _locations_lookup_from_csv() -> Dict[str, Dict[str, Tuple[float, float]]]:
+    """
+    Build lookups from customer_location.csv:
+      - by_addr: normalized "Address, City, State, Zip, USA" -> (lat, lon)
+      - by_name: normalized Account Name                      -> (lat, lon)
+
+    Your file columns:
+      Account Name, City, Address, County State, Zip Code,
+      Min of Latitude, Min of Longitude
+    """
+    by_addr: Dict[str, Tuple[float, float]] = {}
+    by_name: Dict[str, Tuple[float, float]] = {}
+
+    path = LOCATIONS_CSV
+    if not os.path.exists(path):
+        return {"by_addr": by_addr, "by_name": by_name}
+
+    df = _read_csv(path)  # robust reader defined earlier
+    for _, r in df.iterrows():
+        row = {str(k): r[k] for k in df.columns}
+        latlon = _extract_latlon_from_row(row)
+        if not latlon:
+            continue
+
+        # Address-based key (reuse the same address builder as report side)
+        addr = _build_full_address(row)
+        if addr:
+            key = _addr_key(addr)
+            if key and key not in by_addr:
+                by_addr[key] = latlon
+
+        # Name-based key (Account Name)
+        acct = str(row.get("Account Name", "")).strip()
+        if acct:
+            nkey = _norm_name(acct)
+            if nkey and nkey not in by_name:
+                by_name[nkey] = latlon
+
+    return {"by_addr": by_addr, "by_name": by_name}
+
+def _unique_locations_from_report() -> List[Dict]:
+    """
+    One row per unique physical address from customer_report.csv.
+    """
+    seen = set()
+    uniq: List[Dict] = []
+    for r in load_customer_report():
+        full = _build_full_address(r)
+        if not full:
+            continue
+        key = _addr_key(full)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append({
+            "full_address": full,
+            "label": _pick_name(r),            # name for popup
+            "sales_rep": _sales_rep_of(r),     # used for color
+            "row": r,                           # keep raw row for inline lat/lon
+        })
+    return uniq
+
+def get_locations_with_geo() -> List[Dict]:
+    """
+    Returns a list of dicts with: label, sales_rep, lat, lon, full_address.
+    Resolution order:
+      1) Lat/Lon present on the report row
+      2) Match full address in customer_location.csv
+      3) Match Account Name in customer_location.csv
+    """
+    uniq = _unique_locations_from_report()
+    lookups = _locations_lookup_from_csv()
+    by_addr = lookups.get("by_addr", {})
+    by_name = lookups.get("by_name", {})
+
+    out: List[Dict] = []
+    for item in uniq:
+        r = item["row"]
+
+        # 1) Inline lat/lon in report
+        latlon = _extract_latlon_from_row(r)
+
+        # 2) Lookup by full address in locations file
+        if not latlon:
+            key = _addr_key(item["full_address"])
+            if key in by_addr:
+                latlon = by_addr[key]
+
+        # 3) Lookup by account name in locations file
+        if not latlon:
+            nkey = _norm_name(item["label"])
+            if nkey in by_name:
+                latlon = by_name[nkey]
+
+        if not latlon:
+            continue  # skip if still no coordinates
+
+        lat, lon = latlon
+        out.append({
+            "label": item["label"],
+            "sales_rep": item["sales_rep"],
+            "lat": float(lat),
+            "lon": float(lon),
+            "full_address": item["full_address"]
+        })
+
+    return out
