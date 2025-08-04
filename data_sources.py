@@ -1,8 +1,8 @@
 # data_sources.py
 """
 Inquiry data utilities:
-- Robust CSV loading (encodings; keep text; no NA coercion)
-- Flexible customer matching by ID or Name
+- Robust CSV loading (encodings; keep text; strip header whitespace)
+- Flexible customer matching by ID or Name (with normalization)
 - Billing aggregation (what/when/how often)
 - Segmentation:
     * Account Size (A/B/C/D) from R12 revenue
@@ -14,8 +14,7 @@ Inquiry data utilities:
 """
 
 from __future__ import annotations
-import os
-import difflib
+import os, re, difflib
 from functools import lru_cache
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -29,7 +28,7 @@ CUSTOMER_REPORT_CSV  = os.getenv("CUSTOMER_REPORT_CSV",  "customer_report.csv")
 CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
 
 # -------------------------------------------------------------------------
-# Robust CSV reader (now strips header whitespace)
+# Robust CSV reader (keeps all text + strips header whitespace)
 def _read_csv(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -47,7 +46,7 @@ def _read_csv(path: str) -> pd.DataFrame:
                 low_memory=False,
                 dtype=str,             # keep IDs and numerics as text
                 keep_default_na=False, # keep blanks as ""
-                **opts                  # pass encoding + encoding_errors
+                **opts                 # pass encoding + encoding_errors
             ).fillna("")
             # Normalize headers like " CUSTOMER "
             df.columns = [str(c).strip() for c in df.columns]
@@ -70,6 +69,22 @@ def load_customer_report() -> List[Dict]:
 @lru_cache(maxsize=1)
 def load_customer_billing() -> List[Dict]:
     return _read_csv(CUSTOMER_BILLING_CSV).to_dict(orient="records")
+
+# -------------------------------------------------------------------------
+# Name normalization (case/spacing/punct/suffix)
+def _norm_name(s: str) -> str:
+    if not s:
+        return ""
+    s = str(s).strip().lower()
+    s = re.sub(r"\s+", " ", s)              # collapse whitespace
+    s = re.sub(r"[^\w\s&]", "", s)          # remove punctuation except &
+    s = s.replace("&", " and ")
+    s = re.sub(r"\s+", " ", s).strip()
+    suffixes = [" inc", " llc", " co", " corp", " corporation", " company", " ltd", " limited"]
+    for suf in suffixes:
+        if s.endswith(suf):
+            s = s[: -len(suf)].strip()
+    return s
 
 # -------------------------------------------------------------------------
 # ID / Name heuristics
@@ -98,20 +113,24 @@ def make_inquiry_targets() -> List[Dict]:
             targets[cid] = {"id": cid, "label": name}
         elif targets[cid]["label"] == "Unnamed" and name != "Unnamed":
             targets[cid]["label"] = name
-    return sorted(targets.values(), key=lambda x: x["label"].lower())
+    return sorted(targets.values(), key=lambda x: _norm_name(x["label"]))
 
 def find_customer_id_by_name(name: str) -> Optional[str]:
     if not name:
         return None
+    want = _norm_name(name)
     labels = make_inquiry_targets()
-    # direct substring first
-    name_l = name.lower()
+    # exact normalized
     for item in labels:
-        if item["label"] and item["label"].lower() in name_l:
+        if _norm_name(item["label"]) == want:
             return item["id"]
-    # fuzzy fallback
+    # normalized substring
+    for item in labels:
+        if want and _norm_name(item["label"]).find(want) >= 0:
+            return item["id"]
+    # fuzzy on raw labels (fallback)
     options = [it["label"] for it in labels]
-    match = difflib.get_close_matches(name, options, n=1, cutoff=0.72)
+    match = difflib.get_close_matches(name, options, n=1, cutoff=0.6)
     if match:
         lbl = match[0]
         for it in labels:
@@ -131,9 +150,9 @@ def find_inquiry_rows(customer_id: str) -> Dict[str, List[Dict]]:
 
 def find_inquiry_rows_flexible(customer_id: str | None = None,
                                customer_name: str | None = None) -> Dict[str, List[Dict]]:
-    """Match by ID OR exact (case-insensitive) name across both CSVs."""
+    """Match by ID OR normalized name (exact or substring) across both CSVs."""
     id_val = (customer_id or "").strip()
-    name_l = (customer_name or "").strip().lower()
+    want = _norm_name(customer_name or "")
 
     rep_all = load_customer_report()
     bil_all = load_customer_billing()
@@ -141,21 +160,21 @@ def find_inquiry_rows_flexible(customer_id: str | None = None,
 
     def name_matches(row: Dict) -> bool:
         for k in ("CUSTOMER", "Customer", "Ship to Name", "Sold to Name"):
-            v = str(row.get(k, "")).strip()
-            if v and v.lower() == name_l:
+            v = _norm_name(row.get(k, ""))
+            if v and (v == want or (want and v.find(want) >= 0)):
                 return True
         return False
 
     for idx, r in enumerate(rep_all):
         if id_val and _pick_id(r, idx) == id_val:
             report_hits.append(r); continue
-        if name_l and name_matches(r):
+        if want and name_matches(r):
             report_hits.append(r)
 
     for idx, r in enumerate(bil_all):
         if id_val and _pick_id(r, idx) == id_val:
             billing_hits.append(r); continue
-        if name_l and name_matches(r):
+        if want and name_matches(r):
             billing_hits.append(r)
 
     return {"report": report_hits, "billing": billing_hits}
@@ -206,7 +225,7 @@ OFFERING_KEYS = ["SERVICE", "PARTS", "RENTAL", "NEW_EQUIP", "USED_EQUIP"]
 NICE = {"SERVICE":"Service", "PARTS":"Parts", "RENTAL":"Rental", "NEW_EQUIP":"New Equipment", "USED_EQUIP":"Used Equipment"}
 
 # -------------------------------------------------------------------------
-# Aggregations (now prefer Date/Type; fallback to legacy columns)
+# Aggregations (prefer new headers Date/Type; fallback to legacy)
 def _aggregate_report_r12(report_rows: List[Dict]) -> Dict[str, float]:
     buckets = {
         "NEW_EQUIP": 0.0,
@@ -231,7 +250,6 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
     invoices = 0
     last_invoice = None
     for r in billing_rows:
-        # NEW: prefer new headers
         dep = normalize_department(r.get("Type") or r.get("Department"))
         amt = _to_float(r.get("REVENUE"))
         by_dept[dep] += amt
@@ -246,8 +264,8 @@ def _aggregate_billing(billing_rows: List[Dict]) -> Dict:
 
     avg_days = None
     if len(dates) >= 2:
-        dates_sorted = sorted(dates)
-        deltas = [(dates_sorted[i] - dates_sorted[i-1]).days for i in range(1, len(dates_sorted))]
+        ds = sorted(dates)
+        deltas = [(ds[i] - ds[i-1]).days for i in range(1, len(ds))]
         if deltas:
             avg_days = sum(deltas) / len(deltas)
 
@@ -285,7 +303,7 @@ def classify_relationship(offerings_count: int, had_revenue: bool) -> str:
     if offerings_count == 3:
         return "2"
     if offerings_count == 2:
-        return "2"   # closest to tier 2
+        return "2"   # closest to tier 2 per your grid intent
     return "3"       # 0–1 offering
 
 def next_relationship(current: str) -> Optional[str]:
@@ -399,17 +417,25 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
     visit_focus = _recommend_focus(bil["by_dept"], bil["last_invoice"])
     next_level_actions = _actions_next_level(size_letter, rel_code, bil["offerings_count"], bil["by_dept"])
 
+    # ---- build lines ----
     lines: List[str] = []
     lines.append("<CONTEXT:INQUIRY>")
     lines.append(f"Customer: {disp_name} (ID: {cid or 'n/a'})")
     lines.append(f"Segmentation: Size={size_letter}  Relationship={rel_code}")
     lines.append(f"R12 Revenue (approx): ${rep['total_r12']:,.0f}")
-    lines.append("By Offering (R12-ish): " + ", ".join([f"{NICE[k]} ${rep.get(k,0.0):,.0f}" for k in ["SERVICE","PARTS","RENTAL","NEW_EQUIP","USED_EQUIP"]]))
-    lines.append(f"Billing: invoices={bil['invoice_count']}  last_invoice={bil['last_invoice'] or 'N/A'}  avg_days_between_invoices={bil['avg_days_between_invoices'] or 'N/A'}")
+    lines.append(
+        "By Offering (R12-ish): "
+        + ", ".join([f"{NICE[k]} ${rep.get(k, 0.0):,.0f}" for k in ["SERVICE", "PARTS", "RENTAL", "NEW_EQUIP", "USED_EQUIP"]])
+    )
+    lines.append(
+        f"Billing: invoices={bil['invoice_count']}  "
+        f"last_invoice={bil['last_invoice'] or 'N/A'}  "
+        f"avg_days_between_invoices={bil['avg_days_between_invoices'] or 'N/A'}"
+    )
     if bil["top_months"]:
-        lines.append("Top Months: " + ", ".join([f"{m} ${v:,.0f}" for m, v in bil['top_months']]))
+        lines.append("Top Months: " + ", ".join([f"{m} ${v:,.0f}" for m, v in bil["top_months"]]))
     if bil["top_offerings"]:
-        lines.append("Top Offerings: " + ", ".join([f"{NICE.get(k,k)} ${v:,.0f}" for k, v in bil['top_offerings']]))
+        lines.append("Top Offerings: " + ", ".join([f"{NICE.get(k, k)} ${v:,.0f}" for k, v in bil["top_offerings"]]))
     if visit_focus:
         lines.append("Visit Focus Suggestions: " + " | ".join(visit_focus))
     if next_level_actions:

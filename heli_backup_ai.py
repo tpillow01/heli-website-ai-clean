@@ -119,7 +119,7 @@ def login():
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
-    if request.method == "POST":
+    if request.method == "POST"):
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
         confirm = request.form.get("confirm") or ""
@@ -160,7 +160,7 @@ def chat():
     # ───────────── INQUIRY MODE ─────────────
     if mode == "inquiry":
         from data_sources import build_inquiry_brief, find_customer_id_by_name
-        # Try to resolve a customer from the question; fall back to the raw text
+        # Try to resolve a customer from the question; fall back to raw text
         probe = find_customer_id_by_name(user_q) or user_q
         brief = build_inquiry_brief(probe)
 
@@ -279,6 +279,29 @@ def api_targets():
         _id   = str(a.get("Account Name", label))
         items.append({"id": _id, "label": label})
     return jsonify(items)
+
+# ─── Inquiry preview (debug) ────────────────────────────────────────────
+@app.route("/api/inquiry_preview")
+@login_required
+def inquiry_preview():
+    from data_sources import (
+        build_inquiry_brief, find_inquiry_rows_flexible,
+        _aggregate_billing, _aggregate_report_r12
+    )
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "pass ?q=Customer Name"}), 400
+    brief = build_inquiry_brief(q)
+    if not brief:
+        return jsonify({"error":"not found"}), 404
+    rows = find_inquiry_rows_flexible(customer_name=q)
+    return jsonify({
+        "name": brief["inferred_name"],
+        "counts": {"report": len(rows["report"]), "billing": len(rows["billing"])},
+        "billing_agg": _aggregate_billing(rows["billing"]),
+        "report_agg": _aggregate_report_r12(rows["report"]),
+        "context_block": brief["context_block"]
+    })
 
 # Service worker at site root (so scope is '/')
 @app.route('/service-worker.js')
