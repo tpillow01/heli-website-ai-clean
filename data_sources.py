@@ -29,7 +29,7 @@ CUSTOMER_REPORT_CSV  = os.getenv("CUSTOMER_REPORT_CSV",  "customer_report.csv")
 CUSTOMER_BILLING_CSV = os.getenv("CUSTOMER_BILLING_CSV", "customer_billing.csv")
 
 # -------------------------------------------------------------------------
-# Robust CSV reader
+# data_sources.py
 def _read_csv(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -45,12 +45,14 @@ def _read_csv(path: str) -> pd.DataFrame:
             return pd.read_csv(
                 path,
                 low_memory=False,
-                dtype=str,             # keep IDs and numerics as text
-                keep_default_na=False  # keep blanks as ""
+                dtype=str,              # keep IDs/text as-is
+                keep_default_na=False,  # no NaN coercion
+                **opts                  # <-- pass encoding + encoding_errors
             ).fillna("")
         except Exception as e:
             last_err = e
             continue
+    # last resort
     try:
         return pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
     except Exception:
