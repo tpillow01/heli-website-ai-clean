@@ -1,4 +1,4 @@
-# heli_backup_ai.py  — main web service (with signup/login)
+# heli_backup_ai.py — main web service (with signup/login)
 import os
 import json
 import difflib
@@ -6,19 +6,17 @@ import sqlite3
 from datetime import timedelta
 
 import tiktoken
-from flask import (
-    Flask, render_template, request, jsonify, redirect, url_for, session
-)
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
+from ai_logic import generate_forklift_context
 from data_sources import make_inquiry_targets  # for /api/targets
-from ai_logic import generate_forklift_context  # your existing helper
 
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "dev-insecure")  # set in env for prod
+app.secret_key = os.getenv("SECRET_KEY", "dev-insecure")
 app.permanent_session_lifetime = timedelta(days=7)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -84,7 +82,6 @@ with open("models.json", "r", encoding="utf-8") as f:
     model_data = json.load(f)
 print(f"✅ Loaded {len(model_data)} models from JSON")
 
-# Helper for recommendation mode
 def find_account_by_name(text: str):
     low = text.lower()
     for acct in account_data:
@@ -105,7 +102,7 @@ def home():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == "POST":   # <-- no trailing parenthesis here
+    if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
         user = find_user_by_email(email)
@@ -115,15 +112,14 @@ def login():
         session["user_id"] = user["id"]
         session["email"] = user["email"]
         return redirect(request.args.get("next") or url_for("home"))
-    # GET
     return render_template("login.html")
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
-    if request.method == "POST":   # <-- no trailing parenthesis here
+    if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
-        password = request.form.get("password") or ""
-        confirm = request.form.get("confirm") or ""
+        password = (request.form.get("password") or "")
+        confirm  = (request.form.get("confirm") or "")
         if not email or not password:
             return render_template("signup.html", error="Email and password are required.", email=email), 400
         if password != confirm:
@@ -138,7 +134,6 @@ def signup():
         session["user_id"] = user["id"]
         session["email"] = user["email"]
         return redirect(url_for("home"))
-    # GET
     return render_template("signup.html")
 
 @app.route("/logout")
@@ -159,20 +154,14 @@ def chat():
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
-    # ───────────── INQUIRY MODE ─────────────
+    # ───────── Inquiry mode ─────────
     if mode == "inquiry":
         from data_sources import build_inquiry_brief, find_customer_id_by_name
-        # Try to resolve a customer from the question; fall back to raw text
         probe = find_customer_id_by_name(user_q) or user_q
         brief = build_inquiry_brief(probe)
 
         if not brief:
-            return jsonify({
-                "response": (
-                    "I couldn’t locate that customer in the report/billing data. "
-                    "Please include the company name as it appears in your system."
-                )
-            })
+            return jsonify({"response": "I couldn’t locate that customer in the report/billing data. Please include the company name as it appears in your system."})
 
         system_prompt = {
             "role": "system",
@@ -209,7 +198,7 @@ def chat():
         return jsonify({"response": f"{tag}\n\n{ai_reply}"})
 
 
-    # ───────── RECOMMENDATION MODE (existing flow) ─────────
+    # ───────── Recommendation mode (existing flow) ─────────
     acct = find_account_by_name(user_q)
     context_input = user_q
     if acct:
@@ -244,7 +233,7 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # Optional token guard (safe for gpt-4-8k)
+    # Token guard
     enc = tiktoken.encoding_for_model("gpt-4")
     while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
         messages.pop(1)
@@ -262,7 +251,7 @@ def chat():
 
     return jsonify({"response": ai_reply})
 
-# ─── Data for dropdowns ─────────────────────────────────────────────────
+# ─── Optional data endpoints ─────────────────────────────────────────────
 @app.route("/api/modes")
 def api_modes():
     return jsonify([
@@ -282,7 +271,7 @@ def api_targets():
         items.append({"id": _id, "label": label})
     return jsonify(items)
 
-# ─── Inquiry preview (debug) ────────────────────────────────────────────
+# Debug endpoint to inspect server-side aggregates
 @app.route("/api/inquiry_preview")
 @login_required
 def inquiry_preview():
@@ -295,7 +284,7 @@ def inquiry_preview():
         return jsonify({"error": "pass ?q=Customer Name"}), 400
     brief = build_inquiry_brief(q)
     if not brief:
-        return jsonify({"error":"not found"}), 404
+        return jsonify({"error": "not found"}), 404
     rows = find_inquiry_rows_flexible(customer_name=q)
     return jsonify({
         "name": brief["inferred_name"],
@@ -305,11 +294,9 @@ def inquiry_preview():
         "context_block": brief["context_block"]
     })
 
-# Service worker at site root (so scope is '/')
 @app.route('/service-worker.js')
 def service_worker():
     return app.send_static_file('service-worker.js')
 
-# ─── Run locally / Render ───────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
