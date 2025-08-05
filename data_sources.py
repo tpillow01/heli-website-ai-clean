@@ -559,8 +559,9 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
     }
 # =========================
-# MAP / GEO HELPERS (CSV with lat/lon)
+# MAP / GEO HELPERS (CSV with lat/lon) — with R12 enrichment
 # =========================
+import math  # make sure this import exists with your other imports
 
 CUSTOMER_LOCATION_CSV = os.getenv("CUSTOMER_LOCATION_CSV", "customer_location.csv")
 
@@ -589,9 +590,33 @@ def load_customer_location() -> List[Dict]:
         "City": "city",
         "Address": "address",
     }
-    for k, v in list(rename_map.items()):
-        if k in df.columns:
-            df[v] = df[k]
+    for src, dst in rename_map.items():
+        if src in df.columns:
+            df[dst] = df[src]
+
+    # strip whitespace on object cols
+    for c in df.columns:
+        if df[c].dtype == object:
+            df[c] = df[c].astype(str).str.strip()
+
+    # coerce lat/lon to floats; leave invalid as None (filtered later)
+    def _to_float_or_none(x):
+        try:
+            s = str(x).strip()
+            if not s or s.lower() == "nan":
+                return None
+            val = float(s)
+            if not math.isfinite(val):
+                return None
+            return val
+        except Exception:
+            return None
+
+    if "lat" in df.columns:
+        df["lat"] = df["lat"].apply(_to_float_or_none)
+    if "lon" in df.columns:
+        df["lon"] = df["lon"].apply(_to_float_or_none)
+
     return df.to_dict(orient="records")
 
 def _guess_state_from_cs(cs: str) -> str:
@@ -602,47 +627,89 @@ def _guess_state_from_cs(cs: str) -> str:
 
 def _build_name_index_for_report() -> Dict[str, Dict]:
     """
-    Build a quick lookup of normalized name -> { segment, sales_rep } from report.
-    If segment not in row, we compute size letter from the aggregated totals per name.
+    Build lookup: normalized name -> {
+        segment_from_report (if present),
+        sales_rep,
+        size_letter,
+        relationship_code,
+        r12  (R12 Aftermarket or sum of parts/service/rental; fallback = last_365 from billing)
+    }
     """
-    rows = load_customer_report()
-    # group rows by normalized name
-    groups: Dict[str, List[Dict]] = defaultdict(list)
-    for r in rows:
-        nm = _norm_name(_pick_name(r))
-        if nm:
-            groups[nm].append(r)
+    rep_rows = load_customer_report()
+    bil_rows = load_customer_billing()
 
+    # group by normalized display name
+    def nm(r: Dict) -> str:
+        return _norm_name(_pick_name(r))
+
+    rep_groups: Dict[str, List[Dict]] = defaultdict(list)
+    for r in rep_rows:
+        k = nm(r)
+        if k:
+            rep_groups[k].append(r)
+
+    bil_groups: Dict[str, List[Dict]] = defaultdict(list)
+    for r in bil_rows:
+        k = nm(r)
+        if k:
+            bil_groups[k].append(r)
+
+    all_names = set(rep_groups.keys()) | set(bil_groups.keys())
     out: Dict[str, Dict] = {}
-    for nm, lst in groups.items():
-        # try segment straight from report
-        seg = None
-        rep_name_rows = lst
-        for r in rep_name_rows:
+
+    for nkey in all_names:
+        rep_list = rep_groups.get(nkey, [])
+        bil_list = bil_groups.get(nkey, [])
+
+        # 1) aggregate
+        rep_agg = _aggregate_report_r12(rep_list) if rep_list else {"total_r12": 0.0}
+        bil_agg = _aggregate_billing(bil_list) if bil_list else {
+            "by_dept": {},
+            "total_last_365": 0.0,
+            "offerings_count": 0,
+        }
+
+        # 2) segment from report, if present (e.g., "C2")
+        seg_from_report = None
+        for r in rep_list:
             for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
                 val = str(r.get(key, "")).strip()
                 if val:
-                    seg = val.upper().replace(" ", "")
+                    seg_from_report = val.upper().replace(" ", "")
                     break
-            if seg:
+            if seg_from_report:
                 break
 
-        # compute size if no explicit segment
-        size_letter = None
-        if not seg:
-            agg = _aggregate_report_r12(rep_name_rows)
-            size_letter = classify_account_size(agg["total_r12"])
-            seg = size_letter or ""
+        # 3) pick an R12 value for sizing (report preferred, else last 365 billing)
+        r12_for_size = rep_agg.get("total_r12", 0.0)
+        if not r12_for_size or r12_for_size <= 0:
+            r12_for_size = float(bil_agg.get("total_last_365", 0.0) or 0.0)
 
-        # sales rep name (territory) from the first row that has it
+        # 4) compute size/relationship
+        if seg_from_report and len(seg_from_report) == 2 and seg_from_report[0] in "ABCD":
+            size_letter = seg_from_report[0]
+            relationship_code = seg_from_report[1]
+        else:
+            size_letter = classify_account_size(r12_for_size)
+            had_rev = (r12_for_size > 0) or any(v > 0 for v in bil_agg.get("by_dept", {}).values())
+            relationship_code = classify_relationship(bil_agg.get("offerings_count", 0), had_rev)
+
+        # 5) sales rep (territory) from report rows if available
         sales_rep = ""
-        for r in rep_name_rows:
+        for r in rep_list:
             v = (r.get("Sales Rep Name") or r.get("Sales Rep") or "").strip()
             if v:
                 sales_rep = v
                 break
 
-        out[nm] = {"segment": seg, "sales_rep": sales_rep}
+        out[nkey] = {
+            "segment_from_report": seg_from_report or "",
+            "sales_rep": sales_rep,
+            "size_letter": size_letter or "",
+            "relationship_code": relationship_code or "",
+            "r12": float(r12_for_size or 0.0),
+        }
+
     return out
 
 def get_locations_with_geo() -> List[Dict]:
@@ -650,37 +717,38 @@ def get_locations_with_geo() -> List[Dict]:
     Return unique map points from customer_location.csv (lat/lon present),
     enriched with:
       - sales_rep (from report: Sales Rep Name)
-      - segment (from report when present, otherwise computed size letter)
-      - state, county, zip (parsed from CSV)
-    Deduping by normalized account name.
+      - segment (prefer report; else computed size+relationship)
+      - size_letter, relationship_code
+      - r12 (report aftermarket R12 or sum; fallback = billing last 365)
+      - state, county, zip, city, address
+    Deduped by normalized account name. Rows with invalid coords are skipped.
     """
     loc_rows = load_customer_location()
     if not loc_rows:
         return []
 
-    # name -> {segment, sales_rep}
+    # name -> meta with R12/segment/etc
     name_meta = _build_name_index_for_report()
 
     seen_names = set()
     out: List[Dict] = []
 
     for r in loc_rows:
-        # label / name
         label = (r.get("account_name") or r.get("Account Name") or "").strip()
         if not label:
             continue
         nkey = _norm_name(label)
-        if not nkey:
-            continue
-        if nkey in seen_names:
+        if not nkey or nkey in seen_names:
             continue
 
-        # coords
+        # coords (skip any invalid)
         lat_raw = r.get("lat") or r.get("Min of Latitude")
         lon_raw = r.get("lon") or r.get("Min of Longitude")
         try:
             lat = float(str(lat_raw).strip())
             lon = float(str(lon_raw).strip())
+            if not (math.isfinite(lat) and math.isfinite(lon)):
+                continue
         except Exception:
             continue
 
@@ -692,15 +760,21 @@ def get_locations_with_geo() -> List[Dict]:
         state  = _guess_state_from_cs(cs)
         county = cs.split(",")[0].strip() if "," in cs else ""
 
-        # enrich from report
+        # enrich from name meta
         meta = name_meta.get(nkey, {})
-        segment   = str(meta.get("segment") or "").upper()
-        sales_rep = meta.get("sales_rep") or ""
+        size_letter = meta.get("size_letter", "")
+        rel_code    = meta.get("relationship_code", "")
+        seg_display = meta.get("segment_from_report") or (f"{size_letter}{rel_code}" if size_letter and rel_code else "")
+        sales_rep   = meta.get("sales_rep", "")
+        r12_val     = float(meta.get("r12", 0.0))
 
         out.append({
             "label": label,
             "sales_rep": sales_rep,
-            "segment": segment,
+            "segment": seg_display,
+            "size": size_letter,
+            "relationship": rel_code,
+            "r12": r12_val,
             "lat": lat,
             "lon": lon,
             "state": state,

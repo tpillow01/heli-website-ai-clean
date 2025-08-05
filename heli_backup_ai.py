@@ -341,7 +341,6 @@ from flask import Response  # you already import this earlier
 def api_locations():
     from data_sources import get_locations_with_geo
     items = get_locations_with_geo()
-    # Force strict JSON (no NaN/Infinity), which fixes JSON.parse errors in the browser
     return Response(json.dumps(items, allow_nan=False), mimetype="application/json")
 
 # Debug endpoint to inspect server-side aggregates
