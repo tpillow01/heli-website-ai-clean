@@ -559,9 +559,9 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
     }
 # =========================
-# MAP / GEO HELPERS (CSV with lat/lon) — with R12 enrichment
+# MAP / GEO HELPERS (CSV with lat/lon) — with R12 enrichment + fuzzy name matching
 # =========================
-import math  # make sure this import exists with your other imports
+import math  # ensure this is imported at top with others
 
 CUSTOMER_LOCATION_CSV = os.getenv("CUSTOMER_LOCATION_CSV", "customer_location.csv")
 
@@ -638,7 +638,6 @@ def _build_name_index_for_report() -> Dict[str, Dict]:
     rep_rows = load_customer_report()
     bil_rows = load_customer_billing()
 
-    # group by normalized display name
     def nm(r: Dict) -> str:
         return _norm_name(_pick_name(r))
 
@@ -712,6 +711,34 @@ def _build_name_index_for_report() -> Dict[str, Dict]:
 
     return out
 
+def _closest_name_key(nkey: str, keys: List[str], cutoff: float = 0.86) -> Optional[str]:
+    """Return best fuzzy match for nkey among keys, if similarity >= cutoff."""
+    if not nkey or not keys:
+        return None
+    # quick exact pass
+    if nkey in keys:
+        return nkey
+    # fuzzy
+    try:
+        cand = difflib.get_close_matches(nkey, keys, n=1, cutoff=cutoff)
+        if cand:
+            return cand[0]
+    except Exception:
+        pass
+    # token-subset loose match
+    wt = {t for t in nkey.split() if len(t) > 1}
+    best = None
+    best_score = 0
+    for k in keys:
+        ct = {t for t in k.split() if len(t) > 1}
+        if not wt:
+            continue
+        score = len(wt & ct) / len(wt)
+        if score > best_score and score >= 0.67:
+            best = k
+            best_score = score
+    return best
+
 def get_locations_with_geo() -> List[Dict]:
     """
     Return unique map points from customer_location.csv (lat/lon present),
@@ -722,13 +749,14 @@ def get_locations_with_geo() -> List[Dict]:
       - r12 (report aftermarket R12 or sum; fallback = billing last 365)
       - state, county, zip, city, address
     Deduped by normalized account name. Rows with invalid coords are skipped.
+    Uses fuzzy matching to align location names to report/billing names.
     """
     loc_rows = load_customer_location()
     if not loc_rows:
         return []
 
-    # name -> meta with R12/segment/etc
     name_meta = _build_name_index_for_report()
+    meta_keys = list(name_meta.keys())
 
     seen_names = set()
     out: List[Dict] = []
@@ -760,29 +788,37 @@ def get_locations_with_geo() -> List[Dict]:
         state  = _guess_state_from_cs(cs)
         county = cs.split(",")[0].strip() if "," in cs else ""
 
-        # enrich from name meta
-        meta = name_meta.get(nkey, {})
-        size_letter = meta.get("size_letter", "")
-        rel_code    = meta.get("relationship_code", "")
-        seg_display = meta.get("segment_from_report") or (f"{size_letter}{rel_code}" if size_letter and rel_code else "")
-        sales_rep   = meta.get("sales_rep", "")
-        r12_val     = float(meta.get("r12", 0.0))
+        # enrich from meta — exact or fuzzy
+        meta = name_meta.get(nkey)
+        if not meta:
+            # try fuzzy on normalized keys (handles small typos like CYRSTAL → CRYSTAL)
+            close_key = _closest_name_key(nkey, meta_keys, cutoff=0.86)
+            if close_key:
+                meta = name_meta.get(close_key)
+
+        # safe defaults if still missing
+        size_letter = meta.get("size_letter", "") if meta else ""
+        rel_code    = meta.get("relationship_code", "") if meta else ""
+        seg_display = (meta.get("segment_from_report") or (f"{size_letter}{rel_code}" if size_letter and rel_code else "")) if meta else ""
+        sales_rep   = (meta.get("sales_rep", "") if meta else "") or "-"          # never "undefined" in JSON
+        r12_val     = float(meta.get("r12", 0.0)) if meta else 0.0
 
         out.append({
             "label": label,
             "sales_rep": sales_rep,
             "segment": seg_display,
-            "size": size_letter,
-            "relationship": rel_code,
+            "size": size_letter or "-",
+            "relationship": rel_code or "-",
             "r12": r12_val,
             "lat": lat,
             "lon": lon,
-            "state": state,
-            "county": county,
-            "zip": _zip,
-            "city": city,
-            "address": addr,
+            "state": state or "-",
+            "county": county or "-",
+            "zip": _zip or "-",
+            "city": city or "",
+            "address": addr or "",
         })
         seen_names.add(nkey)
 
     return out
+
