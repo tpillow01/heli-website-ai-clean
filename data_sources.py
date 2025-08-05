@@ -568,187 +568,451 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
     }
 # =========================
-# MAP / GEO HELPERS (CSV with lat/lon)  — REPLACE the whole section
+# MAP / GEO HELPERS (FAST, NO EXTERNAL API)
 # =========================
-CUSTOMER_LOCATION_CSV = os.getenv("CUSTOMER_LOCATION_CSV", "customer_location.csv")
+import os
+import re
+import unicodedata
+from functools import lru_cache
+from collections import defaultdict
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
+
+# We assume these exist elsewhere in your file:
+# - load_customer_report()  -> List[Dict]
+# - load_customer_billing() -> List[Dict]
+
+# If you override via env:
+LOCATIONS_CSV = os.getenv("LOCATIONS_CSV", "customer_location.csv")
+
+# ---------- Name & address helpers ----------
+def _pick_name(row: dict) -> str:
+    """Return a displayable customer name from whichever column is present."""
+    for k in (
+        "Account Name", "Customer", "CUSTOMER",
+        "Sold to Name", "Ship to Name", "name", "Name"
+    ):
+        v = row.get(k)
+        if v:
+            v = str(v).strip()
+            if v:
+                return v
+    return "Unnamed"
+
+def _norm_name(s: str) -> str:
+    """Normalize names for matching (lowercased, stripped of punctuation, unify &)."""
+    try:
+        if s is None:
+            return ""
+        s = str(s)
+        s = unicodedata.normalize("NFKD", s)
+        s = s.replace("\u00a0", " ")
+        s = re.sub(r"\s+", " ", s).strip().lower()
+        s = re.sub(r"[^\w\s&]", "", s)
+        s = s.replace("&", " and ")
+        s = re.sub(r"\s+", " ", s).strip()
+        for suf in (" inc", " llc", " co", " corp", " corporation", " company", " ltd", " limited"):
+            if s.endswith(suf):
+                s = s[: -len(suf)].strip()
+        return s
+    except Exception:
+        return ""
+
+def _addr_key(addr: str) -> str:
+    if not addr:
+        return ""
+    a = re.sub(r"\s+", " ", str(addr)).strip().lower()
+    a = a.replace("#", "")
+    return a
+
+def _guess_state(row: Dict) -> str:
+    for k in ("State", "STATE", "County State", "County/State", "CountyState"):
+        v = str(row.get(k, "")).strip()
+        if not v:
+            continue
+        m = re.findall(r"\b([A-Z]{2})\b", v.upper())
+        if m:
+            return m[-1]
+    return ""
+
+def _split_county_state(row: Dict) -> Tuple[str, str]:
+    raw = str(row.get("County State", "")).strip()
+    if not raw:
+        return ("", _guess_state(row))
+    parts = re.split(r"[, ]+", raw.strip())
+    if len(parts) >= 2:
+        state = parts[-1].upper()
+        county = " ".join(parts[:-1]).strip()
+        return (county, state)
+    return (raw, _guess_state(row))
+
+def _build_full_address(r: Dict) -> str:
+    addr = str(r.get("Address", "")).strip()
+    city = str(r.get("City", "")).strip()
+    state = _guess_state(r)
+    zc = str(r.get("Zip Code", "") or r.get("ZIP", "")).strip()
+    parts = [p for p in [addr, city, state, zc, "USA"] if p]
+    return ", ".join(parts)
+
+def _sales_rep_of(r: Dict) -> str:
+    return (str(r.get("Sales Rep Name", "")).strip()
+            or str(r.get("Sales Rep", "")).strip()
+            or "Unassigned")
+
+# ---------- CSV load/lookup for coordinates ----------
+def _read_csv_generic(path: str) -> pd.DataFrame:
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    attempts = [
+        {"encoding": "utf-8",     "encoding_errors": "strict"},
+        {"encoding": "utf-8-sig", "encoding_errors": "replace"},
+        {"encoding": "cp1252",    "encoding_errors": "replace"},
+        {"encoding": "latin1",    "encoding_errors": "replace"},
+    ]
+    for opts in attempts:
+        try:
+            df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False, **opts).fillna("")
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+        except Exception:
+            continue
+    df = pd.read_csv(path, low_memory=False, dtype=str, keep_default_na=False).fillna("")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
 
 @lru_cache(maxsize=1)
-def load_customer_location() -> List[Dict]:
-    """
-    Expected columns:
-      - Account Name
-      - City
-      - Address
-      - County State  (e.g. 'Marion, IN' or 'Marion County, IN')
-      - Zip Code
-      - Min of Latitude
-      - Min of Longitude
-    """
-    df = _read_csv(CUSTOMER_LOCATION_CSV)
+def _locations_df() -> pd.DataFrame:
+    """Customer locations CSV that already contains lat/lon."""
+    df = _read_csv_generic(LOCATIONS_CSV)
     if df.empty:
-        return []
-    # normalize header variants without dropping original columns
-    def copy_col(src, dst):
-        if src in df.columns and dst not in df.columns:
-            df[dst] = df[src]
+        return df
+    # normalize column names
+    colmap = {}
+    for c in df.columns:
+        k = c.strip().lower()
+        if k in ("account name", "account_name", "name", "customer"):
+            colmap[c] = "Account Name"
+        elif k in ("min of latitude", "latitude", "lat"):
+            colmap[c] = "Min of Latitude"
+        elif k in ("min of longitude", "longitude", "lon", "lng"):
+            colmap[c] = "Min of Longitude"
+        elif k in ("zip", "zip code", "zipcode"):
+            colmap[c] = "Zip Code"
+        elif k in ("county state", "countystate", "county/state"):
+            colmap[c] = "County State"
+        elif k == "address":
+            colmap[c] = "Address"
+        elif k == "city":
+            colmap[c] = "City"
+    if colmap:
+        df = df.rename(columns=colmap)
+    return df
 
-    copy_col("Min of Latitude",  "lat")
-    copy_col("Min of Longitude", "lon")
-    copy_col("Zip Code",         "zip")
-    copy_col("County State",     "county_state")
-    copy_col("Account Name",     "account_name")
-    copy_col("City",             "city")
-    copy_col("Address",          "address")
+@lru_cache(maxsize=1)
+def _locations_lookup_from_csv() -> Dict[str, Dict]:
+    """Two quick lookups: by normalized name, and by normalized full-address."""
+    by_name: Dict[str, Tuple[float, float]] = {}
+    by_addr: Dict[str, Tuple[float, float]] = {}
+    df = _locations_df()
+    if df.empty:
+        return {"by_name": by_name, "by_addr": by_addr}
 
-    # some CSVs may have numeric ZIPs; keep as string
-    if "zip" in df.columns:
-        df["zip"] = df["zip"].astype(str).str.strip()
+    for _, row in df.iterrows():
+        name = _norm_name(row.get("Account Name", ""))
+        lat = str(row.get("Min of Latitude", "")).strip()
+        lon = str(row.get("Min of Longitude", "")).strip()
+        addr = ", ".join([str(row.get("Address", "")).strip(),
+                          str(row.get("City", "")).strip(),
+                          str(row.get("County State", "")).strip(),
+                          str(row.get("Zip Code", "")).strip()]).strip(", ")
+        try:
+            if lat and lon:
+                latf = float(lat); lonf = float(lon)
+            else:
+                continue
+        except Exception:
+            continue
 
-    return df.to_dict(orient="records")
+        if name:
+            by_name.setdefault(name, (latf, lonf))
+        if addr:
+            by_addr.setdefault(_addr_key(addr), (latf, lonf))
+    return {"by_name": by_name, "by_addr": by_addr}
 
+def _extract_latlon_from_row(r: Dict) -> Optional[Tuple[float, float]]:
+    """If report rows already carry lat/lon, use them."""
+    for lat_k in ("lat", "Lat", "LAT", "Latitude", "Min of Latitude"):
+        for lon_k in ("lon", "Lon", "LON", "Longitude", "Min of Longitude"):
+            lat = str(r.get(lat_k, "")).strip()
+            lon = str(r.get(lon_k, "")).strip()
+            if lat and lon:
+                try:
+                    return (float(lat), float(lon))
+                except Exception:
+                    pass
+    return None
 
-def _split_county_state(cs: str) -> Tuple[str, str]:
-    """
-    Parse 'County State' like 'Marion, IN' or 'Marion County, IN' -> ('Marion', 'IN').
-    Returns ('', '') if not parseable.
-    """
-    s = (cs or "").strip()
-    if not s:
-        return ("", "")
-    # grab trailing state code
-    m = re.search(r"\b([A-Z]{2})\b\s*$", s.upper())
-    state = m.group(1) if m else ""
-    # county is the part before the last comma, sans 'County'
-    county = s
-    if "," in s:
-        county = s.rsplit(",", 1)[0]
-    county = county.replace("County", "").strip()
-    return (county, state)
+def _unique_locations_from_report() -> List[Dict]:
+    """Unique customer locations from the report (dedupe by address, else by name)."""
+    seen = set()
+    uniq: List[Dict] = []
+    for r in load_customer_report():
+        label = _pick_name(r)
+        full = _build_full_address(r)
+        key = _addr_key(full) if full else f"name::{_norm_name(label)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append({
+            "full_address": full or "",
+            "label": label,
+            "sales_rep": _sales_rep_of(r),
+            "row": r,
+        })
+    return uniq
 
+# ---------- Business classification ----------
+def classify_account_size(total_r12: float) -> str:
+    if total_r12 >= 200_000: return "A"
+    if total_r12 >=  80_000: return "B"
+    if total_r12 >=  10_000: return "C"
+    return "D"
 
-def _name_index_group(rows: List[Dict]) -> Dict[str, List[Dict]]:
-    """
-    Group a list of rows by normalized picked name.
-    """
-    groups: Dict[str, List[Dict]] = defaultdict(list)
+def _aggregate_report_r12(rows: List[Dict]) -> Dict:
+    """Sum best-available R12 aftermarket revenue across rows."""
+    total = 0.0
     for r in rows:
+        for k in ("Revenue Rolling 12 Months - Aftermarket", "R12 Aftermarket Revenue"):
+            v = r.get(k)
+            if v:
+                try:
+                    total += float(str(v).replace(",", "").replace("$", ""))
+                    break
+                except Exception:
+                    pass
+    return {"total_r12": total}
+
+# ---- FAST date parser to avoid pandas "guess" overhead ----
+_DATE_RE = re.compile(r"^\s*(\d{1,4})[/-](\d{1,2})[/-](\d{1,4})")
+def _parse_date_fast(s: str) -> Optional[datetime]:
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%Y/%m/%d", "%m-%d-%Y", "%m-%d-%y"):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            pass
+    m = _DATE_RE.match(s.replace(".", "-").replace(" ", ""))
+    if m:
+        a, b, c = m.groups()
+        y, mth, d = None, None, None
+        if len(a) == 4:      # yyyy-mm-dd
+            y, mth, d = int(a), int(b), int(c)
+        elif len(c) == 4:    # mm/dd/yyyy
+            y, mth, d = int(c), int(a), int(b)
+        if y and mth and d:
+            try:
+                return datetime(y, mth, d)
+            except Exception:
+                return None
+    return None
+
+def _aggregate_billing(rows: List[Dict]) -> Dict:
+    """Summaries from billing rows (last 12 months by department, cadence, top months)."""
+    if not rows:
+        return {
+            "invoice_count": 0,
+            "by_dept": {},
+            "top_months": [],
+            "top_offerings": [],
+            "avg_days_between_invoices": None,
+            "last_invoice": None,
+            "total_last_365": 0.0,
+        }
+
+    by_dept = defaultdict(float)
+    by_month = defaultdict(float)
+    dates: List[datetime] = []
+    amounts_last365: List[float] = []
+
+    now = datetime.utcnow()
+    try:
+        cutoff = now.replace(year=now.year - 1)
+    except ValueError:
+        # Dec 31 edge case; fallback to ~365 days
+        cutoff = now - pd.Timedelta(days=365)
+
+    for r in rows:
+        d_raw = (r.get("Date") or r.get("Doc. Date") or r.get("date") or "").strip()
+        d = _parse_date_fast(d_raw)
+        typ = (r.get("Type") or r.get("Department") or "").strip()
+        amt_raw = (r.get("REVENUE") or r.get("Revenue") or r.get("Amount") or "").strip()
+        try:
+            amt = float(str(amt_raw).replace(",", "").replace("$", "").replace("(", "-").replace(")", ""))
+        except Exception:
+            amt = 0.0
+
+        if d:
+            dates.append(d)
+            ym = d.strftime("%Y-%m")
+            by_month[ym] += amt
+            if d >= cutoff:
+                by_dept[typ] += amt
+                amounts_last365.append(amt)
+
+    dates_sorted = sorted(dates)
+    gaps = []
+    for i in range(1, len(dates_sorted)):
+        gaps.append((dates_sorted[i] - dates_sorted[i-1]).days)
+    avg_gap = sum(gaps)/len(gaps) if gaps else None
+    last_inv = dates_sorted[-1].strftime("%Y-%m-%d") if dates_sorted else None
+
+    top_months = sorted(by_month.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    top_off = sorted(by_dept.items(), key=lambda kv: kv[1], reverse=True)[:5]
+
+    return {
+        "invoice_count": len(rows),
+        "by_dept": dict(by_dept),
+        "top_months": top_months,
+        "top_offerings": top_off,
+        "avg_days_between_invoices": avg_gap,
+        "last_invoice": last_inv,
+        "total_last_365": sum(amounts_last365),
+    }
+
+# ---------- Fast indexes (avoid O(N^2)) ----------
+@lru_cache(maxsize=1)
+def _rep_rows_by_norm() -> Dict[str, List[dict]]:
+    """Index customer_report rows by normalized name once to avoid O(N^2)."""
+    idx: Dict[str, List[dict]] = defaultdict(list)
+    for r in load_customer_report():
         nm = _norm_name(_pick_name(r))
         if nm:
-            groups[nm].append(r)
-    return groups
+            idx[nm].append(r)
+    return idx
 
+@lru_cache(maxsize=1)
+def _billing_rows_by_norm() -> Dict[str, List[dict]]:
+    """Index billing rows by normalized customer name."""
+    idx: Dict[str, List[dict]] = defaultdict(list)
+    for r in load_customer_billing():
+        cand = (r.get("CUSTOMER") or r.get("Customer") or _pick_name(r))
+        nm = _norm_name(cand)
+        if nm:
+            idx[nm].append(r)
+    return idx
 
-def _report_meta_index() -> Dict[str, Dict]:
+@lru_cache(maxsize=1)
+def _name_aggregate_index() -> Dict[str, Dict]:
     """
-    Build normalized name -> { segment, sales_rep, r12_total } from the report.
-    Segment is taken directly from report if available; otherwise computed (size letter only).
+    Precompute total for size and size_letter per normalized name, using
+    report R12 first; if missing, fall back to last-365 billing total.
     """
-    rep_rows = load_customer_report()
-    by_name = _name_index_group(rep_rows)
+    rep_groups = _rep_rows_by_norm()
+    bil_groups = _billing_rows_by_norm()
 
     out: Dict[str, Dict] = {}
-    for nm, lst in by_name.items():
-        # segment straight from report if present
-        seg = None
-        sales_rep = ""
-        for r in lst:
-            # any sales rep/territory
-            if not sales_rep:
-                sales_rep = (r.get("Sales Rep Name") or r.get("Sales Rep") or "").strip()
-            for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
-                val = str(r.get(key, "")).strip()
-                if val:
-                    seg = val.upper().replace(" ", "")
-                    break
-            if seg and sales_rep:
-                break
-
-        # compute R12 and size letter
-        agg = _aggregate_report_r12(lst)
-        r12_total = float(agg.get("total_r12", 0.0))
-        size_letter = classify_account_size(r12_total)
-
-        # if no explicit segment, fall back to size letter (no relationship)
-        if not seg:
-            seg = size_letter
-
+    all_names = set(rep_groups.keys()) | set(bil_groups.keys())
+    for nm in all_names:
+        rep = _aggregate_report_r12(rep_groups.get(nm, []))
+        bil = _aggregate_billing(bil_groups.get(nm, []))
+        total_r12 = rep["total_r12"] if rep["total_r12"] > 0 else bil.get("total_last_365", 0.0)
         out[nm] = {
-            "segment": seg,            # e.g., "C2" or "A"
-            "sales_rep": sales_rep,    # territory from report
-            "r12_total": r12_total,    # numeric
+            "total_r12_for_size": total_r12,
+            "size_letter": classify_account_size(total_r12),
         }
     return out
 
+# ---------- Segment + geo fields ----------
+def _segment_from_report_rows(rows: List[Dict]) -> str:
+    for r in rows:
+        for k in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R25 - 36 Segment (Sold to ID)"):
+            v = str(r.get(k, "")).strip()
+            if v:
+                return v
+    return ""
+
+def _state_county_zip_from_row(r: Dict) -> Tuple[str, str, str]:
+    county, st = _split_county_state(r)
+    z = str(r.get("Zip Code", "") or r.get("ZIP", "")).strip()
+    return (st, county, z)
 
 def get_locations_with_geo() -> List[Dict]:
     """
-    Return unique map points from customer_location.csv (lat/lon present),
-    enriched with:
-      - sales_rep (from report)
-      - segment   (from report if available; else computed size letter)
-      - r12_total (report R12; if zero, fall back to billing last-365)
-      - state, county, zip, city, address
-    Deduped by normalized account name. Optimized to avoid N×M scans.
+    Returns pins with:
+      label, sales_rep, lat, lon, full_address, state, county, zip,
+      size_letter (A/B/C/D), segment (e.g., 'B2' if present), total_r12.
+    Any bad row is skipped (logged), so the API never 500s due to a single record.
     """
-    loc_rows = load_customer_location()
-    if not loc_rows:
-        return []
+    uniq = _unique_locations_from_report()
+    lookups = _locations_lookup_from_csv()
+    by_addr = lookups.get("by_addr", {})
+    by_name = lookups.get("by_name", {})
 
-    # Precompute indexes once (fast)
-    name_meta = _report_meta_index()                 # from report
-    billing_groups = _name_index_group(load_customer_billing())
+    rep_by_norm = _rep_rows_by_norm()
+    name_idx = _name_aggregate_index()
 
-    seen = set()
     out: List[Dict] = []
+    skipped = 0
 
-    for r in loc_rows:
-        label = (r.get("account_name") or r.get("Account Name") or "").strip()
-        if not label:
-            continue
-        nkey = _norm_name(label)
-        if not nkey or nkey in seen:
-            continue
-
-        # coords: must be valid floats
+    for item in uniq:
         try:
-            lat = float(str((r.get("lat") or r.get("Min of Latitude") or "")).strip())
-            lon = float(str((r.get("lon") or r.get("Min of Longitude") or "")).strip())
-        except Exception:
-            # skip rows with invalid coords
-            continue
+            nkey = _norm_name(item.get("label"))
+            if not nkey:
+                skipped += 1
+                continue
 
-        city = (r.get("city") or r.get("City") or "").strip()
-        addr = (r.get("address") or r.get("Address") or "").strip()
-        cs   = (r.get("county_state") or r.get("County State") or "").strip()
-        zipc = (r.get("zip") or r.get("Zip Code") or "").strip()
-        county, state = _split_county_state(cs)
+            r = item.get("row", {})
+            # Coordinates resolution (name → inline → full address)
+            latlon = by_name.get(nkey) or _extract_latlon_from_row(r)
+            if not latlon and item.get("full_address"):
+                latlon = by_addr.get(_addr_key(item["full_address"]))
+            if not latlon:
+                skipped += 1
+                continue
+            lat, lon = float(latlon[0]), float(latlon[1])
 
-        # report-based meta
-        meta      = name_meta.get(nkey, {})
-        segment   = str(meta.get("segment") or "").upper()
-        sales_rep = meta.get("sales_rep") or ""
-        r12_total = float(meta.get("r12_total") or 0.0)
+            # business rollup (precomputed)
+            agg = name_idx.get(nkey, {"total_r12_for_size": 0.0, "size_letter": "C"})
+            total_r12 = float(agg.get("total_r12_for_size") or 0.0)
+            size_letter = agg.get("size_letter") or "C"
 
-        # FALLBACK: if report R12 is 0, use billing last-365
-        if r12_total <= 0.0:
-            bil_list = billing_groups.get(nkey, [])
-            if bil_list:
-                bil_agg = _aggregate_billing(bil_list)
-                r12_total = float(bil_agg.get("total_last_365") or 0.0)
+            # segment from report rows for same normalized name
+            report_rows_same = rep_by_norm.get(nkey, [])
+            seg = _segment_from_report_rows(report_rows_same)
 
-        out.append({
-            "label": label,
-            "sales_rep": sales_rep,
-            "segment": segment,
-            "r12_total": r12_total,
-            "lat": lat,
-            "lon": lon,
-            "state": state,
-            "county": county,
-            "zip": zipc,
-            "city": city,
-            "address": addr,
-        })
-        seen.add(nkey)
+            st, county, zc = _state_county_zip_from_row(r)
+
+            out.append({
+                "label": item.get("label") or "Unnamed",
+                "sales_rep": item.get("sales_rep") or "Unassigned",
+                "lat": lat,
+                "lon": lon,
+                "full_address": item.get("full_address") or "",
+                "state": st or "",
+                "county": county or "",
+                "zip": zc or "",
+                "size_letter": size_letter,
+                "segment": seg,
+                "total_r12": round(total_r12, 2),
+            })
+        except Exception as row_err:
+            # Best-effort logging; don’t crash the whole endpoint
+            try:
+                import logging
+                logging.getLogger(__name__).warning("Skipped bad location row: %s", row_err)
+            except Exception:
+                pass
+            skipped += 1
+
+    # Optional: log summary count to server logs
+    try:
+        import logging
+        logging.getLogger(__name__).info("Locations built: %d (skipped %d)", len(out), skipped)
+    except Exception:
+        pass
 
     return out
