@@ -159,7 +159,7 @@ def chat():
 
         qnorm = _norm_name(user_q)
 
-        # try to lock onto a known label present in the question
+        # Try to lock onto a known label present in the question
         chosen_name = None
         try:
             for it in make_inquiry_targets():
@@ -176,11 +176,11 @@ def chat():
             return jsonify({
                 "response": (
                     "I couldn’t locate that customer in the report/billing data. "
-                    "Please include the company name as it appears in your system."
+                    "Please include the company name exactly as it appears in your system."
                 )
             })
 
-        # If the rep asked for recent invoices, attach a compact listing
+        # Optional: attach compact recent invoices if asked
         want_recent = any(k in qnorm for k in (
             "recent invoice", "recent invoices", "last invoices", "latest invoices", "most recent invoices"
         ))
@@ -192,46 +192,46 @@ def chat():
             lines.append("</CONTEXT:RECENT_INVOICES>")
             recent_block = "\n".join(lines)
 
-            system_prompt = {
-                "role": "system",
-                "content": (
-                    "You are a sales strategist for a forklift dealership.\n"
-                    "Use ONLY the provided INQUIRY context; do not invent numbers or customers.\n"
-                    "Customer name is fixed. Do not rename it.\n\n"
+        # ✨ Formatting-only system prompt (inquiry)
+        system_prompt = {
+            "role": "system",
+            "content": (
+                "You are a sales strategist for a forklift dealership.\n"
+                "Use ONLY the provided INQUIRY context; do not invent numbers or customers.\n"
+                "Customer name is fixed. Do not rename it.\n\n"
 
-                    "FORMAT RULES (strict):\n"
-                    "- Use exactly the sections below in this order.\n"
-                    "- Put ONE blank line between sections (no more, no less).\n"
-                    "- Use hyphen bullets starting with '- ' for list items.\n"
-                    "- Use two spaces for sub-bullets (e.g., '  - ').\n"
-                    "- Keep lines short and scannable.\n\n"
+                "FORMAT RULES (strict):\n"
+                "- Use exactly the sections below in this order.\n"
+                "- Put ONE blank line between sections (no more, no less).\n"
+                "- Use hyphen bullets starting with '- ' for list items.\n"
+                "- Use two spaces for sub-bullets (e.g., '  - ').\n"
+                "- Keep lines short and scannable.\n\n"
 
-                    "RESPONSE TEMPLATE:\n"
-                    "1) Segmentation\n"
-                    "   - Account Size: <A/B/C/D> — short meaning.\n"
-                    "   - Relationship: <P/3/2/1> — short meaning.\n\n"
-                    "2) Current Pattern\n"
-                    "   - Top Spending Months: <Month YYYY ($#), ...>.\n"
-                    "   - Top Offerings: <Parts/Service/Rental/...>.\n"
-                    "   - Frequency: <~N days between invoices>.\n\n"
-                    "3) Visit Plan\n"
-                    "   - Lead with: <Service/Parts/Rental/New/Used>.\n"
-                    "   - Why: <1 short sentence using billing data>.\n"
-                    "   - Backup: <optional 1 item>.\n\n"
-                    "4) Next Level (from current → next better only)\n"
-                    "   - Add Offerings: <which are missing to reach next tier>.\n"
-                    "   - Revenue Path: <if relevant, R12 target>.\n"
-                    "   - Quick Wins: <1–2 concrete ideas>.\n\n"
-                    "5) Next Actions\n"
-                    "   - <Action 1>\n"
-                    "   - <Action 2>\n"
-                    "   - <Action 3>\n\n"
-                    "If a <CONTEXT:RECENT_INVOICES> block is present, add this section at the end:\n"
-                    "Recent Invoices\n"
-                    "  - <YYYY-MM-DD | Dept | $ | (desc)> up to 5 items.\n"
-                )
-            }
-
+                "RESPONSE TEMPLATE:\n"
+                "1) Segmentation\n"
+                "   - Account Size: <A/B/C/D> — short meaning.\n"
+                "   - Relationship: <P/3/2/1> — short meaning.\n\n"
+                "2) Current Pattern\n"
+                "   - Top Spending Months: <Month YYYY ($#), ...>.\n"
+                "   - Top Offerings: <Parts/Service/Rental/...>.\n"
+                "   - Frequency: <~N days between invoices>.\n\n"
+                "3) Visit Plan\n"
+                "   - Lead with: <Service/Parts/Rental/New/Used>.\n"
+                "   - Why: <1 short sentence using billing data>.\n"
+                "   - Backup: <optional 1 item>.\n\n"
+                "4) Next Level (from current → next better only)\n"
+                "   - Add Offerings: <which are missing to reach next tier>.\n"
+                "   - Revenue Path: <if relevant, R12 target>.\n"
+                "   - Quick Wins: <1–2 concrete ideas>.\n\n"
+                "5) Next Actions\n"
+                "   - <Action 1>\n"
+                "   - <Action 2>\n"
+                "   - <Action 3>\n\n"
+                "If a <CONTEXT:RECENT_INVOICES> block is present, add this section at the end:\n"
+                "Recent Invoices\n"
+                "  - <YYYY-MM-DD | Dept | $ | (desc)> up to 5 items.\n"
+            )
+        }
 
         messages = [
             system_prompt,
@@ -271,26 +271,48 @@ def chat():
 
     prompt_ctx = generate_forklift_context(context_input, acct)
 
+    # ✨ Formatting-only system prompt (recommendation)
     system_prompt = {
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "When providing customer-specific data, wrap it in a "
-            "<span class=\"section-label\">Customer Profile:</span> section.\n"
-            "When recommending models, wrap section headers in a "
-            "<span class=\"section-label\">...</span> tag.\n"
-            "Use these sections in order if present:\n"
-            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
-            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
-            "List details using hyphens and indent sub-points.\n"
-            "Only cite forklift **Model** codes exactly as in the data (e.g., CPD25, CQD16).\n"
-            "End with Sales Pitch Techniques and Common Objections."
+            "Use the sections below and keep formatting consistent.\n\n"
+
+            "FORMAT RULES (strict):\n"
+            "- Wrap section headers in <span class=\"section-label\">Header:</span>\n"
+            "- Put ONE blank line between sections.\n"
+            "- Use hyphen bullets starting with '- ' for list items.\n"
+            "- Use two spaces for sub-bullets.\n\n"
+
+            "<span class=\"section-label\">Customer Profile:</span>\n"
+            "- Company: <name>\n"
+            "- Industry: <value>\n"
+            "- SIC Code: <value>\n"
+            "- Fleet Size: <value>\n"
+            "- Truck Types: <value>\n\n"
+
+            "<span class=\"section-label\">Model:</span>\n"
+            "- <Exact model code(s) like CPD25, CQD16> (never series-only)\n\n"
+            "<span class=\"section-label\">Power:</span>\n"
+            "- <key points>\n\n"
+            "<span class=\"section-label\">Capacity:</span>\n"
+            "- <key points>\n\n"
+            "<span class=\"section-label\">Tire Type:</span>\n"
+            "- <key points>\n\n"
+            "<span class=\"section-label\">Attachments:</span>\n"
+            "- <key points>\n\n"
+            "<span class=\"section-label\">Comparison:</span>\n"
+            "- <brief contrast to 1–2 alternatives>\n\n"
+            "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
+            "- <1–2 concise persuasion bullets>\n\n"
+            "<span class=\"section-label\">Common Objections:</span>\n"
+            "- <1–2 likely objections with counters>\n"
         )
     }
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # Optional token guard — skip if tiktoken missing
+    # Optional token guard — skip silently if tiktoken missing
     try:
         import tiktoken
         enc = tiktoken.encoding_for_model("gpt-4")
