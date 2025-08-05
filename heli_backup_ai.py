@@ -192,7 +192,7 @@ def chat():
             lines.append("</CONTEXT:RECENT_INVOICES>")
             recent_block = "\n".join(lines)
 
-        # ✨ Formatting-only system prompt (inquiry)
+        # ✨ Formatting & content guidance for Inquiry
         system_prompt = {
             "role": "system",
             "content": (
@@ -200,34 +200,37 @@ def chat():
                 "Use ONLY the provided INQUIRY context; do not invent numbers or customers.\n"
                 "Customer name is fixed. Do not rename it.\n\n"
 
-                "FORMAT RULES (strict):\n"
-                "- Use exactly the sections below in this order.\n"
-                "- Put ONE blank line between sections (no more, no less).\n"
-                "- Use hyphen bullets starting with '- ' for list items.\n"
-                "- Use two spaces for sub-bullets (e.g., '  - ').\n"
-                "- Keep lines short and scannable.\n\n"
+                "OUTPUT RULES (strict):\n"
+                "- Start with a single line: **Segmentation: <LETTER><NUMBER>** (bold, no brackets).\n"
+                "- Then produce the sections below in this order, with ONE blank line between sections.\n"
+                "- Use hyphen bullets ('- ') for list items; use two leading spaces for sub-bullets.\n"
+                "- Keep lines concise; no empty bullets; no stray parentheses.\n"
+                "- Pull concrete $ figures and months from the context where available.\n\n"
 
-                "RESPONSE TEMPLATE:\n"
+                "SECTIONS & EXPECTED CONTENT:\n"
                 "1) Segmentation\n"
                 "   - Account Size: <A/B/C/D> — short meaning.\n"
                 "   - Relationship: <P/3/2/1> — short meaning.\n\n"
                 "2) Current Pattern\n"
-                "   - Top Spending Months: <Month YYYY ($#), ...>.\n"
-                "   - Top Offerings: <Parts/Service/Rental/...>.\n"
-                "   - Frequency: <~N days between invoices>.\n\n"
+                "   - Top Spending Months: <Month YYYY ($#) ...> (up to 3).\n"
+                "   - Top Offerings: <Parts ($#), Service ($#), Rental ($#) ...> (up to 3).\n"
+                "   - Frequency: <~N days between invoices> (if known).\n\n"
                 "3) Visit Plan\n"
                 "   - Lead with: <Service/Parts/Rental/New/Used>.\n"
-                "   - Why: <1 short sentence using billing data>.\n"
-                "   - Backup: <optional 1 item>.\n\n"
-                "4) Next Level (from current → next better only)\n"
-                "   - Add Offerings: <which are missing to reach next tier>.\n"
-                "   - Revenue Path: <if relevant, R12 target>.\n"
-                "   - Quick Wins: <1–2 concrete ideas>.\n\n"
+                "   - Why: one sentence grounded in the billing mix or gaps.\n"
+                "   - Talk Track:\n"
+                "     - <1–2 concise lines your rep can say out loud>\n"
+                "   - Landmines:\n"
+                "     - <1–2 issues to avoid or handle briefly>\n\n"
+                "4) Next Level (current → next better only)\n"
+                "   - Add Offerings: <which are missing to reach the next relationship tier>.\n"
+                "   - Revenue Path: <R12 target if relevant to move size D→C→B→A>.\n"
+                "   - Quick Wins: <1–2 concrete offers/bundles or actions>.\n\n"
                 "5) Next Actions\n"
                 "   - <Action 1>\n"
                 "   - <Action 2>\n"
                 "   - <Action 3>\n\n"
-                "If a <CONTEXT:RECENT_INVOICES> block is present, add this section at the end:\n"
+                "If a <CONTEXT:RECENT_INVOICES> block is present, add at the end:\n"
                 "Recent Invoices\n"
                 "  - <YYYY-MM-DD | Dept | $ | (desc)> up to 5 items.\n"
             )
@@ -245,15 +248,17 @@ def chat():
             resp = client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                max_tokens=900,
+                max_tokens=1000,
                 temperature=0.4
             )
             ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
             ai_reply = f"❌ Internal error: {e}"
 
-        tag = f"[Segmentation: {brief['size_letter']}{brief['relationship_code']}]"
-        return jsonify({"response": f"{tag}\n\n{ai_reply}"})
+        # First line: bold segmentation, no brackets
+        tier = f"{brief['size_letter']}{brief['relationship_code']}"
+        pretty = f"**Segmentation: {tier}**\n\n{ai_reply}"
+        return jsonify({"response": pretty})
 
     # ───────── Recommendation mode (existing flow) ─────────
     acct = find_account_by_name(user_q)
@@ -271,48 +276,26 @@ def chat():
 
     prompt_ctx = generate_forklift_context(context_input, acct)
 
-    # ✨ Formatting-only system prompt (recommendation)
     system_prompt = {
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "Use the sections below and keep formatting consistent.\n\n"
-
-            "FORMAT RULES (strict):\n"
-            "- Wrap section headers in <span class=\"section-label\">Header:</span>\n"
-            "- Put ONE blank line between sections.\n"
-            "- Use hyphen bullets starting with '- ' for list items.\n"
-            "- Use two spaces for sub-bullets.\n\n"
-
-            "<span class=\"section-label\">Customer Profile:</span>\n"
-            "- Company: <name>\n"
-            "- Industry: <value>\n"
-            "- SIC Code: <value>\n"
-            "- Fleet Size: <value>\n"
-            "- Truck Types: <value>\n\n"
-
-            "<span class=\"section-label\">Model:</span>\n"
-            "- <Exact model code(s) like CPD25, CQD16> (never series-only)\n\n"
-            "<span class=\"section-label\">Power:</span>\n"
-            "- <key points>\n\n"
-            "<span class=\"section-label\">Capacity:</span>\n"
-            "- <key points>\n\n"
-            "<span class=\"section-label\">Tire Type:</span>\n"
-            "- <key points>\n\n"
-            "<span class=\"section-label\">Attachments:</span>\n"
-            "- <key points>\n\n"
-            "<span class=\"section-label\">Comparison:</span>\n"
-            "- <brief contrast to 1–2 alternatives>\n\n"
-            "<span class=\"section-label\">Sales Pitch Techniques:</span>\n"
-            "- <1–2 concise persuasion bullets>\n\n"
-            "<span class=\"section-label\">Common Objections:</span>\n"
-            "- <1–2 likely objections with counters>\n"
+            "When providing customer-specific data, wrap it in a "
+            "<span class=\"section-label\">Customer Profile:</span> section.\n"
+            "When recommending models, wrap section headers in a "
+            "<span class=\"section-label\">...</span> tag.\n"
+            "Use these sections in order if present:\n"
+            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
+            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
+            "List details using hyphens and indent sub-points.\n"
+            "Only cite forklift **Model** codes exactly as in the data (e.g., CPD25, CQD16).\n"
+            "End with Sales Pitch Techniques and Common Objections."
         )
     }
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # Optional token guard — skip silently if tiktoken missing
+    # Optional token guard — skip if tiktoken missing
     try:
         import tiktoken
         enc = tiktoken.encoding_for_model("gpt-4")
