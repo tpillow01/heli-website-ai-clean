@@ -159,7 +159,7 @@ def chat():
 
         qnorm = _norm_name(user_q)
 
-        # Try to lock onto a known label present in the question
+        # try to lock onto a known label present in the question
         chosen_name = None
         try:
             for it in make_inquiry_targets():
@@ -176,63 +176,63 @@ def chat():
             return jsonify({
                 "response": (
                     "I couldn’t locate that customer in the report/billing data. "
-                    "Please include the company name exactly as it appears in your system."
+                    "Please include the company name as it appears in your system."
                 )
             })
 
-        # Optional: attach compact recent invoices if asked
-        want_recent = any(k in qnorm for k in (
-            "recent invoice", "recent invoices", "last invoices", "latest invoices", "most recent invoices"
-        ))
+        # Always include up to 5 recent invoices in a separate CONTEXT block
+        recent5 = (brief.get("recent_invoices") or [])[:5]
         recent_block = ""
-        if want_recent and brief.get("recent_invoices"):
+        if recent5:
             lines = ["<CONTEXT:RECENT_INVOICES>"]
-            for inv in brief["recent_invoices"]:
-                lines.append(f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f} | {inv.get('Description','')}")
+            for inv in recent5:
+                desc = inv.get("Description") or ""
+                lines.append(
+                    f"- {inv['Date']} | {inv.get('Type','')} | ${inv.get('REVENUE',0):,.2f}"
+                    + (f" | {desc}" if desc else "")
+                )
             lines.append("</CONTEXT:RECENT_INVOICES>")
             recent_block = "\n".join(lines)
 
-        # ✨ Formatting & content guidance for Inquiry
+        # Clean, detailed, no-bold prompt with strict formatting rules
         system_prompt = {
             "role": "system",
             "content": (
                 "You are a sales strategist for a forklift dealership.\n"
-                "Use ONLY the provided INQUIRY context; do not invent numbers or customers.\n"
-                "Customer name is fixed. Do not rename it.\n\n"
+                "Use only the numeric and factual data provided in the INQUIRY context blocks; do not invent numbers.\n"
+                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n\n"
 
-                "OUTPUT RULES (strict):\n"
-                "- Start with a single line: **Segmentation: <LETTER><NUMBER>** (bold, no brackets).\n"
-                "- Then produce the sections below in this order, with ONE blank line between sections.\n"
-                "- Use hyphen bullets ('- ') for list items; use two leading spaces for sub-bullets.\n"
-                "- Keep lines concise; no empty bullets; no stray parentheses.\n"
-                "- Pull concrete $ figures and months from the context where available.\n\n"
+                "OUTPUT FORMAT (no asterisks/bold; clean spacing):\n"
+                "- Each section header on its own line (no numbering).\n"
+                "- Under each header, use bullets prefixed by exactly '  - ' (two spaces + hyphen).\n"
+                "- Keep one blank line between sections. Avoid extra blank lines.\n\n"
 
-                "SECTIONS & EXPECTED CONTENT:\n"
-                "1) Segmentation\n"
-                "   - Account Size: <A/B/C/D> — short meaning.\n"
-                "   - Relationship: <P/3/2/1> — short meaning.\n\n"
-                "2) Current Pattern\n"
-                "   - Top Spending Months: <Month YYYY ($#) ...> (up to 3).\n"
-                "   - Top Offerings: <Parts ($#), Service ($#), Rental ($#) ...> (up to 3).\n"
-                "   - Frequency: <~N days between invoices> (if known).\n\n"
-                "3) Visit Plan\n"
-                "   - Lead with: <Service/Parts/Rental/New/Used>.\n"
-                "   - Why: one sentence grounded in the billing mix or gaps.\n"
-                "   - Talk Track:\n"
-                "     - <1–2 concise lines your rep can say out loud>\n"
-                "   - Landmines:\n"
-                "     - <1–2 issues to avoid or handle briefly>\n\n"
-                "4) Next Level (current → next better only)\n"
-                "   - Add Offerings: <which are missing to reach the next relationship tier>.\n"
-                "   - Revenue Path: <R12 target if relevant to move size D→C→B→A>.\n"
-                "   - Quick Wins: <1–2 concrete offers/bundles or actions>.\n\n"
-                "5) Next Actions\n"
-                "   - <Action 1>\n"
-                "   - <Action 2>\n"
-                "   - <Action 3>\n\n"
-                "If a <CONTEXT:RECENT_INVOICES> block is present, add at the end:\n"
+                "SECTIONS TO PRODUCE (in this order):\n"
+                "Segmentation\n"
+                "  - Show Account Size (A/B/C/D) and Relationship (P/3/2/1) as provided.\n"
+                "  - Include a one-line meaning for each (e.g., 'D — small account size', '3 — limited breadth of offerings').\n\n"
+
+                "Current Pattern\n"
+                "  - Top spending months (up to 3) with month-year and amount, from context.\n"
+                "  - Top offerings (2–3) with amounts from context.\n"
+                "  - Frequency as average days between invoices (or 'N/A' if unavailable).\n\n"
+
+                "Visit Plan\n"
+                "  - What to lead with (Service / Parts / Rental / New / Used) and why (tie to gaps or recent history).\n"
+                "  - Keep it short, actionable, and grounded in the data.\n\n"
+
+                "Next Level (from current → next better only)\n"
+                "  - Move exactly one step (e.g., D3 → D2, C2 → C1). Do NOT skip tiers.\n"
+                "  - State how many additional distinct offerings are needed to reach the next relationship tier.\n"
+                "  - List the specific missing offerings that would count toward that.\n"
+                "  - If applicable, note the revenue target to reach the next size letter.\n\n"
+
+                "Next Actions\n"
+                "  - Provide three short, specific tasks the rep should do today.\n\n"
+
                 "Recent Invoices\n"
-                "  - <YYYY-MM-DD | Dept | $ | (desc)> up to 5 items.\n"
+                "  - If a <CONTEXT:RECENT_INVOICES> block is present, show up to five bullets summarizing the most recent invoices.\n"
+                "  - Use the same bullet style (two spaces + hyphen)."
             )
         }
 
@@ -248,17 +248,15 @@ def chat():
             resp = client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                max_tokens=1000,
+                max_tokens=900,
                 temperature=0.4
             )
             ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
             ai_reply = f"❌ Internal error: {e}"
 
-        # First line: bold segmentation, no brackets
-        tier = f"{brief['size_letter']}{brief['relationship_code']}"
-        pretty = f"**Segmentation: {tier}**\n\n{ai_reply}"
-        return jsonify({"response": pretty})
+        tag = f"[Segmentation: {brief['size_letter']}{brief['relationship_code']}]"
+        return jsonify({"response": f"{tag}\n\n{ai_reply}"})
 
     # ───────── Recommendation mode (existing flow) ─────────
     acct = find_account_by_name(user_q)
@@ -288,7 +286,7 @@ def chat():
             "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
             "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
             "List details using hyphens and indent sub-points.\n"
-            "Only cite forklift **Model** codes exactly as in the data (e.g., CPD25, CQD16).\n"
+            "Only cite forklift Model codes exactly as in the data (e.g., CPD25, CQD16).\n"
             "End with Sales Pitch Techniques and Common Objections."
         )
     }
@@ -337,7 +335,7 @@ def api_targets():
         items.append({"id": _id, "label": label})
     return jsonify(items)
 
-# Debug endpoint to inspect server-side aggregates
+# Debug endpoint to inspect server-side aggregates (optional)
 @app.route("/api/inquiry_preview")
 @login_required
 def inquiry_preview():
@@ -369,7 +367,7 @@ def inquiry_preview():
         "context_block": brief.get("context_block", "")
     })
 
-# ─── Map routes (added) ─────────────────────────────────────────────────
+# ─── Map endpoints ───────────────────────────────────────────────────────
 @app.route("/map")
 @login_required
 def map_page():
@@ -378,40 +376,12 @@ def map_page():
 @app.route("/api/locations")
 @login_required
 def api_locations():
-    """
-    Returns deduped geo points from customer_location.csv, enriched with
-    territory (Sales Rep Name) and segment when available.
-    Optional filters: ?rep=...&segment=A&state=IN&county=Marion&zip=46214
-    """
+    # This simply returns the rich location dicts assembled in data_sources.get_locations_with_geo()
     from data_sources import get_locations_with_geo
-
     items = get_locations_with_geo()
-
-    # simple filtering on server side (optional)
-    rep     = (request.args.get("rep") or "").strip().lower()
-    segment = (request.args.get("segment") or "").strip().upper()  # "A","B","C","D" or "A1" etc
-    state   = (request.args.get("state") or "").strip().upper()
-    county  = (request.args.get("county") or "").strip().lower()
-    zc      = (request.args.get("zip") or "").strip()
-
-    def keep(it):
-        if rep     and rep     not in (it.get("sales_rep","").lower()): return False
-        if state   and state   != (it.get("state","").upper()):         return False
-        if county  and county  not in (it.get("county","").lower()):    return False
-        if zc      and zc      != (it.get("zip","")):                   return False
-        if segment:
-            seg = (it.get("segment") or "").upper()
-            if len(segment) == 1:  # match A/B/C/D
-                if seg[:1] != segment[:1]:
-                    return False
-            else:  # match full like "C2"
-                if seg != segment:
-                    return False
-        return True
-
-    items = [it for it in items if keep(it)]
     return jsonify(items)
 
+# ─── Service worker at site root ─────────────────────────────────────────
 @app.route('/service-worker.js')
 def service_worker():
     return app.send_static_file('service-worker.js')
