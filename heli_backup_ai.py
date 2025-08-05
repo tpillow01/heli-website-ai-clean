@@ -5,7 +5,7 @@ import difflib
 import sqlite3
 from datetime import timedelta
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
@@ -187,7 +187,11 @@ def chat():
             if five:
                 lines = ["Recent Invoices"]
                 for inv in five:
-                    lines.append(f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f}" + (f" | {inv.get('Description','')}" if inv.get('Description') else ""))
+                    desc = inv.get("Description", "")
+                    line = f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f}"
+                    if desc:
+                        line += f" | {desc}"
+                    lines.append(line)
                 recent_block = "\n".join(lines)
 
         # Strong, structured system prompt with explicit rules and formatting
@@ -232,14 +236,14 @@ def chat():
             )
         }
 
-
+        # Order context so the model sees the data first, then the user
         messages = [
             system_prompt,
             {"role": "system", "content": brief["context_block"]},
-            {"role": "user", "content": user_q},
         ]
         if recent_block:
             messages.append({"role": "system", "content": recent_block})
+        messages.append({"role": "user", "content": user_q})
 
         try:
             resp = client.chat.completions.create(
@@ -328,19 +332,18 @@ def api_targets():
         items.append({"id": _id, "label": label})
     return jsonify(items)
 
-# Map routes (unchanged)
+# Map routes
 @app.route("/map")
 @login_required
 def map_page():
     return render_template("map.html")
-
-from flask import Response  # you already import this earlier
 
 @app.route("/api/locations")
 @login_required
 def api_locations():
     from data_sources import get_locations_with_geo
     items = get_locations_with_geo()
+    # ensure valid JSON (no NaN)
     return Response(json.dumps(items, allow_nan=False), mimetype="application/json")
 
 # Debug endpoint to inspect server-side aggregates

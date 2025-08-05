@@ -559,16 +559,15 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
     }
 # =========================
-# MAP / GEO HELPERS (CSV with lat/lon) — with R12 enrichment + fuzzy name matching
+# MAP / GEO HELPERS (CSV with lat/lon)
 # =========================
-import math  # ensure this is imported at top with others
 
 CUSTOMER_LOCATION_CSV = os.getenv("CUSTOMER_LOCATION_CSV", "customer_location.csv")
 
 @lru_cache(maxsize=1)
 def load_customer_location() -> List[Dict]:
     """
-    Expected columns:
+    Expected columns (we alias to simpler names):
       - Account Name
       - City
       - Address
@@ -580,185 +579,124 @@ def load_customer_location() -> List[Dict]:
     df = _read_csv(CUSTOMER_LOCATION_CSV)
     if df.empty:
         return []
-    # normalize common header quirks
+
+    # Normalize common header quirks into standard columns
     rename_map = {
-        "Min of Latitude": "lat",
-        "Min of Longitude": "lon",
-        "Zip Code": "zip",
-        "County State": "county_state",
         "Account Name": "account_name",
         "City": "city",
         "Address": "address",
+        "County State": "county_state",
+        "Zip Code": "zip",
+        "Min of Latitude": "lat",
+        "Min of Longitude": "lon",
     }
     for src, dst in rename_map.items():
-        if src in df.columns:
+        if src in df.columns and dst not in df.columns:
             df[dst] = df[src]
-
-    # strip whitespace on object cols
-    for c in df.columns:
-        if df[c].dtype == object:
-            df[c] = df[c].astype(str).str.strip()
-
-    # coerce lat/lon to floats; leave invalid as None (filtered later)
-    def _to_float_or_none(x):
-        try:
-            s = str(x).strip()
-            if not s or s.lower() == "nan":
-                return None
-            val = float(s)
-            if not math.isfinite(val):
-                return None
-            return val
-        except Exception:
-            return None
-
-    if "lat" in df.columns:
-        df["lat"] = df["lat"].apply(_to_float_or_none)
-    if "lon" in df.columns:
-        df["lon"] = df["lon"].apply(_to_float_or_none)
 
     return df.to_dict(orient="records")
 
-def _guess_state_from_cs(cs: str) -> str:
-    s = (cs or "").strip()
-    # match trailing ", IN" or just "IN"
-    m = re.search(r"\b([A-Z]{2})\b\s*$", s.upper())
-    return m.group(1) if m else ""
 
-def _build_name_index_for_report() -> Dict[str, Dict]:
+def _parse_county_and_state(cs: str) -> Tuple[str, str]:
+    """
+    Parse a 'County State' cell into (county, state).
+    Accepts forms like:
+      - "Marion, IN"
+      - "Marion County, IN"
+      - "IN"
+      - "Marion County IN"
+    Returns (county, state) where either can be "" if unknown.
+    """
+    val = (cs or "").strip()
+    if not val:
+        return ("", "")
+    # Try comma first: "Marion County, IN"
+    if "," in val:
+        left, right = val.split(",", 1)
+        county = left.strip()
+        st = re.search(r"\b([A-Z]{2})\b", right.strip().upper())
+        return (county, st.group(1) if st else "")
+    # No comma: maybe "Marion County IN" or just "IN"
+    st = re.search(r"\b([A-Z]{2})\b$", val.upper())
+    state = st.group(1) if st else ""
+    county = val[: st.start()].strip() if st else val
+    # Strip trailing "County"
+    county = re.sub(r"\bCounty\b$", "", county, flags=re.I).strip()
+    return (county, state)
+
+
+def _build_name_index_for_report_with_agg() -> Dict[str, Dict]:
     """
     Build lookup: normalized name -> {
-        segment_from_report (if present),
-        sales_rep,
-        size_letter,
-        relationship_code,
-        r12  (R12 Aftermarket or sum of parts/service/rental; fallback = last_365 from billing)
+        'segment': 'C2' or size letter if not present,
+        'sales_rep': territory name,
+        'r12': numeric R12 total computed from report (fallback handled later)
     }
     """
-    rep_rows = load_customer_report()
-    bil_rows = load_customer_billing()
+    rows = load_customer_report()
+    groups: Dict[str, List[Dict]] = defaultdict(list)
+    for r in rows:
+        nm = _norm_name(_pick_name(r))
+        if nm:
+            groups[nm].append(r)
 
-    def nm(r: Dict) -> str:
-        return _norm_name(_pick_name(r))
-
-    rep_groups: Dict[str, List[Dict]] = defaultdict(list)
-    for r in rep_rows:
-        k = nm(r)
-        if k:
-            rep_groups[k].append(r)
-
-    bil_groups: Dict[str, List[Dict]] = defaultdict(list)
-    for r in bil_rows:
-        k = nm(r)
-        if k:
-            bil_groups[k].append(r)
-
-    all_names = set(rep_groups.keys()) | set(bil_groups.keys())
     out: Dict[str, Dict] = {}
-
-    for nkey in all_names:
-        rep_list = rep_groups.get(nkey, [])
-        bil_list = bil_groups.get(nkey, [])
-
-        # 1) aggregate
-        rep_agg = _aggregate_report_r12(rep_list) if rep_list else {"total_r12": 0.0}
-        bil_agg = _aggregate_billing(bil_list) if bil_list else {
-            "by_dept": {},
-            "total_last_365": 0.0,
-            "offerings_count": 0,
-        }
-
-        # 2) segment from report, if present (e.g., "C2")
-        seg_from_report = None
-        for r in rep_list:
+    for nm, rep_rows in groups.items():
+        # Segment straight from report if present
+        seg = None
+        for r in rep_rows:
             for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
                 val = str(r.get(key, "")).strip()
                 if val:
-                    seg_from_report = val.upper().replace(" ", "")
+                    seg = val.upper().replace(" ", "")
                     break
-            if seg_from_report:
+            if seg:
                 break
 
-        # 3) pick an R12 value for sizing (report preferred, else last 365 billing)
-        r12_for_size = rep_agg.get("total_r12", 0.0)
-        if not r12_for_size or r12_for_size <= 0:
-            r12_for_size = float(bil_agg.get("total_last_365", 0.0) or 0.0)
+        # Compute R12 from report rows
+        rep_agg = _aggregate_report_r12(rep_rows)
+        r12_val = float(rep_agg.get("total_r12", 0.0))
 
-        # 4) compute size/relationship
-        if seg_from_report and len(seg_from_report) == 2 and seg_from_report[0] in "ABCD":
-            size_letter = seg_from_report[0]
-            relationship_code = seg_from_report[1]
-        else:
-            size_letter = classify_account_size(r12_for_size)
-            had_rev = (r12_for_size > 0) or any(v > 0 for v in bil_agg.get("by_dept", {}).values())
-            relationship_code = classify_relationship(bil_agg.get("offerings_count", 0), had_rev)
+        # If no explicit segment, synthesize from size letter
+        if not seg:
+            size_letter = classify_account_size(r12_val)
+            # relationship unknown here; keep size letter as display segment fallback
+            seg = size_letter or ""
 
-        # 5) sales rep (territory) from report rows if available
+        # Territory/Sales Rep
         sales_rep = ""
-        for r in rep_list:
+        for r in rep_rows:
             v = (r.get("Sales Rep Name") or r.get("Sales Rep") or "").strip()
             if v:
                 sales_rep = v
                 break
 
-        out[nkey] = {
-            "segment_from_report": seg_from_report or "",
-            "sales_rep": sales_rep,
-            "size_letter": size_letter or "",
-            "relationship_code": relationship_code or "",
-            "r12": float(r12_for_size or 0.0),
-        }
-
+        out[nm] = {"segment": seg, "sales_rep": sales_rep, "r12": r12_val}
     return out
 
-def _closest_name_key(nkey: str, keys: List[str], cutoff: float = 0.86) -> Optional[str]:
-    """Return best fuzzy match for nkey among keys, if similarity >= cutoff."""
-    if not nkey or not keys:
-        return None
-    # quick exact pass
-    if nkey in keys:
-        return nkey
-    # fuzzy
-    try:
-        cand = difflib.get_close_matches(nkey, keys, n=1, cutoff=cutoff)
-        if cand:
-            return cand[0]
-    except Exception:
-        pass
-    # token-subset loose match
-    wt = {t for t in nkey.split() if len(t) > 1}
-    best = None
-    best_score = 0
-    for k in keys:
-        ct = {t for t in k.split() if len(t) > 1}
-        if not wt:
-            continue
-        score = len(wt & ct) / len(wt)
-        if score > best_score and score >= 0.67:
-            best = k
-            best_score = score
-    return best
 
 def get_locations_with_geo() -> List[Dict]:
     """
-    Return unique map points from customer_location.csv (lat/lon present),
+    Returns unique map points from customer_location.csv (lat/lon present),
     enriched with:
       - sales_rep (from report: Sales Rep Name)
-      - segment (prefer report; else computed size+relationship)
-      - size_letter, relationship_code
-      - r12 (report aftermarket R12 or sum; fallback = billing last 365)
-      - state, county, zip, city, address
-    Deduped by normalized account name. Rows with invalid coords are skipped.
-    Uses fuzzy matching to align location names to report/billing names.
+      - segment (from report when present, otherwise computed size letter)
+      - size/relationship computed using report+billing if we can find matches
+      - r12 (from report aggregation; fallback to last-365 from billing)
+      - state / county / zip / city / address
+    Deduped by normalized account name.
     """
     loc_rows = load_customer_location()
     if not loc_rows:
         return []
 
-    name_meta = _build_name_index_for_report()
-    meta_keys = list(name_meta.keys())
+    # name -> meta from report (segment/sales_rep/r12)
+    name_meta = _build_name_index_for_report_with_agg()
 
-    seen_names = set()
+    # Preload all billing to enable last-365 fallback & relationship calc
+    all_billing = load_customer_billing()
+
+    seen = set()
     out: List[Dict] = []
 
     for r in loc_rows:
@@ -766,59 +704,72 @@ def get_locations_with_geo() -> List[Dict]:
         if not label:
             continue
         nkey = _norm_name(label)
-        if not nkey or nkey in seen_names:
+        if not nkey or nkey in seen:
             continue
 
-        # coords (skip any invalid)
+        # Coordinates
         lat_raw = r.get("lat") or r.get("Min of Latitude")
         lon_raw = r.get("lon") or r.get("Min of Longitude")
         try:
             lat = float(str(lat_raw).strip())
             lon = float(str(lon_raw).strip())
-            if not (math.isfinite(lat) and math.isfinite(lon)):
-                continue
         except Exception:
+            # skip bad/missing coordinates
             continue
 
-        # address-ish info
+        # Address-ish info
         city   = (r.get("city") or r.get("City") or "").strip()
         addr   = (r.get("address") or r.get("Address") or "").strip()
         cs     = (r.get("county_state") or r.get("County State") or "").strip()
         _zip   = (r.get("zip") or r.get("Zip Code") or "").strip()
-        state  = _guess_state_from_cs(cs)
-        county = cs.split(",")[0].strip() if "," in cs else ""
+        county, state = _parse_county_and_state(cs)
 
-        # enrich from meta — exact or fuzzy
-        meta = name_meta.get(nkey)
-        if not meta:
-            # try fuzzy on normalized keys (handles small typos like CYRSTAL → CRYSTAL)
-            close_key = _closest_name_key(nkey, meta_keys, cutoff=0.86)
-            if close_key:
-                meta = name_meta.get(close_key)
+        # Meta from report
+        meta = name_meta.get(nkey, {})
+        seg_from_report = str(meta.get("segment") or "").upper()
+        sales_rep = meta.get("sales_rep") or ""
+        r12_from_report = float(meta.get("r12") or 0.0)
 
-        # safe defaults if still missing
-        size_letter = meta.get("size_letter", "") if meta else ""
-        rel_code    = meta.get("relationship_code", "") if meta else ""
-        seg_display = (meta.get("segment_from_report") or (f"{size_letter}{rel_code}" if size_letter and rel_code else "")) if meta else ""
-        sales_rep   = (meta.get("sales_rep", "") if meta else "") or "-"          # never "undefined" in JSON
-        r12_val     = float(meta.get("r12", 0.0)) if meta else 0.0
+        # Find this customer's rows in both datasets by normalized name
+        rep_rows_same = [rr for rr in load_customer_report() if _norm_name(_pick_name(rr)) == nkey]
+        bil_rows_same = [br for br in all_billing if _norm_name(_pick_name(br)) == nkey]
+
+        # Aggregate for size/relationship fallback & last-365
+        rep_agg = _aggregate_report_r12(rep_rows_same) if rep_rows_same else {"total_r12": 0.0}
+        bil_agg = _aggregate_billing(bil_rows_same) if bil_rows_same else {
+            "by_dept": {}, "total_last_365": 0.0, "offerings_count": 0
+        }
+
+        # Decide R12 shown on map: prefer report, else billing last-365
+        r12_val = r12_from_report if r12_from_report > 0 else float(bil_agg.get("total_last_365", 0.0))
+
+        # Size/relationship derivation for display
+        total_for_size = rep_agg.get("total_r12", 0.0) or bil_agg.get("total_last_365", 0.0)
+        size_letter = classify_account_size(total_for_size)
+        had_rev = (total_for_size > 0) or any(v > 0 for v in bil_agg.get("by_dept", {}).values())
+        rel_code = classify_relationship(int(bil_agg.get("offerings_count", 0)), had_rev)
+
+        # Segment text priority: explicit from report if looks like A/B/C/D[123P], else synthesize
+        seg_display = seg_from_report if seg_from_report else (size_letter + rel_code if size_letter and rel_code else "")
 
         out.append({
             "label": label,
             "sales_rep": sales_rep,
-            "segment": seg_display,
+            "segment": seg_display or "-",
             "size": size_letter or "-",
             "relationship": rel_code or "-",
-            "r12": r12_val,
+            "r12": r12_val,            # primary key used by map
+            "r12_total": r12_val,      # alias for safety in JS
             "lat": lat,
             "lon": lon,
             "state": state or "-",
             "county": county or "-",
             "zip": _zip or "-",
-            "city": city or "",
-            "address": addr or "",
+            "city": city,
+            "address": addr,
         })
-        seen_names.add(nkey)
+
+        seen.add(nkey)
 
     return out
 
