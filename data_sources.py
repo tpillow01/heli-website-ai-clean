@@ -686,7 +686,7 @@ def get_locations_with_geo() -> List[Dict]:
     enriched with:
       - sales_rep (from report)
       - segment   (from report if available; else computed size letter)
-      - r12_total (from report aggregates)
+      - r12_total (report R12; if zero, fall back to billing last-365)
       - state, county, zip, city, address
     Deduped by normalized account name. Optimized to avoid N×M scans.
     """
@@ -696,7 +696,6 @@ def get_locations_with_geo() -> List[Dict]:
 
     # Precompute indexes once (fast)
     name_meta = _report_meta_index()                 # from report
-    # also pre-group billing by normalized name (not strictly needed for pins, but handy later)
     billing_groups = _name_index_group(load_customer_billing())
 
     seen = set()
@@ -724,10 +723,18 @@ def get_locations_with_geo() -> List[Dict]:
         zipc = (r.get("zip") or r.get("Zip Code") or "").strip()
         county, state = _split_county_state(cs)
 
-        meta = name_meta.get(nkey, {})
+        # report-based meta
+        meta      = name_meta.get(nkey, {})
         segment   = str(meta.get("segment") or "").upper()
         sales_rep = meta.get("sales_rep") or ""
         r12_total = float(meta.get("r12_total") or 0.0)
+
+        # FALLBACK: if report R12 is 0, use billing last-365
+        if r12_total <= 0.0:
+            bil_list = billing_groups.get(nkey, [])
+            if bil_list:
+                bil_agg = _aggregate_billing(bil_list)
+                r12_total = float(bil_agg.get("total_last_365") or 0.0)
 
         out.append({
             "label": label,
