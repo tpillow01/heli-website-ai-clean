@@ -180,90 +180,77 @@ def chat():
                 )
             })
 
-        # Always include up to 5 recent invoices in a separate CONTEXT block
-        recent5 = (brief.get("recent_invoices") or [])[:5]
+        # Optional: attach up to 5 recent invoices
         recent_block = ""
-        if recent5:
-            lines = ["<CONTEXT:RECENT_INVOICES>"]
-            for inv in recent5:
-                desc = inv.get("Description") or ""
-                lines.append(
-                    f"- {inv['Date']} | {inv.get('Type','')} | ${inv.get('REVENUE',0):,.2f}"
-                    + (f" | {desc}" if desc else "")
-                )
-            lines.append("</CONTEXT:RECENT_INVOICES>")
-            recent_block = "\n".join(lines)
+        if brief.get("recent_invoices"):
+            five = brief["recent_invoices"][:5]
+            if five:
+                lines = ["Recent Invoices"]
+                for inv in five:
+                    lines.append(f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f}" + (f" | {inv.get('Description','')}" if inv.get('Description') else ""))
+                recent_block = "\n".join(lines)
 
-        # Clean, detailed, no-bold prompt with strict formatting rules
+        # Strong, structured system prompt with explicit rules and formatting
         system_prompt = {
             "role": "system",
             "content": (
-                "You are a sales strategist for a forklift dealership.\n"
-                "Use only the numeric and factual data provided in the INQUIRY context blocks; do not invent numbers.\n"
-                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n\n"
-
-                "OUTPUT FORMAT (no asterisks/bold; clean spacing):\n"
-                "- Each section header on its own line (no numbering).\n"
-                "- Under each header, use bullets prefixed by exactly '  - ' (two spaces + hyphen).\n"
-                "- Keep one blank line between sections. Avoid extra blank lines.\n\n"
-
-                "SECTIONS TO PRODUCE (in this order):\n"
-                "Segmentation\n"
-                "  - Show Account Size (A/B/C/D) and Relationship (P/3/2/1) as provided.\n"
-                "  - Include a one-line meaning for each (e.g., 'D — small account size', '3 — limited breadth of offerings').\n\n"
-
+                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
+                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
+                "Print the response EXACTLY with these section headers and dash bullets. No bold, no asterisks:\n"
+                "\n"
+                "Segmentation: <SIZE><REL>\n"
+                "- Account Size: <SIZE>\n"
+                "- Relationship: <REL>\n"
+                "- <SIZE> — meaning (A=≥$200k, B=≥$80k, C=≥$10k, D=<$10k in R12)\n"
+                "- <REL> — meaning (1=4+ offerings, 2=3 offerings, 3=1–2 offerings, P=No revenue)\n"
                 "Current Pattern\n"
-                "  - Top spending months (up to 3) with month-year and amount, from context.\n"
-                "  - Top offerings (2–3) with amounts from context.\n"
-                "  - Frequency as average days between invoices (or 'N/A' if unavailable).\n\n"
-
+                "- Top spending months: <list month & $ from INQUIRY context>\n"
+                "- Top offerings: <list offerings & $ from INQUIRY context>\n"
+                "- Frequency: <avg days between invoices from INQUIRY context>\n"
                 "Visit Plan\n"
-                "  - What to lead with (Service / Parts / Rental / New / Used) and why (tie to gaps or recent history).\n"
-                "  - Keep it short, actionable, and grounded in the data.\n\n"
-
-                "Next Level (from current → next better only)\n"
-                "  - Move exactly one step (e.g., D3 → D2, C2 → C1). Do NOT skip tiers.\n"
-                "  - State how many additional distinct offerings are needed to reach the next relationship tier.\n"
-                "  - List the specific missing offerings that would count toward that.\n"
-                "  - If applicable, note the revenue target to reach the next size letter.\n\n"
-
+                "- Lead with: <one category>\n"
+                "- Why: ground this in gaps vs history (e.g., low Service vs Parts) and seasonality (top months).\n"
+                "Next Level (from <SIZE><REL> → next better only)\n"
+                "- Relationship requirement: use rules P→3 (create first revenue), 3→2 (reach 3 distinct offerings), 2→1 (reach 4+); say exactly how many NEW distinct offerings are needed and list the best candidates based on missing categories in the INQUIRY context and recent buying patterns.\n"
+                "- Revenue path: if a size upgrade is possible (D→C $10k, C→B $80k, B→A $200k), show the target and the delta vs current R12 in the INQUIRY context. If already at A or target not applicable, state 'No size upgrade required to reach next relationship tier.'\n"
                 "Next Actions\n"
-                "  - Provide three short, specific tasks the rep should do today.\n\n"
-
+                "- Three short, specific tasks the rep should do today.\n"
                 "Recent Invoices\n"
-                "  - If a <CONTEXT:RECENT_INVOICES> block is present, show up to five bullets summarizing the most recent invoices.\n"
-                "  - Use the same bullet style (two spaces + hyphen)."
+                "- List exactly 5 most recent invoices if present (date | type | $amount).\n"
+                "\n"
+                "Be practical and concise. Use only the data present in the INQUIRY context for numbers and categories."
             )
         }
 
         messages = [
             system_prompt,
             {"role": "system", "content": brief["context_block"]},
+            {"role": "user", "content": user_q},
         ]
         if recent_block:
             messages.append({"role": "system", "content": recent_block})
-        messages.append({"role": "user", "content": user_q})
 
         try:
             resp = client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
                 max_tokens=900,
-                temperature=0.4
+                temperature=0.35
             )
             ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
             ai_reply = f"❌ Internal error: {e}"
 
-        tag = f"[Segmentation: {brief['size_letter']}{brief['relationship_code']}]"
-        return jsonify({"response": f"{tag}\n\n{ai_reply}"})
+        tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
+        # Prepend tag line and a blank line for readability
+        return jsonify({"response": f"{tag}\n{ai_reply}"})
 
     # ───────── Recommendation mode (existing flow) ─────────
     acct = find_account_by_name(user_q)
     context_input = user_q
     if acct:
         profile_ctx = (
-            "<span class=\"section-label\">Customer Profile:</span>\n"
+            "Customer Profile:\n"
             f"- Company: {acct.get('Account Name')}\n"
             f"- Industry: {acct.get('Industry', 'N/A')}\n"
             f"- SIC Code: {acct.get('SIC Code', 'N/A')}\n"
@@ -278,13 +265,8 @@ def chat():
         "role": "system",
         "content": (
             "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "When providing customer-specific data, wrap it in a "
-            "<span class=\"section-label\">Customer Profile:</span> section.\n"
-            "When recommending models, wrap section headers in a "
-            "<span class=\"section-label\">...</span> tag.\n"
             "Use these sections in order if present:\n"
-            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, "
-            "Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
+            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
             "List details using hyphens and indent sub-points.\n"
             "Only cite forklift Model codes exactly as in the data (e.g., CPD25, CQD16).\n"
             "End with Sales Pitch Techniques and Common Objections."
@@ -293,8 +275,8 @@ def chat():
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
-    # Optional token guard — skip if tiktoken missing
     try:
+        # Optional token guard — skip quietly if tiktoken is missing
         import tiktoken
         enc = tiktoken.encoding_for_model("gpt-4")
         while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
@@ -335,7 +317,20 @@ def api_targets():
         items.append({"id": _id, "label": label})
     return jsonify(items)
 
-# Debug endpoint to inspect server-side aggregates (optional)
+# Map routes (unchanged)
+@app.route("/map")
+@login_required
+def map_page():
+    return render_template("map.html")
+
+@app.route("/api/locations")
+@login_required
+def api_locations():
+    from data_sources import get_locations_with_geo
+    items = get_locations_with_geo()
+    return jsonify(items)
+
+# Debug endpoint to inspect server-side aggregates
 @app.route("/api/inquiry_preview")
 @login_required
 def inquiry_preview():
@@ -367,21 +362,6 @@ def inquiry_preview():
         "context_block": brief.get("context_block", "")
     })
 
-# ─── Map endpoints ───────────────────────────────────────────────────────
-@app.route("/map")
-@login_required
-def map_page():
-    return render_template("map.html")
-
-@app.route("/api/locations")
-@login_required
-def api_locations():
-    # This simply returns the rich location dicts assembled in data_sources.get_locations_with_geo()
-    from data_sources import get_locations_with_geo
-    items = get_locations_with_geo()
-    return jsonify(items)
-
-# ─── Service worker at site root ─────────────────────────────────────────
 @app.route('/service-worker.js')
 def service_worker():
     return app.send_static_file('service-worker.js')

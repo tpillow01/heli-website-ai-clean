@@ -558,16 +558,80 @@ def build_inquiry_brief(name_or_id: str) -> Optional[Dict]:
         "inferred_name": disp_name,
         "recent_invoices": recent_invoices(billing_rows, limit=10),  # for optional use
     }
- # =========================
-# MAP / GEO HELPERS (CSV with lat/lon)
 # =========================
+# MAP / GEO HELPERS (UPDATED)
+# =========================
+def _safe_float(x) -> Optional[float]:
+    try:
+        s = str(x).strip()
+        if not s:
+            return None
+        return float(s)
+    except Exception:
+        return None
 
-CUSTOMER_LOCATION_CSV = os.getenv("CUSTOMER_LOCATION_CSV", "customer_location.csv")
-
-@lru_cache(maxsize=1)
-def load_customer_location() -> List[Dict]:
+def _parse_county_state(v: str) -> Tuple[str, str]:
     """
-    Expected columns:
+    Accepts values like 'Marion IN', 'Marion, IN', 'Marion County IN', 'IN'
+    Returns (county, state2)
+    """
+    s = (str(v) or "").strip()
+    if not s:
+        return ("", "")
+    s = re.sub(r"\s+", " ", s.replace(",", " ")).strip()
+    parts = s.split(" ")
+    state = ""
+    county = ""
+    # grab last 2-letter token as state
+    for token in reversed(parts):
+        if re.fullmatch(r"[A-Za-z]{2}", token):
+            state = token.upper()
+            break
+    # county = everything before that, minus "county"
+    if state:
+        before = " ".join(parts[: parts.index(state)])
+        before = before.replace("County", "").replace("county", "").strip()
+        county = before
+    else:
+        # only a county word or nothing provided
+        if len(parts) == 1 and len(parts[0]) == 2:
+            state = parts[0].upper()
+        else:
+            county = s
+    return (county, state)
+
+def _guess_state_from_row(row: Dict) -> str:
+    # prefer explicit 'State' if present
+    for k in ("State", "STATE"):
+        v = str(row.get(k, "")).strip()
+        if v and len(v) == 2:
+            return v.upper()
+    # try County State style
+    for k in ("County State", "County/State", "CountyState"):
+        v = str(row.get(k, "")).strip()
+        if v:
+            _, st = _parse_county_state(v)
+            if st:
+                return st
+    # last resort from ZIP (US-only heuristic not implemented)
+    return ""
+
+def _build_full_address_from_report(r: Dict) -> str:
+    addr = str(r.get("Address", "")).strip()
+    city = str(r.get("City", "")).strip()
+    state = _guess_state_from_row(r)
+    zc = str(r.get("Zip Code", "") or r.get("ZIP", "")).strip()
+    parts = [p for p in [addr, city, state, zc, "USA"] if p]
+    return ", ".join(parts)
+
+def _sales_rep_of(r: Dict) -> str:
+    return (str(r.get("Sales Rep Name", "")).strip()
+            or str(r.get("Sales Rep", "")).strip()
+            or "(unknown)")
+
+def _read_customer_locations() -> List[Dict]:
+    """
+    Expect columns (case-insensitive / forgiving):
       - Account Name
       - City
       - Address
@@ -576,139 +640,152 @@ def load_customer_location() -> List[Dict]:
       - Min of Latitude
       - Min of Longitude
     """
-    df = _read_csv(CUSTOMER_LOCATION_CSV)
-    if df.empty:
+    path = os.getenv("CUSTOMER_LOCATION_CSV", "customer_location.csv")
+    if not os.path.exists(path):
         return []
-    # normalize common header quirks
-    rename_map = {
-        "Min of Latitude": "lat",
-        "Min of Longitude": "lon",
-        "Zip Code": "zip",
-        "County State": "county_state",
-        "Account Name": "account_name",
-        "City": "city",
-        "Address": "address",
-    }
-    for k, v in list(rename_map.items()):
-        if k in df.columns:
-            df[v] = df[k]
-    return df.to_dict(orient="records")
+    df = _read_csv(path)
+    # normalize headers commonly seen
+    ren = {}
+    for c in df.columns:
+        lc = c.strip().lower()
+        if lc == "account name":
+            ren[c] = "Account Name"
+        elif lc == "city":
+            ren[c] = "City"
+        elif lc in ("address", "street"):
+            ren[c] = "Address"
+        elif lc in ("county state", "county/state", "countystate"):
+            ren[c] = "County State"
+        elif lc in ("zip", "zip code", "postal code"):
+            ren[c] = "Zip Code"
+        elif lc in ("min of latitude", "latitude", "lat"):
+            ren[c] = "Min of Latitude"
+        elif lc in ("min of longitude", "longitude", "lon", "lng"):
+            ren[c] = "Min of Longitude"
+    if ren:
+        df = df.rename(columns=ren)
 
-def _guess_state_from_cs(cs: str) -> str:
-    s = (cs or "").strip()
-    # match trailing ", IN" or just "IN"
-    m = re.search(r"\b([A-Z]{2})\b\s*$", s.upper())
-    return m.group(1) if m else ""
-
-def _build_name_index_for_report() -> Dict[str, Dict]:
-    """
-    Build a quick lookup of normalized name -> { segment, sales_rep } from report.
-    If segment not in row, we compute size letter from the aggregated totals per name.
-    """
-    rows = load_customer_report()
-    # group rows by normalized name
-    groups: Dict[str, List[Dict]] = defaultdict(list)
+    rows = df.to_dict(orient="records")
+    # dedupe by (name norm) so we don't drop multiple *distinct* addresses for same name.
+    # Your ask was: "if same place listed multiple times, only one pin".
+    # We'll dedupe by (name, city, address) when available; else by name.
+    seen = set()
+    out = []
     for r in rows:
-        nm = _norm_name(_pick_name(r))
-        if nm:
-            groups[nm].append(r)
-
-    out: Dict[str, Dict] = {}
-    for nm, lst in groups.items():
-        # try segment straight from report
-        seg = None
-        rep_name_rows = lst
-        for r in rep_name_rows:
-            for key in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
-                val = str(r.get(key, "")).strip()
-                if val:
-                    seg = val.upper().replace(" ", "")
-                    break
-            if seg:
-                break
-
-        # compute size if no explicit segment
-        size_letter = None
-        if not seg:
-            agg = _aggregate_report_r12(rep_name_rows)
-            size_letter = classify_account_size(agg["total_r12"])
-            seg = size_letter or ""
-
-        # sales rep name (territory) from the first row that has it
-        sales_rep = ""
-        for r in rep_name_rows:
-            v = (r.get("Sales Rep Name") or r.get("Sales Rep") or "").strip()
-            if v:
-                sales_rep = v
-                break
-
-        out[nm] = {"segment": seg, "sales_rep": sales_rep}
+        name = str(r.get("Account Name", "")).strip()
+        city = str(r.get("City", "")).strip()
+        addr = str(r.get("Address", "")).strip()
+        key = ( _norm_name(name), _norm_name(city), _norm_name(addr) ) if (city or addr) else (_norm_name(name),)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
     return out
+
+def _segment_from_report_rows(report_rows: List[Dict]) -> Optional[str]:
+    for r in report_rows:
+        for k in ("R12 Segment (Ship to ID)", "R12 Segment (Sold to ID)", "R12 Segment"):
+            v = str(r.get(k, "")).strip()
+            if v:
+                s = v.upper().replace(" ", "")
+                if len(s) == 2 and s[0] in "ABCD":
+                    return s
+    return None
+
+def _territory_from_rows(report_rows: List[Dict], billing_rows: List[Dict]) -> str:
+    # Prefer report's Sales Rep Name
+    for r in report_rows:
+        rep = _sales_rep_of(r)
+        if rep and rep != "(unknown)":
+            return rep
+    # fallback: sometimes billing has "Sales Rep"
+    for r in billing_rows:
+        rep = (str(r.get("Sales Rep", "")).strip())
+        if rep:
+            return rep
+    return "(unknown)"
 
 def get_locations_with_geo() -> List[Dict]:
     """
-    Return unique map points from customer_location.csv (lat/lon present),
-    enriched with:
-      - sales_rep (from report: Sales Rep Name)
-      - segment (from report when present, otherwise computed size letter)
-      - state, county, zip (parsed from CSV)
-    Deduping by normalized account name.
+    Returns a list of dicts per map pin:
+      {
+        "label": <Account Name>,
+        "lat": <float>, "lon": <float>,
+        "sales_rep": <territory/rep or '(unknown)'>,
+        "state": <2-letter or ''>,
+        "county": <string or ''>,
+        "zip": <string or ''>,
+        "segment": <e.g., 'C2' or 'P'>,
+        "size_letter": <'A'|'B'|'C'|'D' or ''>,
+        "r12_total": <float>,
+      }
+    Ensures no 'undefined' values in popups.
     """
-    loc_rows = load_customer_location()
-    if not loc_rows:
-        return []
+    loc_rows = _read_customer_locations()
+    rep_all = load_customer_report()
+    bil_all = load_customer_billing()
 
-    # name -> {segment, sales_rep}
-    name_meta = _build_name_index_for_report()
+    pins: List[Dict] = []
 
-    seen_names = set()
-    out: List[Dict] = []
+    for loc in loc_rows:
+        name = (loc.get("Account Name") or "").strip()
+        if not name:
+            # try any non-empty value as a label
+            name = _pick_name(loc)
 
-    for r in loc_rows:
-        # label / name
-        label = (r.get("account_name") or r.get("Account Name") or "").strip()
-        if not label:
-            continue
-        nkey = _norm_name(label)
-        if not nkey:
-            continue
-        if nkey in seen_names:
+        lat = _safe_float(loc.get("Min of Latitude"))
+        lon = _safe_float(loc.get("Min of Longitude"))
+        if lat is None or lon is None:
+            # skip entries without coordinates
             continue
 
-        # coords
-        lat_raw = r.get("lat") or r.get("Min of Latitude")
-        lon_raw = r.get("lon") or r.get("Min of Longitude")
-        try:
-            lat = float(str(lat_raw).strip())
-            lon = float(str(lon_raw).strip())
-        except Exception:
-            continue
+        # state/county/zip from location file
+        county_state_raw = loc.get("County State", "")
+        county, state = _parse_county_state(county_state_raw)
+        if not state:
+            state = str(loc.get("State", "")).strip().upper()
+        zipc = str(loc.get("Zip Code", "")).strip()
 
-        # address-ish info
-        city   = (r.get("city") or r.get("City") or "").strip()
-        addr   = (r.get("address") or r.get("Address") or "").strip()
-        cs     = (r.get("county_state") or r.get("County State") or "").strip()
-        _zip   = (r.get("zip") or r.get("Zip Code") or "").strip()
-        state  = _guess_state_from_cs(cs)
-        county = cs.split(",")[0].strip() if "," in cs else ""
+        # match rows from both sources by normalized name
+        want = _norm_name(name)
+        report_rows = [r for r in rep_all if _norm_name(_pick_name(r)) == want]
+        billing_rows = [r for r in bil_all if _norm_name(_pick_name(r)) == want]
 
-        # enrich from report
-        meta = name_meta.get(nkey, {})
-        segment   = str(meta.get("segment") or "").upper()
-        sales_rep = meta.get("sales_rep") or ""
+        # territory/rep
+        territory = _territory_from_rows(report_rows, billing_rows)
 
-        out.append({
-            "label": label,
-            "sales_rep": sales_rep,
-            "segment": segment,
+        # aggregates for segment & R12
+        seg = _segment_from_report_rows(report_rows)
+        rep_agg = _aggregate_report_r12(report_rows) if report_rows else {"total_r12": 0.0}
+        bil_agg = _aggregate_billing(billing_rows) if billing_rows else {
+            "by_dept": {}, "total_last_365": 0.0, "offerings_count": 0,
+            "last_invoice": "", "invoice_count": 0, "avg_days_between_invoices": None,
+            "top_months": [], "top_offerings": []
+        }
+
+        total_for_size = rep_agg.get("total_r12", 0.0) or bil_agg.get("total_last_365", 0.0)
+
+        if seg:
+            size_letter = seg[0]
+            rel_code = seg[1]
+        else:
+            size_letter = classify_account_size(total_for_size) if (report_rows or billing_rows) else ""
+            had_rev = (total_for_size > 0) or any((v or 0.0) > 0.0 for v in bil_agg.get("by_dept", {}).values())
+            rel_code = classify_relationship(bil_agg.get("offerings_count", 0), had_rev) if (report_rows or billing_rows) else "P"
+
+        segment_str = f"{size_letter}{rel_code}" if (size_letter and rel_code) else "P"
+
+        pins.append({
+            "label": name,
             "lat": lat,
             "lon": lon,
-            "state": state,
-            "county": county,
-            "zip": _zip,
-            "city": city,
-            "address": addr,
+            "sales_rep": territory or "(unknown)",
+            "state": state or "",
+            "county": county or "",
+            "zip": zipc or "",
+            "segment": segment_str,
+            "size_letter": size_letter or "",
+            "r12_total": float(total_for_size or 0.0),
         })
-        seen_names.add(nkey)
 
-    return out
+    return pins
