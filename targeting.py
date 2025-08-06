@@ -14,7 +14,6 @@ BILLING_CSV  = os.getenv("TARGETING_BILLING_CSV",  "customer_billing")
 # 2) File Reading Helpers
 # ────────────────────────────────────────────────────────────────────────────
 def _resolve_path(base: str) -> str:
-    """Return first matching file with no ext, .csv, or .xlsx."""
     for ext in ("", ".csv", ".xlsx"):
         p = base + ext
         if os.path.exists(p):
@@ -54,21 +53,18 @@ def _to_number(x: any) -> float:
 # ────────────────────────────────────────────────────────────────────────────
 # 3) Segmentation Logic
 # ────────────────────────────────────────────────────────────────────────────
-# Column names in your customer_report
-C_R12   = "Revenue Rolling 12 Months - Aftermarket"
-C_R13   = "Revenue Rolling 13 - 24 Months - Aftermarket"
-C_R25   = "Revenue Rolling 25 - 36 Months - Aftermarket"
+C_R12 = "Revenue Rolling 12 Months - Aftermarket"
+C_R13 = "Revenue Rolling 13 - 24 Months - Aftermarket"
+C_R25 = "Revenue Rolling 25 - 36 Months - Aftermarket"
 
-def segment_account(row,
-                    momentum_thresh: float    = 0.20,
-                    recapture_thresh: float   = 100_000) -> str:
+def segment_account(row, momentum_thresh=0.20, recapture_thresh=100000):
     r12 = row.get(C_R12, 0.0)
     r13 = row.get(C_R13, 0.0)
+    r25 = row.get(C_R25, 0.0)
     # momentum = (this year – prior) / prior
     eps = 1e-9
     momentum = (r12 - r13) / (abs(r13) + eps)
-    # three-year peak
-    r25 = row.get(C_R25, 0.0)
+    # three-year peak + recapture
     peak = max(r12, r13, r25)
     recapture = max(0.0, peak - r12)
 
@@ -84,7 +80,7 @@ TACTICS = {
     "ATTACK":      "Win-back/displace: multi-thread, demo, sharp pricing.",
     "GROW":        "Upsell/cross-sell: add PM, attachments, lithium conversion.",
     "MAINTAIN":    "Defend & delight: QBR cadence, SLA adherence.",
-    "TEST/EXPAND": "Pilot: starter order, trial service, quick win."
+    "TEST/EXPAND": "Low-friction pilot: starter order, trial service, quick win."
 }
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -92,56 +88,50 @@ TACTICS = {
 # ────────────────────────────────────────────────────────────────────────────
 @targeting_bp.route("/targeting")
 def targeting_page():
-    # — Load & clean customer data —
+    # Load & clean customer data
     cust = _read_loose(CUSTOMER_CSV)
     cust.columns = cust.columns.str.strip()
-    # numeric‐ify revenue fields
     for col in (C_R12, C_R13, C_R25):
-        if col in cust.columns:
-            cust[col] = cust[col].apply(_to_number)
-        else:
-            cust[col] = 0.0
+        cust[col] = cust.get(col, 0).apply(_to_number)
 
-    # — Load & pivot billing for services —
+    # Load & pivot billing for services
     bill = _read_loose(BILLING_CSV)
     bill.columns = bill.columns.str.strip()
     bill["CUSTOMER"] = bill["CUSTOMER"].astype(str)
     bill["Type"]     = bill["Type"].astype(str)
     bill["bought"]   = True
+
     pivot = (
         bill
-        .pivot_table(index="CUSTOMER",
-                     columns="Type",
-                     values="bought",
-                     aggfunc="max",
-                     fill_value=False)
+        .pivot_table(
+            index="CUSTOMER",
+            columns="Type",
+            values="bought",
+            aggfunc="max",
+            fill_value=False
+        )
     )
-    # ensure master list
+
+    # Master list of services
     SERVICES = ["Parts", "Service", "Rental", "New Equipment", "Used Equipment"]
     for svc in SERVICES:
-        pivot.setdefault(svc, False)
+        if svc not in pivot.columns:
+            pivot[svc] = False
     pivot = pivot[SERVICES]
 
-    # — Compute segmentation & recommendations —
+    # Compute segmentation & recommendations
     cust["Sold to Name"]   = cust["Sold to Name"].astype(str)
     cust["Sales Rep Name"] = cust["Sales Rep Name"].astype(str)
-
-    # apply segment
     cust["Segment"] = cust.apply(segment_account, axis=1)
     cust["Tactic"]  = cust["Segment"].map(TACTICS)
 
-    # join in pivot so we know what they've never bought
-    df = (
-      cust
-      .set_index("Sold to Name")
-      .join(pivot, how="left")
-      .fillna(False)
+    # Join in pivot so we know what they've never bought
+    df = cust.set_index("Sold to Name").join(pivot, how="left").fillna(False)
+    df["Recommended Services"] = df.apply(
+        lambda r: [s for s in SERVICES if not r.get(s, False)], axis=1
     )
-    def recommend_services(row):
-        return [svc for svc in SERVICES if not row.get(svc, False)]
-    df["Recommended Services"] = df.apply(recommend_services, axis=1)
 
-    # — Group by territory & sort by segment —
+    # Group by territory & sort by segment
     SEG_ORDER = {"ATTACK": 0, "GROW": 1, "MAINTAIN": 2, "TEST/EXPAND": 3}
     rep_groups = {}
     for rep, group in df.groupby("Sales Rep Name"):
@@ -155,5 +145,4 @@ def targeting_page():
         entries.sort(key=lambda e: SEG_ORDER.get(e["segment"], 99))
         rep_groups[rep] = entries
 
-    # — Render template —
     return render_template("targeting.html", rep_groups=rep_groups)
