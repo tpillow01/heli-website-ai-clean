@@ -36,16 +36,12 @@ def _resolve_path(base: str) -> str:
 
 def _read_loose(path: str) -> pd.DataFrame:
     """
-    Try reading a file first as UTF-8 CSV,
-    then CP1252 CSV (skipping bad lines),
-    then as Excel.
+    Try reading as UTF-8 CSV, then CP1252 CSV, then as Excel.
     """
     resolved = _resolve_path(path)
     try:
         return pd.read_csv(resolved, dtype=str, encoding="utf-8")
-    except UnicodeDecodeError:
-        pass
-    except Exception:
+    except (UnicodeDecodeError, Exception):
         pass
     try:
         return pd.read_csv(resolved, dtype=str, encoding="cp1252", on_bad_lines="skip")
@@ -100,14 +96,13 @@ def _load_customer():
     if not os.path.exists(path):
         raise FileNotFoundError(f"Missing {CUSTOMER_CSV} (csv/xlsx)")
     df = _read_loose(path)
-    # Ensure all expected columns exist
+    # Ensure expected columns and types
     for col in C.values():
         if col not in df.columns:
             df[col] = pd.NA
     # Convert numeric columns
-    numeric_cols = [C[k] for k in ["r12","r13_24","r25_36","new36","used36","parts12","service12","ps12","rental12"]]
-    for col in numeric_cols:
-        df[col] = df[col].apply(_to_number)
+    for key in ["r12","r13_24","r25_36","new36","used36","parts12","service12","ps12","rental12"]:
+        df[C[key]] = df[C[key]].apply(_to_number)
     # Derive state code
     df["State"] = df[C["county_state"]].astype(str).str[-2:].str.upper()
     # Compute momentum %
@@ -123,16 +118,18 @@ def _load_customer():
     df["Breadth"] = df[cats].gt(0).sum(axis=1)
     # Flags
     df["Reactivated"] = (r12 > 0) & (r13 == 0)
-    df["At Risk"] = (r12 == 0) & (r13 > 0)
+    df["At Risk"]     = (r12 == 0) & (r13 > 0)
+    # Ensure string types for merge keys
+    df[C["sold_to_name"]] = df[C["sold_to_name"]].astype(str)
+    df[C["ship_to_name"]] = df[C["ship_to_name"]].astype(str)
     # Geocode ZIP
     df["ZIP5"] = df[C["zip"]].astype(str).str.extract(r"(\d{5})")[0]
-    df["Latitude"] = pd.NA
-    df["Longitude"] = pd.NA
+    df["Latitude"], df["Longitude"] = pd.NA, pd.NA
     if USE_ZIP_GEO:
         try:
             nomi = pgeocode.Nominatim("us")
-            unique_zips = df["ZIP5"].dropna().unique()
-            geo = nomi.query_postal_code(unique_zips)
+            zips = df["ZIP5"].dropna().unique()
+            geo = nomi.query_postal_code(zips)
             geo = geo[["postal_code","latitude","longitude"]].dropna()
             geo.columns = ["ZIP5","Latitude","Longitude"]
             df = df.merge(geo, on="ZIP5", how="left")
@@ -149,6 +146,8 @@ def _load_billing():
     for col in ["Date","Type","REVENUE","CUSTOMER"]:
         if col not in b.columns:
             b[col] = pd.NA
+    # Normalize CUSTOMER as string
+    b["CUSTOMER"] = b["CUSTOMER"].astype(str)
     # Parse date as tz-naive
     b["Date"] = pd.to_datetime(b["Date"], errors="coerce")
     b["REVENUE"] = b["REVENUE"].apply(_to_number)
@@ -244,8 +243,7 @@ def targeting_page():
         if missing.any():
             alt = df[missing].drop(columns=["CUSTOMER","Last Invoice Date","Rev 90d","Rev 180d","Rev 365d"], errors="ignore")
             alt = alt.merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
-            df.loc[missing, ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]] = \
-                alt[["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]].values
+            df.loc[missing, ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]] = alt[["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]].values
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
     segment_colors = {"ATTACK":"#ff3333","GROW":"#ff9933","TEST/EXPAND":"#33aaff","MAINTAIN":"#66cc66"}
