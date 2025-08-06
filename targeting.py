@@ -28,19 +28,36 @@ targeting_bp = Blueprint("targeting", __name__, template_folder="templates")
 CUSTOMER_CSV = os.environ.get("TARGETING_CUSTOMER_CSV", "customer_report")
 BILLING_CSV  = os.environ.get("TARGETING_BILLING_CSV", "customer_billing")
 
+# ─── Minimal robust readers (fixes the encoding crash) ───────────────────
 def _resolve_path(base: str) -> str:
-    """
-    Accepts 'customer_report' and tries:
-      - customer_report
-      - customer_report.csv
-      - customer_report.xlsx
-    Returns the first that exists; otherwise returns the original string.
-    """
-    candidates = [base, f"{base}.csv", f"{base}.xlsx"]
-    for p in candidates:
+    """Try plain, .csv, .xlsx — return the first that exists."""
+    for p in (base, f"{base}.csv", f"{base}.xlsx"):
         if os.path.exists(p):
             return p
-    return base  # downstream will raise FileNotFoundError if missing
+    return base  # downstream will error if missing
+
+def _read_loose(path: str) -> pd.DataFrame:
+    """
+    Tolerant table loader:
+    1) UTF-8 CSV
+    2) Windows-1252 CSV (skip bad lines)
+    3) Excel (xlsx/xls)
+    """
+    path = _resolve_path(path)
+    # Try UTF-8 CSV
+    try:
+        return pd.read_csv(path, dtype=str, encoding="utf-8")
+    except UnicodeDecodeError:
+        pass
+    except Exception:
+        pass
+    # Try CP1252 CSV
+    try:
+        return pd.read_csv(path, dtype=str, encoding="cp1252", on_bad_lines="skip")
+    except Exception:
+        pass
+    # Excel last
+    return pd.read_excel(path, dtype=str)
 
 # Your report headers (from your sample)
 C = {
@@ -86,52 +103,11 @@ def _to_number(x):
     except Exception:
         return None
 
-def _read_any_table(path: str) -> pd.DataFrame:
-    """
-    Robust reader:
-    - Excel (.xlsx/.xls) or CSV that's actually Excel (ZIP magic) -> read_excel
-    - Try UTF-8, UTF-8-SIG, CP1252, Latin-1 for CSV
-    - Last resort: CP1252 with replace + skip bad lines
-    """
-    path = _resolve_path(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(path)
-
-    ext = os.path.splitext(path)[1].lower()
-    try:
-        with open(path, "rb") as f:
-            magic = f.read(4)
-    except Exception:
-        magic = b""
-
-    # Excel detection: extension OR ZIP magic ("PK\x03\x04")
-    if ext in (".xlsx", ".xls") or magic.startswith(b"PK\x03\x04"):
-        return pd.read_excel(path, dtype=str)
-
-    # CSV encodings to try
-    for enc in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
-        try:
-            return pd.read_csv(path, dtype=str, encoding=enc)
-        except UnicodeDecodeError:
-            continue
-        except Exception:
-            continue
-
-    # Last resort (tolerant)
-    try:
-        return pd.read_csv(
-            path, dtype=str, encoding="cp1252",
-            encoding_errors="replace", on_bad_lines="skip"
-        )
-    except TypeError:
-        # Older pandas: no encoding_errors
-        return pd.read_csv(path, dtype=str, encoding="cp1252", engine="python")
-
-# ─── Loaders ─────────────────────────────────────────────────────────────
+# ─── Loaders (using the tolerant reader) ─────────────────────────────────
 def _load_customer():
     if not os.path.exists(_resolve_path(CUSTOMER_CSV)):
-        raise FileNotFoundError(f"Missing {CUSTOMER_CSV}(.csv/.xlsx). Put it next to app or set TARGETING_CUSTOMER_CSV.")
-    df = _read_any_table(CUSTOMER_CSV)
+        raise FileNotFoundError(f"Missing {CUSTOMER_CSV} (.csv/.xlsx). Put it next to app or set TARGETING_CUSTOMER_CSV.")
+    df = _read_loose(CUSTOMER_CSV)
 
     # ensure expected columns exist
     for _, col in C.items():
@@ -186,12 +162,12 @@ def _load_customer():
 def _load_billing():
     """
     Expect columns: Date, Type, REVENUE, CUSTOMER
-    Handles CSV in cp1252/latin1 and Excel workbooks.
+    Handles CSV (utf-8, cp1252) and Excel workbooks.
     """
     if not os.path.exists(_resolve_path(BILLING_CSV)):
         return None
 
-    b = _read_any_table(BILLING_CSV)
+    b = _read_loose(BILLING_CSV)
 
     # normalize expected columns
     for need in ["Date", "Type", "REVENUE", "CUSTOMER"]:
