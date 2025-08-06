@@ -7,20 +7,31 @@ targeting_bp = Blueprint("targeting", __name__, template_folder="templates")
 CUSTOMER_CSV = os.getenv("TARGETING_CUSTOMER_CSV", "customer_report")
 BILLING_CSV  = os.getenv("TARGETING_BILLING_CSV",  "customer_billing")
 
-def _resolve_path(base):
+def _resolve_path(base: str) -> str:
     for ext in ("", ".csv", ".xlsx"):
         p = base + ext
         if os.path.exists(p):
             return p
     raise FileNotFoundError(f"Cannot find {base}(.csv/.xlsx)")
 
-def _read_loose(base) -> pd.DataFrame:
+def _read_loose(base: str) -> pd.DataFrame:
+    """Try UTF-8 CSV → CP1252 CSV → Excel (openpyxl) → fallback CSV."""
     path = _resolve_path(base)
-    # try CSV first, then Excel
+    # 1) UTF-8 CSV
     try:
-        return pd.read_csv(path, dtype=str)
+        return pd.read_csv(path, dtype=str, encoding="utf-8", on_bad_lines="skip")
     except Exception:
-        return pd.read_excel(path, dtype=str)
+        pass
+    # 2) CP1252 CSV
+    try:
+        return pd.read_csv(path, dtype=str, encoding="cp1252", on_bad_lines="skip")
+    except Exception:
+        pass
+    # 3) Excel if extension matches
+    if path.lower().endswith((".xls", ".xlsx")):
+        return pd.read_excel(path, dtype=str, engine="openpyxl")
+    # 4) Final CSV fallback
+    return pd.read_csv(path, dtype=str, on_bad_lines="skip")
 
 @targeting_bp.route("/targeting")
 def targeting_page():
@@ -41,35 +52,31 @@ def targeting_page():
                      fill_value=False)
     )
 
-    # 3) Define the master list of services
+    # 3) Master list of services
     SERVICES = ["Parts", "Service", "Rental", "New Equipment", "Used Equipment"]
-    # ensure all columns present
     for svc in SERVICES:
         if svc not in pivot.columns:
             pivot[svc] = False
     pivot = pivot[SERVICES]
 
     # 4) Join to customer_report on Sold-to Name
-    cust["Sold to Name"]    = cust["Sold to Name"].astype(str)
-    cust["Sales Rep Name"]  = cust["Sales Rep Name"].astype(str)
+    cust["Sold to Name"]   = cust["Sold to Name"].astype(str)
+    cust["Sales Rep Name"] = cust["Sales Rep Name"].astype(str)
     df = cust.set_index("Sold to Name").join(pivot, how="left").fillna(False)
 
-    # 5) Compute “Recommended Services” = those they haven’t bought
-    def _recommend(row):
+    # 5) Compute recommended services
+    def recommend(row):
         return [svc for svc in SERVICES if not row.get(svc, False)]
+    df["Recommended Services"] = df.apply(recommend, axis=1)
 
-    df["Recommended Services"] = df.apply(_recommend, axis=1)
-
-    # 6) Group by territory (Sales Rep)
-    rep_groups = {}
-    for rep, group in df.groupby("Sales Rep Name"):
-        rep_groups[rep] = [
-            {
-                "company": name,
-                "services": row["Recommended Services"]
-            }
+    # 6) Group by territory
+    rep_groups = {
+        rep: [
+            {"company": name, "services": row["Recommended Services"]}
             for name, row in group.iterrows()
         ]
+        for rep, group in df.groupby("Sales Rep Name")
+    }
 
-    # 7) Render one table per territory
+    # 7) Render
     return render_template("targeting.html", rep_groups=rep_groups)
