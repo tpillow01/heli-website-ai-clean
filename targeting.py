@@ -6,27 +6,43 @@ from datetime import timezone
 import pandas as pd
 from flask import Blueprint, render_template, request, send_file
 
-# ─── Safe imports so the site still loads if libs missing ────────────────
+# ── Safe imports so the server never crashes if libs are missing ──
 FOLIUM_AVAILABLE = True
 try:
-    import folium
-    from folium.plugins import MarkerCluster
+    import folium  # type: ignore
+    from folium.plugins import MarkerCluster  # type: ignore
 except Exception:
     FOLIUM_AVAILABLE = False
 
 USE_ZIP_GEO = True
 try:
-    import pgeocode  # pip install pgeocode
+    import pgeocode  # type: ignore
 except Exception:
     USE_ZIP_GEO = False
 
+# Blueprint
 targeting_bp = Blueprint("targeting", __name__, template_folder="templates")
 
-# ─── Config: your filenames (can override via env vars) ──────────────────
-CUSTOMER_CSV = os.environ.get("TARGETING_CUSTOMER_CSV", "customer_report.csv")
-BILLING_CSV  = os.environ.get("TARGETING_BILLING_CSV", "customer_billing.csv")
+# ─── Config: file paths (override via env vars if needed) ────────────────
+# Your files have no extension: "customer_report" and "customer_billing"
+CUSTOMER_CSV = os.environ.get("TARGETING_CUSTOMER_CSV", "customer_report")
+BILLING_CSV  = os.environ.get("TARGETING_BILLING_CSV", "customer_billing")
 
-# Your exact report headers
+def _resolve_path(base: str) -> str:
+    """
+    Accepts 'customer_report' and tries:
+      - customer_report
+      - customer_report.csv
+      - customer_report.xlsx
+    Returns the first that exists; otherwise returns the original string.
+    """
+    candidates = [base, f"{base}.csv", f"{base}.xlsx"]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return base  # downstream will raise FileNotFoundError if missing
+
+# Your report headers (from the sample you shared)
 C = {
     "ship_to_id":   "Ship to ID",
     "sold_to_id":   "Sold to ID",
@@ -50,33 +66,74 @@ C = {
     "rental12":     "Rental Revenue R12",
 }
 
-# ─── Helpers ─────────────────────────────────────────────────────────────
+# ─── Utilities ───────────────────────────────────────────────────────────
 def _to_number(x):
-    """Convert '$81,593', '($80)', ' 1,672.06 ', None → float/None."""
+    """Convert formats like '$81,593', '($80)', ' 1,672.06 ' to float."""
     if pd.isna(x):
         return None
     if isinstance(x, (int, float)):
         return float(x)
     s = str(x).strip()
-    neg = False
-    if s.startswith("(") and s.endswith(")"):
-        neg = True
+    neg = s.startswith("(") and s.endswith(")")
+    if neg:
         s = s[1:-1]
     s = s.replace("$", "").replace(",", "").replace("+", "").strip()
-    if s == "" or s.upper() == "N/A":
+    if not s or s.upper() == "N/A":
         return None
     try:
         v = float(s)
         return -v if neg else v
-    except:
+    except Exception:
         return None
 
-def _load_customer():
-    if not os.path.exists(CUSTOMER_CSV):
-        raise FileNotFoundError(f"Missing {CUSTOMER_CSV}. Put it next to app or set TARGETING_CUSTOMER_CSV.")
-    df = pd.read_csv(CUSTOMER_CSV, dtype=str)
+def _read_any_table(path: str) -> pd.DataFrame:
+    """
+    Robust reader:
+    - Excel (.xlsx/.xls) or CSV that's actually Excel (ZIP magic) -> read_excel
+    - Try UTF-8, UTF-8-SIG, CP1252, Latin-1 for CSV
+    - Last resort: CP1252 with replace + skip bad lines
+    """
+    path = _resolve_path(path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
 
-    # ensure columns
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except Exception:
+        magic = b""
+
+    # Excel detection: extension OR ZIP magic ("PK\x03\x04")
+    if ext in (".xlsx", ".xls") or magic.startswith(b"PK\x03\x04"):
+        return pd.read_excel(path, dtype=str)
+
+    # CSV encodings to try
+    for enc in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
+        try:
+            return pd.read_csv(path, dtype=str, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+        except Exception:
+            continue
+
+    # Last resort (tolerant)
+    try:
+        return pd.read_csv(
+            path, dtype=str, encoding="cp1252",
+            encoding_errors="replace", on_bad_lines="skip"
+        )
+    except TypeError:
+        # Older pandas: no encoding_errors
+        return pd.read_csv(path, dtype=str, encoding="cp1252", engine="python")
+
+# ─── Loaders ─────────────────────────────────────────────────────────────
+def _load_customer():
+    if not os.path.exists(_resolve_path(CUSTOMER_CSV)):
+        raise FileNotFoundError(f"Missing {CUSTOMER_CSV}(.csv/.xlsx). Put it next to app or set TARGETING_CUSTOMER_CSV.")
+    df = _read_any_table(CUSTOMER_CSV)
+
+    # ensure expected columns exist
     for _, col in C.items():
         if col not in df.columns:
             df[col] = pd.NA
@@ -87,7 +144,7 @@ def _load_customer():
     for col in num_cols:
         df[col] = df[col].apply(_to_number)
 
-    # State from "County State" like "Hendricks IN"
+    # State (from "County State" like "Hendricks IN")
     df["State"] = df[C["county_state"]].astype(str).str[-2:].str.upper()
 
     # Momentum % = (R12 - R13_24) / max(|R13_24|, eps)
@@ -127,16 +184,25 @@ def _load_customer():
     return df
 
 def _load_billing():
-    """Expect: Date, Type, REVENUE, CUSTOMER."""
-    if not os.path.exists(BILLING_CSV):
+    """
+    Expect columns: Date, Type, REVENUE, CUSTOMER
+    Handles CSV in cp1252/latin1 and Excel workbooks.
+    """
+    if not os.path.exists(_resolve_path(BILLING_CSV)):
         return None
-    b = pd.read_csv(BILLING_CSV, dtype=str)
+
+    b = _read_any_table(BILLING_CSV)
+
+    # normalize expected columns
     for need in ["Date", "Type", "REVENUE", "CUSTOMER"]:
         if need not in b.columns:
             b[need] = pd.NA
+
+    # types
     b["Date"] = pd.to_datetime(b["Date"], errors="coerce", infer_datetime_format=True)
     b["REVENUE"] = b["REVENUE"].apply(_to_number)
 
+    # recency + rolling sums
     latest = b.groupby("CUSTOMER", dropna=False)["Date"].max().reset_index()
     latest.columns = ["CUSTOMER", "Last Invoice Date"]
 
@@ -146,16 +212,13 @@ def _load_billing():
     def total_in(days):
         return b.loc[b["Days Ago"] <= days].groupby("CUSTOMER")["REVENUE"].sum()
 
-    t90  = total_in(90).rename("Rev 90d")
-    t180 = total_in(180).rename("Rev 180d")
-    t365 = total_in(365).rename("Rev 365d")
-
-    out = latest.merge(t90, on="CUSTOMER", how="left") \
-                .merge(t180, on="CUSTOMER", how="left") \
-                .merge(t365, on="CUSTOMER", how="left")
+    out = latest.merge(total_in(90).rename("Rev 90d"), on="CUSTOMER", how="left") \
+                .merge(total_in(180).rename("Rev 180d"), on="CUSTOMER", how="left") \
+                .merge(total_in(365).rename("Rev 365d"), on="CUSTOMER", how="left")
     out["Days Since Last Invoice"] = (today - out["Last Invoice Date"]).dt.days
     return out
 
+# ─── Scoring & Tactics ───────────────────────────────────────────────────
 def _segment_row(r, momentum_thresh=0.20, recapture_thresh=100000):
     r12 = r.get(C["r12"]) or 0.0
     breadth = r.get("Breadth") or 0
@@ -179,6 +242,7 @@ def _tactic(seg):
         "TEST/EXPAND": "Low-friction pilot: starter order, trial service, quick win."
     }.get(seg, "")
 
+# ─── Map ─────────────────────────────────────────────────────────────────
 def _make_map(df, segment_colors):
     if not FOLIUM_AVAILABLE:
         return "<div style='padding:16px;background:#000;color:#ccc'>Map unavailable (install 'folium' to enable).</div>"
@@ -206,7 +270,7 @@ def _make_map(df, segment_colors):
             rec = float(r["Re-capture Potential ($)"] or 0)
             if rec > 0:
                 radius = min(22, 6 + math.log10(rec + 10) * 6)
-        except:
+        except Exception:
             pass
 
         acct = r.get(C["sold_to_name"]) or r.get(C["ship_to_name"]) or ""
@@ -236,25 +300,29 @@ def _make_map(df, segment_colors):
 # ─── Routes ──────────────────────────────────────────────────────────────
 @targeting_bp.route("/targeting")
 def targeting_page():
-    momentum = float(request.args.get("momentum", 0.20))         # 20%
-    recapture = float(request.args.get("recapture", 100000))     # $100k
+    momentum = float(request.args.get("momentum", 0.20))         # default 20%
+    recapture = float(request.args.get("recapture", 100000))     # default $100k
 
     df = _load_customer()
     billing = _load_billing()
 
-    # merge recency on Sold-to first, fallback Ship-to
+    # Merge recency on Sold-to first, fallback Ship-to
     if billing is not None:
         df = df.merge(billing, left_on=C["sold_to_name"], right_on="CUSTOMER", how="left")
         missing_mask = df["Last Invoice Date"].isna()
         if missing_mask.any():
-            df2 = df[missing_mask].drop(columns=["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d"], errors="ignore") \
-                                   .merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
+            df2 = df[missing_mask].drop(
+                columns=["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d"],
+                errors="ignore"
+            ).merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
             df.loc[missing_mask, ["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d", "Days Since Last Invoice"]] = \
                 df2[["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d", "Days Since Last Invoice"]].values
 
+    # Segment + tactic
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
 
+    # Map
     segment_colors = {
         "ATTACK": "#ff3333",
         "GROW": "#ff9933",
@@ -263,19 +331,18 @@ def targeting_page():
     }
     map_html = _make_map(df, segment_colors)
 
-    # table view (pretty strings)
+    # Table view (pretty strings)
     df_out = df.copy()
-    df_out["R12 ($)"]      = df_out[C["r12"]].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-    df_out["R13–24 ($)"]   = df_out[C["r13_24"]].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-    df_out["R25–36 ($)"]   = df_out[C["r25_36"]].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-    df_out["Momentum %"]   = df_out["Momentum %"].map(lambda x: f"{x*100:.1f}%")
+    df_out["R12 ($)"]        = df_out[C["r12"]].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
+    df_out["R13–24 ($)"]     = df_out[C["r13_24"]].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
+    df_out["R25–36 ($)"]     = df_out[C["r25_36"]].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
+    df_out["Momentum %"]     = df_out["Momentum %"].map(lambda x: f"{x*100:.1f}%")
     df_out["Re-capture ($)"] = df_out["Re-capture Potential ($)"].map(lambda x: f"${x:,.0f}")
     for col in ["Rev 90d", "Rev 180d", "Rev 365d"]:
         if col in df_out.columns:
             df_out[col] = df_out[col].map(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
         else:
             df_out[col] = ""
-
     df_out["Days Since Last Invoice"] = df_out.get("Days Since Last Invoice", pd.Series([None]*len(df_out))).fillna("")
 
     cols = [
@@ -286,17 +353,17 @@ def targeting_page():
     ]
     table = df_out[cols].copy()
 
-    # sort by most actionable: recapture desc, then worst momentum
+    # Sort by most actionable: recapture desc, then worst momentum
     def _key(v):
         s = str(v)
         if "$" in s:
             try: return float(s.replace("$", "").replace(",", ""))
-            except: return 0.0
+            except Exception: return 0.0
         if "%" in s:
             try: return float(s.replace("%", ""))
-            except: return 0.0
+            except Exception: return 0.0
         try: return float(s)
-        except: return 0.0
+        except Exception: return 0.0
 
     table = table.sort_values(by=["Re-capture ($)", "Momentum %"],
                               ascending=[False, True],
@@ -322,8 +389,10 @@ def targeting_download():
         df = df.merge(billing, left_on=C["sold_to_name"], right_on="CUSTOMER", how="left")
         missing_mask = df["Last Invoice Date"].isna()
         if missing_mask.any():
-            df2 = df[missing_mask].drop(columns=["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d"], errors="ignore") \
-                                   .merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
+            df2 = df[missing_mask].drop(
+                columns=["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d"],
+                errors="ignore"
+            ).merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
             df.loc[missing_mask, ["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d", "Days Since Last Invoice"]] = \
                 df2[["CUSTOMER", "Last Invoice Date", "Rev 90d", "Rev 180d", "Rev 365d", "Days Since Last Invoice"]].values
 
