@@ -98,6 +98,10 @@ def _load_customer():
         if col not in df.columns:
             df[col] = pd.NA
 
+    # **guarantee geo columns exist**
+    df["Latitude"] = pd.NA
+    df["Longitude"] = pd.NA
+
     # numeric conversions
     for key in ["r12","r13_24","r25_36","new36","used36","parts12","service12","ps12","rental12"]:
         df[C[key]] = df[C[key]].apply(_to_number)
@@ -123,21 +127,21 @@ def _load_customer():
     df["Reactivated"] = (r12 > 0) & (r13 == 0)
     df["At Risk"]     = (r12 == 0) & (r13 > 0)
 
-    # coerce key columns to string for joins
+    # coerce join keys to string
     df[C["sold_to_name"]] = df[C["sold_to_name"]].astype(str)
     df[C["ship_to_name"]] = df[C["ship_to_name"]].astype(str)
 
-    # geocode zip → lat/lon
-    df["ZIP5"] = df[C["zip"]].astype(str).str.extract(r"(\d{5})")[0]
-    df["Latitude"], df["Longitude"] = pd.NA, pd.NA
+    # geocode ZIP→lat/lon if available
     if USE_ZIP_GEO:
         try:
+            df["ZIP5"] = df[C["zip"]].astype(str).str.extract(r"(\d{5})")[0]
             nomi = pgeocode.Nominatim("us")
             zips = df["ZIP5"].dropna().unique()
-            geo = nomi.query_postal_code(zips)
-            geo = geo[["postal_code","latitude","longitude"]].dropna()
-            geo.columns = ["ZIP5","Latitude","Longitude"]
-            df = df.merge(geo, on="ZIP5", how="left")
+            if len(zips):
+                geo = nomi.query_postal_code(zips)
+                geo = geo[["postal_code","latitude","longitude"]].dropna()
+                geo.columns = ["ZIP5","Latitude","Longitude"]
+                df = df.merge(geo, on="ZIP5", how="left")
         except Exception:
             pass
 
@@ -150,19 +154,18 @@ def _load_billing():
         return None
     b = _read_loose(path)
 
-    # ensure expected columns exist
     for col in ["Date","Type","REVENUE","CUSTOMER"]:
         if col not in b.columns:
             b[col] = pd.NA
 
-    # ensure CUSTOMER is string
+    # CUSTOMER must be string
     b["CUSTOMER"] = b["CUSTOMER"].astype(str)
 
-    # tz-naive date parse
+    # tz-naive parse
     b["Date"] = pd.to_datetime(b["Date"], errors="coerce")
     b["REVENUE"] = b["REVENUE"].apply(_to_number)
 
-    # latest invoice
+    # latest invoice date
     latest = b.groupby("CUSTOMER", dropna=False)["Date"].max().reset_index()
     latest.columns = ["CUSTOMER","Last Invoice Date"]
 
@@ -261,22 +264,29 @@ def targeting_page():
     billing = _load_billing()
 
     if billing is not None:
+        # build billing index
         bill_idx = billing.set_index("CUSTOMER")
         bill_idx.index = bill_idx.index.astype(str)
-        # join on sold-to
+
+        # join sold-to with suffix
         df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_s")
         sold_cols = ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]
         for c in sold_cols:
             df.rename(columns={c: f"{c}_s"}, inplace=True)
-        # join on ship-to
+
+        # join ship-to
         df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_h")
         for c in sold_cols:
             df.rename(columns={c: f"{c}_h"}, inplace=True)
-        # fill
+
+        # fill missing values
         for c in sold_cols:
             df[c] = df[f"{c}_s"].fillna(df[f"{c}_h"])
+
+        # drop helpers
         df.drop(columns=[f"{c}_s" for c in sold_cols] + [f"{c}_h" for c in sold_cols], inplace=True)
 
+    # segmentation + tactics
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
 
@@ -287,6 +297,7 @@ def targeting_page():
         "MAINTAIN":   "#66cc66",
     }
 
+    # prepare a minimal table
     table_cols = [
         C["sold_to_name"], C["ship_to_name"], C["rep"], C["city"],
         "State", "Segment", "Recommended Tactic"
@@ -328,4 +339,7 @@ def targeting_download():
     buf = io.BytesIO()
     df[raw_cols].to_csv(buf, index=False)
     buf.seek(0)
-    return send_file(buf, as_attachment=True, download_name="target_accounts.csv", mimetype="text/csv")
+    return send_file(buf,
+                     as_attachment=True,
+                     download_name="target_accounts.csv",
+                     mimetype="text/csv")
