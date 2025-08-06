@@ -42,7 +42,7 @@ def _to_number(x: any) -> float:
     """Convert '$1,234', '(56)' → float."""
     if pd.isna(x):
         return 0.0
-    s = str(x).strip().replace("$","").replace(",","")
+    s = str(x).strip().replace("$", "").replace(",", "")
     if s.startswith("(") and s.endswith(")"):
         s = "-" + s[1:-1]
     try:
@@ -61,10 +61,8 @@ def segment_account(row, momentum_thresh=0.20, recapture_thresh=100000):
     r12 = row.get(C_R12, 0.0)
     r13 = row.get(C_R13, 0.0)
     r25 = row.get(C_R25, 0.0)
-    # momentum = (this year – prior) / prior
     eps = 1e-9
     momentum = (r12 - r13) / (abs(r13) + eps)
-    # three-year peak + recapture
     peak = max(r12, r13, r25)
     recapture = max(0.0, peak - r12)
 
@@ -112,18 +110,15 @@ def targeting_page():
         )
     )
 
-    # Master list of services
+    # Master list of services, ensure all are present
     SERVICES = ["Parts", "Service", "Rental", "New Equipment", "Used Equipment"]
-    for svc in SERVICES:
-        if svc not in pivot.columns:
-            pivot[svc] = False
-    pivot = pivot[SERVICES]
+    pivot = pivot.reindex(columns=SERVICES, fill_value=False)
 
     # Compute segmentation & recommendations
     cust["Sold to Name"]   = cust["Sold to Name"].astype(str)
     cust["Sales Rep Name"] = cust["Sales Rep Name"].astype(str)
-    cust["Segment"] = cust.apply(segment_account, axis=1)
-    cust["Tactic"]  = cust["Segment"].map(TACTICS)
+    cust["Segment"]        = cust.apply(segment_account, axis=1)
+    cust["Tactic"]         = cust["Segment"].map(TACTICS)
 
     # Join in pivot so we know what they've never bought
     df = cust.set_index("Sold to Name").join(pivot, how="left").fillna(False)
@@ -145,4 +140,5 @@ def targeting_page():
         entries.sort(key=lambda e: SEG_ORDER.get(e["segment"], 99))
         rep_groups[rep] = entries
 
+    # Render the collapsible, color‐coded tables
     return render_template("targeting.html", rep_groups=rep_groups)
