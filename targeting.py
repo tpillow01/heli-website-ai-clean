@@ -1,5 +1,3 @@
-# targeting.py
-
 import os
 import io
 import math
@@ -25,26 +23,21 @@ def _resolve_path(base: str) -> str:
     raise FileNotFoundError(f"Cannot find {base}(.csv/.xlsx)")
 
 def _read_table(base: str) -> pd.DataFrame:
-    """Try UTF8 CSV → CP1252 CSV → Excel."""
     path = _resolve_path(base)
-    for enc in ("utf-8", None, "cp1252"):
+    # try CSV with utf-8, then cp1252, then Excel
+    for enc in ("utf-8", "cp1252", None):
         try:
-            if path.endswith((".xls", ".xlsx")):
+            if path.lower().endswith((".xls", ".xlsx")):
                 return pd.read_excel(path, dtype=str)
             return pd.read_csv(path, dtype=str, encoding=enc, on_bad_lines="skip")
         except Exception:
             continue
-    # Fallback: pandas autodetect
-    return pd.read_csv(path, dtype=str)
+    return pd.read_csv(path, dtype=str)  # fallback
 
 def _to_number(x: str) -> float:
     if pd.isna(x):
         return 0.0
-    s = (str(x).strip()
-           .replace("$","")
-           .replace(",","")
-           .replace("(","-")
-           .replace(")",""))
+    s = str(x).strip().replace("$","").replace(",","").replace("(","-").replace(")","")
     try:
         return float(s)
     except ValueError:
@@ -52,11 +45,11 @@ def _to_number(x: str) -> float:
 
 def load_customer() -> pd.DataFrame:
     df = _read_table(CUSTOMER_CSV)
-    # ensure all expected columns
+    # ensure expected columns
     cols = {
-        "ship_to_name":"Ship to Name",
+        "ship_to_name": "Ship to Name",
         "sold_to_name":"Sold to Name",
-        "r12":"Revenue Rolling 12 Months - Aftermarket",
+        "r12": "Revenue Rolling 12 Months - Aftermarket",
         "r13":"Revenue Rolling 13 - 24 Months - Aftermarket",
         "r25":"Revenue Rolling 25 - 36 Months - Aftermarket",
         "new36":"New Equip R36 Revenue",
@@ -64,67 +57,82 @@ def load_customer() -> pd.DataFrame:
         "parts":"Parts Revenue R12",
         "service":"Service Revenue R12 (Includes GM)",
         "rental":"Rental Revenue R12",
-        "county":"County State",
+        "county":"County State"
     }
-    for c in cols.values():
-        if c not in df.columns:
-            df[c] = pd.NA
-    # parse numbers
+    for key, col in cols.items():
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    # parse numeric columns
     for key in ("r12","r13","r25","new36","used36","parts","service","rental"):
         df[cols[key]] = df[cols[key]].apply(_to_number)
-    # derive extras
-    df["Momentum %"] = (
-        (df[cols["r12"]] - df[cols["r13"]])
-        / (df[cols["r13"]].abs() + 1e-9)
-    )
-    df["3Yr Peak"]   = df[[cols["r12"],cols["r13"],cols["r25"]]].max(axis=1)
+
+    # derive metrics
+    eps = 1e-9
+    df["Momentum %"] = (df[cols["r12"]] - df[cols["r13"]]) / (df[cols["r13"]].abs() + eps)
+    df["3Yr Peak"]   = df[[cols["r12"], cols["r13"], cols["r25"]]].max(axis=1)
     df["Recapture"]  = (df["3Yr Peak"] - df[cols["r12"]]).clip(lower=0)
     df["Breadth"]    = (
-        (df[[cols["parts"],cols["service"],cols["rental"],cols["new36"],cols["used36"]]] > 0)
+        (df[[cols["parts"], cols["service"], cols["rental"], cols["new36"], cols["used36"]]] > 0)
         .sum(axis=1)
     )
+
     # state code
     df["State"] = df[cols["county"]].astype(str).str[-2:].str.upper()
-    # coerce names to str for joins
+
+    # coerce join keys
     df[cols["sold_to_name"]] = df[cols["sold_to_name"]].astype(str)
     df[cols["ship_to_name"]] = df[cols["ship_to_name"]].astype(str)
+
     return df
 
-def load_billing() -> pd.DataFrame|None:
+def load_billing() -> pd.DataFrame | None:
     try:
         b = _read_table(BILLING_CSV)
     except FileNotFoundError:
         return None
-    for col in ("Date","CUSTOMER","REVENUE"):
+
+    for col in ("Date", "CUSTOMER", "REVENUE"):
         if col not in b.columns:
             b[col] = pd.NA
-    b["Date"]    = pd.to_datetime(b["Date"], errors="coerce")
-    b["REVENUE"] = b["REVENUE"].apply(_to_number)
-    b["CUSTOMER"]= b["CUSTOMER"].astype(str)
+
+    b["Date"]     = pd.to_datetime(b["Date"], errors="coerce")
+    b["REVENUE"]  = b["REVENUE"].apply(_to_number)
+    b["CUSTOMER"] = b["CUSTOMER"].astype(str)
     today = pd.Timestamp.now().normalize()
     b["Days Ago"] = (today - b["Date"]).dt.days
+
     latest = (
         b.groupby("CUSTOMER", dropna=False)["Date"]
          .max()
          .reset_index(name="Last Invoice Date")
     )
-    def roll_sum(days):
+
+    def roll_sum(days: int):
         return (
             b[b["Days Ago"] <= days]
             .groupby("CUSTOMER")["REVENUE"]
             .sum()
             .rename(f"Rev {days}d")
         )
-    out = latest.join(roll_sum(90), on="CUSTOMER") \
-                .join(roll_sum(180), on="CUSTOMER") \
-                .join(roll_sum(365), on="CUSTOMER")
+
+    out = (
+        latest
+        .join(roll_sum(90),   on="CUSTOMER")
+        .join(roll_sum(180),  on="CUSTOMER")
+        .join(roll_sum(365),  on="CUSTOMER")
+    )
     out["Days Since Last Invoice"] = (today - out["Last Invoice Date"]).dt.days
     return out
 
 # ────────────────────────────────────────────────────────────────────────────
 # 3) Segmentation & Tactics
 # ────────────────────────────────────────────────────────────────────────────
-def segment_account(row, momentum_thresh=0.20, recapture_thresh=100000):
+def segment_account(
+    row,
+    momentum_thresh: float = 0.20,
+    recapture_thresh: float = 100_000
+) -> str:
     m = row["Momentum %"]
     r = row["Recapture"]
     b = row["Breadth"]
@@ -137,51 +145,53 @@ def segment_account(row, momentum_thresh=0.20, recapture_thresh=100000):
     return "TEST/EXPAND"
 
 TACTICS = {
-    "ATTACK":     "Win-back/displace…",
-    "GROW":       "Upsell/cross-sell…",
-    "MAINTAIN":   "Defend & delight…",
-    "TEST/EXPAND":"Low-friction pilot…",
+    "ATTACK":     "Win-back/displace: multi-thread, demo, sharp pricing, service rescue.",
+    "GROW":       "Upsell/cross-sell: add PM contract, attachments, lithium conversion.",
+    "MAINTAIN":   "Defend & delight: QBR cadence, SLA adherence, renewal focus.",
+    "TEST/EXPAND":"Low-friction pilot: starter order, trial service, quick win."
 }
 
 # ────────────────────────────────────────────────────────────────────────────
 # 4) Route Handlers
 # ────────────────────────────────────────────────────────────────────────────
-
 @targeting_bp.route("/targeting")
 def targeting_page():
-    # parse thresholds
     momentum = float(request.args.get("momentum",  0.20))
     recapture = float(request.args.get("recapture",100000))
 
     cust = load_customer()
     bill = load_billing()
 
-    # join billing by sold-to, then fill from ship-to
     if bill is not None:
-        bill_idx = bill.set_index("CUSTOMER")
-        cust = (
-            cust
-            .join(bill_idx, on="Sold to Name", rsuffix="_s")
-            .join(bill_idx, on="Ship to Name", rsuffix="_h")
+        # join on Sold-to Name first
+        cust = cust.merge(
+            bill, how="left",
+            left_on="Sold to Name", right_on="CUSTOMER"
         )
-        for fld in ("Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"):
-            cust[fld] = cust[f"{fld}_s"].fillna(cust[f"{fld}_h"])
-        cust.drop(columns=[c for c in cust if c.endswith(("_s","_h"))], inplace=True)
+        # then ship-to fallback
+        cust = cust.merge(
+            bill.add_suffix("_ship"), how="left",
+            left_on="Ship to Name", right_on="CUSTOMER_ship"
+        )
+        # for each billing field, fillna from ship suffix
+        for fld in ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]:
+            cust[fld] = cust[fld].fillna(cust.get(fld + "_ship"))
+        # drop helper cols
+        ship_cols = [c for c in cust.columns if c.endswith("_ship")]
+        cust.drop(columns=ship_cols + ["CUSTOMER","CUSTOMER_ship"], inplace=True)
 
-    # segmentation & tactic
-    cust["Segment"] = cust.apply(segment_account, axis=1,
-                                 args=(momentum, recapture))
+    cust["Segment"] = cust.apply(segment_account, axis=1, args=(momentum, recapture))
     cust["Tactic"]  = cust["Segment"].map(TACTICS)
 
-    # prepare table (just show first 20)
-    cols = ["Sold to Name","Ship to Name","Segment","Tactic"]
-    rows = cust[cols].head(20).to_dict(orient="records")
-    total = len(cust)
+    # only show first 20 rows in UI
+    cols     = ["Sold to Name","Ship to Name","Segment","Tactic"]
+    table    = cust[cols].head(20).to_dict(orient="records")
+    total    = len(cust)
 
     return render_template(
         "targeting.html",
         table_columns=cols,
-        table_rows=rows,
+        table_rows=table,
         total_accounts=total,
         momentum=momentum,
         recapture=recapture
@@ -191,13 +201,12 @@ def targeting_page():
 def targeting_download():
     cust = load_customer()
     bill = load_billing()
+
     if bill is not None:
-        bill_idx = bill.set_index("CUSTOMER")
-        cust = (
-            cust
-            .join(bill_idx, on="Sold to Name", rsuffix="_s")
-            .join(bill_idx, on="Ship to Name", rsuffix="_h")
-        )
+        cust = cust.merge(bill, how="left", left_on="Sold to Name", right_on="CUSTOMER")
+        cust = cust.merge(bill.add_suffix("_ship"), how="left",
+                           left_on="Ship to Name", right_on="CUSTOMER_ship")
+
     cust["Segment"] = cust.apply(segment_account, axis=1)
     cust["Tactic"]  = cust["Segment"].map(TACTICS)
 
