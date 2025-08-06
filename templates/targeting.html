@@ -3,45 +3,129 @@
 <head>
   <meta charset="UTF-8" />
   <title>Territory Service Targets</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Reuse your existing site CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    h2 { margin-top: 2rem; }
+    /* Territory tables */
+    .territory {
+      margin-bottom: 1.5rem;
+      border: 1px solid #222;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    details > summary {
+      background: #0b0b0b;
+      color: #eee;
+      padding: 0.75rem 1rem;
+      font-size: 1.1rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    details[open] > summary {
+      border-bottom: 1px solid #333;
+    }
+    .territory-content {
+      padding: 1rem;
+      background: #111;
+    }
     table {
-      width: 100%; border-collapse: collapse; margin-bottom: 1.5rem;
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
     }
     th, td {
-      border: 1px solid #ccc; padding: 0.5rem; text-align: left;
+      border: 1px solid #333;
+      padding: 0.5rem;
+      color: #ccc;
     }
-    th { background: #f4f4f4; }
+    th {
+      background: #1a1a1a;
+      text-align: left;
+    }
+    .sort-select {
+      float: right;
+      margin-top: -1.5rem;
+    }
   </style>
 </head>
 <body>
-  <h1>Service Recommendations by Territory</h1>
+  <div class="chat-container">
+    <!-- Reuse your header bar if desired -->
+    <div class="logo-bar">
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img" />
+      </div>
+      <div class="header-title">Tynan Equipment AI</div>
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
+      </div>
+    </div>
 
-  {% for rep, entries in rep_groups.items() %}
-    <h2>Territory: {{ rep }}</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Company</th>
-          <th>Services to Target</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in entries %}
-        <tr>
-          <td>{{ row.company }}</td>
-          <td>
-            {% if row.services %}
-              {{ row.services | join(', ') }}
-            {% else %}
-              <em>All services purchased</em>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endfor %}
+    <h1 style="color:#ccc; padding:0 1rem;">Service Recommendations by Territory</h1>
+
+    {% for rep, entries in rep_groups.items() %}
+      <div class="territory">
+        <details open>
+          <summary>{{ rep }}</summary>
+          <div class="territory-content">
+            <label class="sort-select">
+              Sort by:
+              <select onchange="sortTable('tbl-{{ loop.index0 }}', this.value)">
+                <option value="Company">Company</option>
+                <option value="Segment">Segment</option>
+              </select>
+            </label>
+            <table id="tbl-{{ loop.index0 }}">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Services to Target</th>
+                  <th>Segment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in entries %}
+                <tr>
+                  <td>{{ row.company }}</td>
+                  <td>
+                    {% if row.services %}
+                      {{ row.services | join(', ') }}
+                    {% else %}
+                      <em>All purchased</em>
+                    {% endif %}
+                  </td>
+                  <td>{{ row.segment or "" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    {% endfor %}
+  </div>
+
+  <script>
+    function sortTable(tableId, sortBy) {
+      const table = document.getElementById(tableId);
+      const tbody = table.tBodies[0];
+      const rows = Array.from(tbody.rows);
+
+      // determine column index
+      const headers = table.tHead.rows[0].cells;
+      let idx = Array.from(headers).findIndex(th => th.innerText.trim() === sortBy);
+      if (idx < 0) return;
+
+      rows.sort((a, b) => {
+        const aText = a.cells[idx].innerText.trim().toLowerCase();
+        const bText = b.cells[idx].innerText.trim().toLowerCase();
+        return aText.localeCompare(bText);
+      });
+
+      // reattach in new order
+      rows.forEach(r => tbody.appendChild(r));
+    }
+  </script>
 </body>
 </html>
