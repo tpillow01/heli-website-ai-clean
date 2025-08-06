@@ -1,131 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Territory Service Targets</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Reuse your existing site CSS -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <meta charset="UTF-8">
+  <title>Targeting</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <style>
-    /* Territory tables */
+    body {
+      background: #000;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header img {
+      height: 60px;
+    }
+    h1 {
+      text-align: center;
+      color: #cc0000;
+    }
     .territory {
-      margin-bottom: 1.5rem;
-      border: 1px solid #222;
+      margin: 20px 0;
+      background: #111;
+      border: 1px solid #333;
       border-radius: 8px;
       overflow: hidden;
     }
-    details > summary {
-      background: #0b0b0b;
-      color: #eee;
-      padding: 0.75rem 1rem;
-      font-size: 1.1rem;
+    .territory-header {
+      background: #cc0000;
+      padding: 14px 20px;
+      font-weight: bold;
+      font-size: 18px;
       cursor: pointer;
-      user-select: none;
     }
-    details[open] > summary {
-      border-bottom: 1px solid #333;
-    }
-    .territory-content {
-      padding: 1rem;
-      background: #111;
-    }
-    table {
+    .company-table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 0.5rem;
+      display: none;
+      max-height: 400px;
+      overflow-y: auto;
     }
-    th, td {
-      border: 1px solid #333;
-      padding: 0.5rem;
-      color: #ccc;
+    .company-table thead {
+      background: #222;
+      position: sticky;
+      top: 0;
     }
-    th {
-      background: #1a1a1a;
+    .company-table th,
+    .company-table td {
+      border: 1px solid #444;
+      padding: 8px 12px;
       text-align: left;
     }
-    .sort-select {
-      float: right;
-      margin-top: -1.5rem;
+    .highlight {
+      background-color: #440000;
+      color: #ff6666;
+    }
+    .scroll-container {
+      max-height: 400px;
+      overflow-y: auto;
+      display: none;
     }
   </style>
-</head>
-<body>
-  <div class="chat-container">
-    <!-- Reuse your header bar if desired -->
-    <div class="logo-bar">
-      <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img" />
-      </div>
-      <div class="header-title">Tynan Equipment AI</div>
-      <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
-      </div>
-    </div>
-
-    <h1 style="color:#ccc; padding:0 1rem;">Service Recommendations by Territory</h1>
-
-    {% for rep, entries in rep_groups.items() %}
-      <div class="territory">
-        <details open>
-          <summary>{{ rep }}</summary>
-          <div class="territory-content">
-            <label class="sort-select">
-              Sort by:
-              <select onchange="sortTable('tbl-{{ loop.index0 }}', this.value)">
-                <option value="Company">Company</option>
-                <option value="Segment">Segment</option>
-              </select>
-            </label>
-            <table id="tbl-{{ loop.index0 }}">
-              <thead>
-                <tr>
-                  <th>Company</th>
-                  <th>Services to Target</th>
-                  <th>Segment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in entries %}
-                <tr>
-                  <td>{{ row.company }}</td>
-                  <td>
-                    {% if row.services %}
-                      {{ row.services | join(', ') }}
-                    {% else %}
-                      <em>All purchased</em>
-                    {% endif %}
-                  </td>
-                  <td>{{ row.segment or "" }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      </div>
-    {% endfor %}
-  </div>
-
   <script>
-    function sortTable(tableId, sortBy) {
-      const table = document.getElementById(tableId);
-      const tbody = table.tBodies[0];
-      const rows = Array.from(tbody.rows);
-
-      // determine column index
-      const headers = table.tHead.rows[0].cells;
-      let idx = Array.from(headers).findIndex(th => th.innerText.trim() === sortBy);
-      if (idx < 0) return;
-
-      rows.sort((a, b) => {
-        const aText = a.cells[idx].innerText.trim().toLowerCase();
-        const bText = b.cells[idx].innerText.trim().toLowerCase();
-        return aText.localeCompare(bText);
-      });
-
-      // reattach in new order
-      rows.forEach(r => tbody.appendChild(r));
+    function toggleTable(id) {
+      const container = document.getElementById(id);
+      container.style.display = (container.style.display === 'block') ? 'none' : 'block';
     }
   </script>
+</head>
+<body>
+  <div class="header">
+    <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo">
+    <h1>Targeting Dashboard</h1>
+    <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo">
+  </div>
+
+  {% for territory, companies in grouped.items() %}
+  <div class="territory">
+    <div class="territory-header" onclick="toggleTable('group-{{ loop.index }}')">
+      {{ territory }} &nbsp; ⬇️
+    </div>
+    <div class="scroll-container" id="group-{{ loop.index }}">
+      <table class="company-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Segment</th>
+            {% for svc in services %}
+            <th>Needs {{ svc.title() }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in companies.itertuples() %}
+          <tr class="{% if row.TARGET_PARTS or row.TARGET_RENTAL or row.TARGET_SERVICE or row.TARGET_NEW or row.TARGET_USED %}highlight{% endif %}">
+            <td>{{ row.COMPANY }}</td>
+            <td>{{ row.SEGMENT }}</td>
+            {% for svc in services %}
+              <td>{{ '✅' if getattr(row, 'TARGET_' + svc) else '' }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
 </body>
 </html>

@@ -1,144 +1,53 @@
-import os
+# targeting.py
+from flask import Flask, render_template
 import pandas as pd
-from flask import Blueprint, render_template
 
-# ────────────────────────────────────────────────────────────────────────────
-# 1) Blueprint & Config
-# ────────────────────────────────────────────────────────────────────────────
-targeting_bp = Blueprint("targeting", __name__, template_folder="templates")
+app = Flask(__name__)
 
-CUSTOMER_CSV = os.getenv("TARGETING_CUSTOMER_CSV", "customer_report")
-BILLING_CSV  = os.getenv("TARGETING_BILLING_CSV",  "customer_billing")
-
-# ────────────────────────────────────────────────────────────────────────────
-# 2) File Reading Helpers
-# ────────────────────────────────────────────────────────────────────────────
-def _resolve_path(base: str) -> str:
-    for ext in ("", ".csv", ".xlsx"):
-        p = base + ext
-        if os.path.exists(p):
-            return p
-    raise FileNotFoundError(f"Cannot find {base}(.csv/.xlsx)")
-
-def _read_loose(base: str) -> pd.DataFrame:
-    """
-    Try:
-      1) UTF-8 CSV (skip bad lines)
-      2) CP1252 CSV (skip bad lines)
-      3) Excel via openpyxl
-      4) Final CSV fallback
-    """
-    path = _resolve_path(base)
-    for enc in ("utf-8", "cp1252"):
-        try:
-            return pd.read_csv(path, dtype=str, encoding=enc, on_bad_lines="skip")
-        except Exception:
-            pass
-    if path.lower().endswith((".xls", ".xlsx")):
-        return pd.read_excel(path, dtype=str, engine="openpyxl")
-    return pd.read_csv(path, dtype=str, on_bad_lines="skip")
-
-def _to_number(x: any) -> float:
-    """Convert '$1,234', '(56)' → float."""
-    if pd.isna(x):
-        return 0.0
-    s = str(x).strip().replace("$", "").replace(",", "")
-    if s.startswith("(") and s.endswith(")"):
-        s = "-" + s[1:-1]
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
-
-# ────────────────────────────────────────────────────────────────────────────
-# 3) Segmentation Logic
-# ────────────────────────────────────────────────────────────────────────────
-C_R12 = "Revenue Rolling 12 Months - Aftermarket"
-C_R13 = "Revenue Rolling 13 - 24 Months - Aftermarket"
-C_R25 = "Revenue Rolling 25 - 36 Months - Aftermarket"
-
-def segment_account(row, momentum_thresh=0.20, recapture_thresh=100000):
-    r12 = row.get(C_R12, 0.0)
-    r13 = row.get(C_R13, 0.0)
-    r25 = row.get(C_R25, 0.0)
-    eps = 1e-9
-    momentum = (r12 - r13) / (abs(r13) + eps)
-    peak = max(r12, r13, r25)
-    recapture = max(0.0, peak - r12)
-
-    if recapture >= recapture_thresh:
-        return "ATTACK"
-    if momentum >= momentum_thresh:
-        return "GROW"
-    if r12 > 0:
-        return "MAINTAIN"
-    return "TEST/EXPAND"
-
-TACTICS = {
-    "ATTACK":      "Win-back/displace: multi-thread, demo, sharp pricing.",
-    "GROW":        "Upsell/cross-sell: add PM, attachments, lithium conversion.",
-    "MAINTAIN":    "Defend & delight: QBR cadence, SLA adherence.",
-    "TEST/EXPAND": "Low-friction pilot: starter order, trial service, quick win."
-}
-
-# ────────────────────────────────────────────────────────────────────────────
-# 4) Route Handler
-# ────────────────────────────────────────────────────────────────────────────
-@targeting_bp.route("/targeting")
+@app.route('/targeting')
 def targeting_page():
-    # Load & clean customer data
-    cust = _read_loose(CUSTOMER_CSV)
-    cust.columns = cust.columns.str.strip()
-    for col in (C_R12, C_R13, C_R25):
-        cust[col] = cust.get(col, 0).apply(_to_number)
+    # Load customer report
+    df = pd.read_csv("customer_report.csv", dtype=str)
+    df = df.rename(columns=lambda x: x.strip().upper())
 
-    # Load & pivot billing for services
-    bill = _read_loose(BILLING_CSV)
-    bill.columns = bill.columns.str.strip()
-    bill["CUSTOMER"] = bill["CUSTOMER"].astype(str)
-    bill["Type"]     = bill["Type"].astype(str)
-    bill["bought"]   = True
+    # Load billing data
+    billing = pd.read_csv("customer_billing.csv", dtype=str)
+    billing = billing.rename(columns=lambda x: x.strip().upper())
 
-    pivot = (
-        bill
-        .pivot_table(
-            index="CUSTOMER",
-            columns="Type",
-            values="bought",
-            aggfunc="max",
-            fill_value=False
-        )
+    # Ensure matching company names are strings
+    df["COMPANY"] = df["COMPANY"].astype(str)
+    billing["CUSTOMER"] = billing["CUSTOMER"].astype(str)
+
+    # Normalize invoice types
+    billing["INVOICE_TYPE"] = billing["INVOICE_TYPE"].str.upper()
+
+    # Create a pivot to determine if a customer has ever been billed for each service
+    service_pivot = billing.pivot_table(
+        index="CUSTOMER",
+        columns="INVOICE_TYPE",
+        values="INVOICE_NO",
+        aggfunc="count",
+        fill_value=0
     )
 
-    # Master list of services, ensure all are present
-    SERVICES = ["Parts", "Service", "Rental", "New Equipment", "Used Equipment"]
-    pivot = pivot.reindex(columns=SERVICES, fill_value=False)
+    # Determine services customer has NOT used (needs attention)
+    services = ["PARTS", "RENTAL", "SERVICE", "NEW", "USED"]
+    for svc in services:
+        if svc not in service_pivot.columns:
+            service_pivot[svc] = 0
 
-    # Compute segmentation & recommendations
-    cust["Sold to Name"]   = cust["Sold to Name"].astype(str)
-    cust["Sales Rep Name"] = cust["Sales Rep Name"].astype(str)
-    cust["Segment"]        = cust.apply(segment_account, axis=1)
-    cust["Tactic"]         = cust["Segment"].map(TACTICS)
+    # Merge data
+    df = df.merge(service_pivot, how="left", left_on="COMPANY", right_index=True)
+    df[services] = df[services].fillna(0)
 
-    # Join in pivot so we know what they've never bought
-    df = cust.set_index("Sold to Name").join(pivot, how="left").fillna(False)
-    df["Recommended Services"] = df.apply(
-        lambda r: [s for s in SERVICES if not r.get(s, False)], axis=1
-    )
+    # Mark focus targets: if they have no usage in any category
+    for svc in services:
+        df[f"TARGET_{svc}"] = df[svc] == 0
 
-    # Group by territory & sort by segment
-    SEG_ORDER = {"ATTACK": 0, "GROW": 1, "MAINTAIN": 2, "TEST/EXPAND": 3}
-    rep_groups = {}
-    for rep, group in df.groupby("Sales Rep Name"):
-        entries = []
-        for name, row in group.iterrows():
-            entries.append({
-                "company": name,
-                "segment": row["Segment"],
-                "services": row["Recommended Services"]
-            })
-        entries.sort(key=lambda e: SEG_ORDER.get(e["segment"], 99))
-        rep_groups[rep] = entries
+    # Group by Territory
+    df_grouped = {}
+    for territory, group in df.groupby("SALES TERRITORY"):
+        sorted_group = group.sort_values("SEGMENT")
+        df_grouped[territory] = sorted_group
 
-    # Render the collapsible, color‐coded tables
-    return render_template("targeting.html", rep_groups=rep_groups)
+    return render_template("targeting.html", grouped=df_grouped, services=services)
