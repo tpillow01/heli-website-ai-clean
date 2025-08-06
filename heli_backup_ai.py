@@ -9,6 +9,8 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
+from targeting import targeting_bp
+
 
 from ai_logic import generate_forklift_context
 from data_sources import make_inquiry_targets  # used by /api/targets

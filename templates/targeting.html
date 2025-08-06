@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Account Targeting</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    .toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:end;background:#1a1a1a;border:1px solid #222;padding:12px;border-radius:8px;margin:10px 0 16px 0}
+    .toolbar .field{display:flex;flex-direction:column;min-width:220px}
+    .toolbar input{padding:8px;border-radius:6px;border:1px solid #333;background:#000;color:#fff}
+    .btn{background:#cc0000;color:#fff;border:none;border-radius:6px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block}
+    .btn.alt{background:#333;border:1px solid #444}
+    .card{background:#111;color:#eee;padding:16px;border-radius:10px}
+    th,td{padding:8px;border-bottom:1px solid #222}
+    th{border-bottom:1px solid #333;text-align:left}
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <div class="logo-bar">
+      <div class="logo-wrapper"><img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan" class="logo-img"></div>
+      <div class="header-title">Account Targeting</div>
+      <div class="logo-wrapper"><img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli" class="logo-img"></div>
+    </div>
+
+    <div class="card">
+      <form method="get" action="{{ url_for('targeting.targeting_page') }}" class="toolbar">
+        <div class="field">
+          <label>Momentum Threshold (%)</label>
+          <input type="number" name="momentum_display" value="{{ (momentum * 100)|round(0) }}" min="-100" max="500" step="5">
+        </div>
+        <div class="field">
+          <label>Re-capture Threshold ($)</label>
+          <input type="number" name="recapture" value="{{ recapture|int }}" min="0" step="10000">
+        </div>
+        <button class="btn">Apply</button>
+        <a class="btn alt" href="{{ url_for('targeting.targeting_download', momentum=momentum, recapture=recapture) }}">Download CSV</a>
+        <a class="btn alt" href="{{ url_for('home') }}">← Back to Chat</a>
+      </form>
+
+      <div style="border:1px solid #222;border-radius:8px;overflow:hidden;">
+        {{ map_html|safe }}
+      </div>
+
+      <h3 style="margin:16px 0 8px 0;">Ranked Targets</h3>
+      <table id="targets" style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            {% for c in table_columns %}
+              <th>{{ c }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in table_rows %}
+            <tr>
+              {% for cell in row %}
+                <td>{{ cell }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.min.css">
+  <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
+  <script>
+    // Convert pretty momentum (%) → decimal for query param
+    const form = document.querySelector('form[action$="/targeting"]');
+    form.addEventListener('submit', () => {
+      const pct = form.querySelector('input[name="momentum_display"]');
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.name = 'momentum';
+      hidden.value = (parseFloat(pct.value || "0") / 100).toString();
+      form.appendChild(hidden);
+      pct.name = 'ignored_momentum';
+    });
+
+    new DataTable('#targets', {
+      paging: true,
+      pageLength: 25,
+      order: [[ 9, 'desc' ]], // "Re-capture ($)" column index in the current layout
+      layout: { topStart: 'search', bottomStart: 'info', bottomEnd: 'paging' }
+    });
+  </script>
+</body>
+</html>
