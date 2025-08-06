@@ -19,40 +19,43 @@
     }
   </script>
 
-  <!-- Minimal toolbar styles to match your dark/red theme -->
   <style>
-    .toolbar{
-      display:flex; align-items:center; justify-content:space-between;
-      gap:12px; flex-wrap:wrap;
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; flex-wrap: wrap;
       margin: 8px 0 12px;
       padding: 8px 12px;
-      background:#0b0b0b;
-      border:1px solid #222;
-      border-radius:10px;
+      background: #0b0b0b;
+      border: 1px solid #222;
+      border-radius: 10px;
       box-shadow: 0 0 0 1px #000 inset;
     }
-    .toolbar-left{
-      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    .toolbar-left {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     }
-    .toolbar-right{
-      margin-left:auto; display:flex; align-items:center;
+    .toolbar-right {
+      margin-left: auto; display: flex; align-items: center;
     }
-    .toolbar label{
-      color:#ccc; font-size:.9rem; display:flex; flex-direction:column;
+    .toolbar label {
+      color: #ccc; font-size: .9rem; display: flex; flex-direction: column;
     }
-    .toolbar select{
-      background:#111; color:#eee; border:1px solid #333; border-radius:8px; padding:6px 8px;
-      outline:none;
+    .toolbar select {
+      background: #111; color: #eee; border: 1px solid #333; border-radius: 8px; padding: 6px 8px;
+      outline: none;
     }
-    .toolbar select:focus{ border-color:#cc0000; box-shadow:0 0 0 2px rgba(204,0,0,.25); }
-
-    .map-btn{
-      display:inline-flex; align-items:center; justify-content:center;
-      padding:8px 14px; border-radius:8px;
-      border:1px solid #333; background:#111; color:#cc0000;
-      text-decoration:none; font-weight:600; font-size:14px;
+    .toolbar select:focus {
+      border-color: #cc0000;
+      box-shadow: 0 0 0 2px rgba(204,0,0,.25);
     }
-    .map-btn:hover{ border-color:#cc0000; background:#1a1a1a; }
+    .map-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 8px 14px; border-radius: 8px;
+      border: 1px solid #333; background: #111; color: #cc0000;
+      text-decoration: none; font-weight: 600; font-size: 14px;
+    }
+    .map-btn:hover {
+      border-color: #cc0000; background: #1a1a1a;
+    }
   </style>
 </head>
 <body>
@@ -78,7 +81,6 @@
       </div>
       <div class="toolbar-right">
         <a class="map-btn" href="{{ url_for('map_page') }}" title="Open Customer Heat Map">Map</a>
-        <a class="map-btn" href="{{ url_for('targeting_page') }}" title="Open Account Targeting">Targeting</a>
       </div>
     </div>
 
@@ -94,13 +96,7 @@
 
     <!-- Input -->
     <form id="chat-form" class="input-form">
-      <textarea
-        id="userInput"
-        rows="3"
-        placeholder="Describe the customer's needs..."
-        required
-        autofocus
-      ></textarea>
+      <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..." required autofocus></textarea>
       <button type="submit">Send</button>
     </form>
 
@@ -140,10 +136,7 @@
       if (sender === 'ai') stopAnimation();
       const bubble = document.createElement('div');
       bubble.className = `response-bubble ${sender}`;
-      bubble.innerHTML = formatLabels(text)
-        .split('\n')
-        .map(line => `<div>${line}</div>`)
-        .join('');
+      bubble.innerHTML = formatLabels(text).split('\n').map(line => `<div>${line}</div>`).join('');
       responseArea.appendChild(bubble);
       bubble.scrollIntoView({ behavior: 'smooth' });
     }
