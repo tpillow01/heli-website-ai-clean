@@ -2,54 +2,90 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Account Targeting</title>
+  <title>Account Targeting • Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   <style>
-    .toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:end;background:#1a1a1a;border:1px solid #222;padding:12px;border-radius:8px;margin:10px 0 16px 0}
-    .toolbar .field{display:flex;flex-direction:column;min-width:220px}
-    .toolbar input{padding:8px;border-radius:6px;border:1px solid #333;background:#000;color:#fff}
-    .btn{background:#cc0000;color:#fff;border:none;border-radius:6px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block}
-    .btn.alt{background:#333;border:1px solid #444}
-    .card{background:#111;color:#eee;padding:16px;border-radius:10px}
-    th,td{padding:8px;border-bottom:1px solid #222}
-    th{border-bottom:1px solid #333;text-align:left}
+    /* lightweight tweaks to match your dark theme */
+    body { background:#0b0b0b; color:#e6e6e6; }
+    .page { max-width:1200px; margin:24px auto; padding:0 16px; }
+    .topbar { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+    .topbar a.btn { text-decoration:none; }
+    .card {
+      background:#111; border:1px solid #222; border-radius:10px;
+      box-shadow:0 0 0 1px #000 inset; padding:14px; margin-bottom:16px;
+    }
+    .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+    .controls label { display:flex; flex-direction:column; font-size:.9rem; color:#ccc; }
+    .controls input {
+      background:#0f0f0f; color:#eee; border:1px solid #333; border-radius:8px; padding:6px 8px; outline:none;
+    }
+    .controls input:focus { border-color:#cc0000; box-shadow:0 0 0 2px rgba(204,0,0,.25); }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      padding:8px 14px; border-radius:8px; border:1px solid #333;
+      background:#111; color:#cc0000; font-weight:600; cursor:pointer;
+    }
+    .btn:hover { border-color:#cc0000; background:#1a1a1a; }
+    .pill { font-size:.85rem; opacity:.85; }
+    .map-wrap { overflow:hidden; border-radius:10px; border:1px solid #222; }
+    .table-wrap { overflow:auto; border-radius:10px; border:1px solid #222; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:10px 12px; border-bottom:1px solid #222; }
+    th { position:sticky; top:0; background:#151515; text-align:left; }
+    tr:hover td { background:#121212; }
+    .legend { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+    .key { display:inline-flex; align-items:center; gap:6px; font-size:.9rem; color:#ccc; }
+    .dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
+    .dot.attack{ background:#ff3333; }
+    .dot.grow{ background:#ff9933; }
+    .dot.test{ background:#33aaff; }
+    .dot.maintain{ background:#66cc66; }
   </style>
 </head>
 <body>
-  <div class="chat-container">
-    <div class="logo-bar">
-      <div class="logo-wrapper"><img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan" class="logo-img"></div>
-      <div class="header-title">Account Targeting</div>
-      <div class="logo-wrapper"><img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli" class="logo-img"></div>
+  <div class="page">
+    <div class="topbar">
+      <a class="btn" href="{{ url_for('home') }}">← Back to Chat</a>
+      <div style="flex:1"></div>
+      <a class="btn" href="{{ url_for('targeting.targeting_download', momentum=momentum, recapture=recapture) }}">Download CSV</a>
     </div>
 
     <div class="card">
-      <form method="get" action="{{ url_for('targeting.targeting_page') }}" class="toolbar">
-        <div class="field">
-          <label>Momentum Threshold (%)</label>
-          <input type="number" name="momentum_display" value="{{ (momentum * 100)|round(0) }}" min="-100" max="500" step="5">
-        </div>
-        <div class="field">
-          <label>Re-capture Threshold ($)</label>
-          <input type="number" name="recapture" value="{{ recapture|int }}" min="0" step="10000">
-        </div>
-        <button class="btn">Apply</button>
-        <a class="btn alt" href="{{ url_for('targeting.targeting_download', momentum=momentum, recapture=recapture) }}">Download CSV</a>
-        <a class="btn alt" href="{{ url_for('home') }}">← Back to Chat</a>
-      </form>
-
-      <div style="border:1px solid #222;border-radius:8px;overflow:hidden;">
-        {{ map_html|safe }}
+      <h2 style="margin:0 0 10px;">Account Targeting</h2>
+      <div class="controls">
+        <label>
+          Momentum Threshold (%)
+          <input id="momentumInput" type="number" step="1" min="-100" max="500"
+                 value="{{ (momentum * 100) | round(0) }}" />
+        </label>
+        <label>
+          Re-capture Threshold ($)
+          <input id="recaptureInput" type="number" step="5000" min="0"
+                 value="{{ recapture | int }}" />
+        </label>
+        <button class="btn" id="applyBtn">Apply</button>
+        <span class="pill">Current: Momentum ≥ {{ (momentum*100)|round(1) }}%  •  Re-capture ≥ ${{ '{:,.0f}'.format(recapture) }}</span>
       </div>
+      <div class="legend">
+        <span class="key"><span class="dot attack"></span> ATTACK</span>
+        <span class="key"><span class="dot grow"></span> GROW</span>
+        <span class="key"><span class="dot test"></span> TEST/EXPAND</span>
+        <span class="key"><span class="dot maintain"></span> MAINTAIN</span>
+      </div>
+    </div>
 
-      <h3 style="margin:16px 0 8px 0;">Ranked Targets</h3>
-      <table id="targets" style="width:100%;border-collapse:collapse;">
+    <div class="card map-wrap">
+      <!-- Folium map HTML -->
+      {{ map_html|safe }}
+    </div>
+
+    <div class="card table-wrap">
+      <table>
         <thead>
           <tr>
-            {% for c in table_columns %}
-              <th>{{ c }}</th>
+            {% for col in table_columns %}
+              <th>{{ col }}</th>
             {% endfor %}
           </tr>
         </thead>
@@ -64,28 +100,25 @@
         </tbody>
       </table>
     </div>
+
+    <div class="topbar" style="justify-content:flex-end;">
+      <a class="btn" href="{{ url_for('targeting.targeting_download', momentum=momentum, recapture=recapture) }}">Download CSV</a>
+    </div>
   </div>
 
-  <link rel="stylesheet" href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.min.css">
-  <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
   <script>
-    // Convert pretty momentum (%) → decimal for query param
-    const form = document.querySelector('form[action$="/targeting"]');
-    form.addEventListener('submit', () => {
-      const pct = form.querySelector('input[name="momentum_display"]');
-      const hidden = document.createElement('input');
-      hidden.type = 'hidden';
-      hidden.name = 'momentum';
-      hidden.value = (parseFloat(pct.value || "0") / 100).toString();
-      form.appendChild(hidden);
-      pct.name = 'ignored_momentum';
-    });
-
-    new DataTable('#targets', {
-      paging: true,
-      pageLength: 25,
-      order: [[ 9, 'desc' ]], // "Re-capture ($)" column index in the current layout
-      layout: { topStart: 'search', bottomStart: 'info', bottomEnd: 'paging' }
+    const mEl = document.getElementById('momentumInput');
+    const rEl = document.getElementById('recaptureInput');
+    document.getElementById('applyBtn').addEventListener('click', () => {
+      const mPct = parseFloat(mEl.value || '0');
+      const rVal = parseFloat(rEl.value || '0');
+      // Convert UI percent → server decimal (e.g., 20 → 0.20)
+      const mDec = isNaN(mPct) ? 0.20 : (mPct / 100);
+      const rNum = isNaN(rVal) ? 100000 : rVal;
+      const url = new URL(window.location.href);
+      url.searchParams.set('momentum', mDec.toString());
+      url.searchParams.set('recapture', rNum.toString());
+      window.location.href = url.toString();
     });
   </script>
 </body>

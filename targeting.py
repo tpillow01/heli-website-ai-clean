@@ -6,29 +6,28 @@ from datetime import timezone
 import pandas as pd
 from flask import Blueprint, render_template, request, send_file
 
-# ── Safe imports so the server never crashes if libs are missing ──
+# ── Safe imports ──
 FOLIUM_AVAILABLE = True
 try:
-    import folium  # type: ignore
-    from folium.plugins import MarkerCluster  # type: ignore
+    import folium
+    from folium.plugins import MarkerCluster
 except Exception:
     FOLIUM_AVAILABLE = False
 
 USE_ZIP_GEO = True
 try:
-    import pgeocode  # type: ignore
+    import pgeocode
 except Exception:
     USE_ZIP_GEO = False
 
 # Blueprint
 targeting_bp = Blueprint("targeting", __name__, template_folder="templates")
 
-# ─── Config: file paths (override via env vars if needed) ────────────────
-# Your files have no extension: "customer_report" and "customer_billing"
+# ─── Config: file names (no extension needed) ────────────────────────────
 CUSTOMER_CSV = os.environ.get("TARGETING_CUSTOMER_CSV", "customer_report")
 BILLING_CSV  = os.environ.get("TARGETING_BILLING_CSV", "customer_billing")
 
-# ─── Minimal robust readers (fixes the encoding crash) ───────────────────
+# ─── Minimal robust readers (fixes encoding crash) ───────────────────────
 def _resolve_path(base: str) -> str:
     """Try plain, .csv, .xlsx — return the first that exists."""
     for p in (base, f"{base}.csv", f"{base}.xlsx"):
@@ -39,9 +38,9 @@ def _resolve_path(base: str) -> str:
 def _read_loose(path: str) -> pd.DataFrame:
     """
     Tolerant table loader:
-    1) UTF-8 CSV
-    2) Windows-1252 CSV (skip bad lines)
-    3) Excel (xlsx/xls)
+      1) UTF-8 CSV
+      2) Windows-1252 CSV (skip bad lines)
+      3) Excel (xlsx/xls)
     """
     path = _resolve_path(path)
     # Try UTF-8 CSV
@@ -59,7 +58,7 @@ def _read_loose(path: str) -> pd.DataFrame:
     # Excel last
     return pd.read_excel(path, dtype=str)
 
-# Your report headers (from your sample)
+# ─── Column map (from your sample) ───────────────────────────────────────
 C = {
     "ship_to_id":   "Ship to ID",
     "sold_to_id":   "Sold to ID",
@@ -83,9 +82,9 @@ C = {
     "rental12":     "Rental Revenue R12",
 }
 
-# ─── Utilities ───────────────────────────────────────────────────────────
+# ─── Utils ───────────────────────────────────────────────────────────────
 def _to_number(x):
-    """Convert formats like '$81,593', '($80)', ' 1,672.06 ' to float."""
+    """Convert '$81,593', '($80)', ' 1,672.06 ' → float."""
     if pd.isna(x):
         return None
     if isinstance(x, (int, float)):
@@ -103,10 +102,10 @@ def _to_number(x):
     except Exception:
         return None
 
-# ─── Loaders (using the tolerant reader) ─────────────────────────────────
+# ─── Loaders ─────────────────────────────────────────────────────────────
 def _load_customer():
     if not os.path.exists(_resolve_path(CUSTOMER_CSV)):
-        raise FileNotFoundError(f"Missing {CUSTOMER_CSV} (.csv/.xlsx). Put it next to app or set TARGETING_CUSTOMER_CSV.")
+        raise FileNotFoundError(f"Missing {CUSTOMER_CSV} (.csv/.xlsx). Put it next to the app or set TARGETING_CUSTOMER_CSV.")
     df = _read_loose(CUSTOMER_CSV)
 
     # ensure expected columns exist
@@ -167,7 +166,7 @@ def _load_billing():
     if not os.path.exists(_resolve_path(BILLING_CSV)):
         return None
 
-    b = _read_loose(BILLING_CSV)
+    b = _read_loose(BILLING_CSV)  # tolerant reader (fixes UTF-8 crash)
 
     # normalize expected columns
     for need in ["Date", "Type", "REVENUE", "CUSTOMER"]:
@@ -333,13 +332,19 @@ def targeting_page():
     def _key(v):
         s = str(v)
         if "$" in s:
-            try: return float(s.replace("$", "").replace(",", ""))
-            except Exception: return 0.0
+            try:
+                return float(s.replace("$", "").replace(",", ""))
+            except Exception:
+                return 0.0
         if "%" in s:
-            try: return float(s.replace("%", ""))
-            except Exception: return 0.0
-        try: return float(s)
-        except Exception: return 0.0
+            try:
+                return float(s.replace("%", ""))
+            except Exception:
+                return 0.0
+        try:
+            return float(s)
+        except Exception:
+            return 0.0
 
     table = table.sort_values(by=["Re-capture ($)", "Momentum %"],
                               ascending=[False, True],
