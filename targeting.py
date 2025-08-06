@@ -35,17 +35,14 @@ def _resolve_path(base: str) -> str:
 
 def _read_loose(path: str) -> pd.DataFrame:
     path = _resolve_path(path)
-    # try UTF-8 CSV
     try:
         return pd.read_csv(path, dtype=str, encoding="utf-8")
     except Exception:
         pass
-    # try CP1252 CSV
     try:
         return pd.read_csv(path, dtype=str, encoding="cp1252", on_bad_lines="skip")
     except Exception:
         pass
-    # fallback to Excel
     return pd.read_excel(path, dtype=str)
 
 # ─── Column map ──────────────────────────────────────────────────────────
@@ -80,8 +77,8 @@ def _to_number(x):
     neg = s.startswith("(") and s.endswith(")")
     if neg:
         s = s[1:-1]
-    s = s.replace("$","").replace(",","").replace("+","").strip()
-    if not s or s.upper()=="N/A":
+    s = s.replace("$", "").replace(",", "").replace("+", "").strip()
+    if not s or s.upper() == "N/A":
         return None
     try:
         v = float(s)
@@ -96,9 +93,10 @@ def _load_customer():
         raise FileNotFoundError(f"Missing {CUSTOMER_CSV} (csv/xlsx)")
     df = _read_loose(path)
 
-    # ensure all columns exist
+    # ensure expected columns exist
     for col in C.values():
-        df.setdefault(col, pd.NA)
+        if col not in df.columns:
+            df[col] = pd.NA
 
     # numeric conversions
     for key in ["r12","r13_24","r25_36","new36","used36","parts12","service12","ps12","rental12"]:
@@ -152,16 +150,19 @@ def _load_billing():
         return None
     b = _read_loose(path)
 
+    # ensure expected columns exist
     for col in ["Date","Type","REVENUE","CUSTOMER"]:
-        b.setdefault(col, pd.NA)
+        if col not in b.columns:
+            b[col] = pd.NA
 
-    # CUSTOMER must be string
+    # ensure CUSTOMER is string
     b["CUSTOMER"] = b["CUSTOMER"].astype(str)
-    # tz-naive date parsing
+
+    # tz-naive date parse
     b["Date"] = pd.to_datetime(b["Date"], errors="coerce")
     b["REVENUE"] = b["REVENUE"].apply(_to_number)
 
-    # latest invoice date
+    # latest invoice
     latest = b.groupby("CUSTOMER", dropna=False)["Date"].max().reset_index()
     latest.columns = ["CUSTOMER","Last Invoice Date"]
 
@@ -172,11 +173,12 @@ def _load_billing():
     def total_in(days):
         return b[b["Days Ago"] <= days].groupby("CUSTOMER")["REVENUE"].sum()
 
-    out = latest \
-        .merge(total_in(90).rename("Rev 90d"),   on="CUSTOMER", how="left") \
-        .merge(total_in(180).rename("Rev 180d"), on="CUSTOMER", how="left") \
+    out = (
+        latest
+        .merge(total_in(90).rename("Rev 90d"),   on="CUSTOMER", how="left")
+        .merge(total_in(180).rename("Rev 180d"), on="CUSTOMER", how="left")
         .merge(total_in(365).rename("Rev 365d"), on="CUSTOMER", how="left")
-
+    )
     out["Days Since Last Invoice"] = (today - out["Last Invoice Date"]).dt.days
     return out
 
@@ -209,7 +211,6 @@ def _make_map(df, segment_colors):
     if not FOLIUM_AVAILABLE:
         return "<div>Map unavailable; install folium.</div>"
 
-    # center
     if df["Latitude"].notna().any() and df["Longitude"].notna().any():
         lat = df["Latitude"].dropna().astype(float).mean()
         lon = df["Longitude"].dropna().astype(float).mean()
@@ -218,7 +219,6 @@ def _make_map(df, segment_colors):
         m = folium.Map(location=[39.8283, -98.5795], tiles="cartodbpositron", zoom_start=4)
 
     cluster = MarkerCluster().add_to(m)
-
     for _, row in df.iterrows():
         lt, ln = row["Latitude"], row["Longitude"]
         if pd.isna(lt) or pd.isna(ln):
@@ -232,7 +232,6 @@ def _make_map(df, segment_colors):
                 radius = min(22, 6 + math.log10(rec + 10) * 6)
         except Exception:
             pass
-
         tooltip = folium.Tooltip(
             f"<b>{row[C['sold_to_name']]}</b><br>"
             f"{row[C['city']]}, {row['State']}<br>"
@@ -240,7 +239,6 @@ def _make_map(df, segment_colors):
             f"Momentum: {row['Momentum %']*100:.1f}%<br>"
             f"Re-capture: ${row['Re-capture Potential ($)']:,.0f}"
         )
-
         folium.CircleMarker(
             location=[lt, ln],
             radius=radius,
@@ -263,35 +261,25 @@ def targeting_page():
     billing = _load_billing()
 
     if billing is not None:
-        # build an index on billing for fast joins
         bill_idx = billing.set_index("CUSTOMER")
         bill_idx.index = bill_idx.index.astype(str)
-
-        # join sold-to
-        df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_sold")
-        # rename sold columns
+        # join on sold-to
+        df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_s")
         sold_cols = ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]
         for c in sold_cols:
-            df.rename(columns={c: f"{c}_sold"}, inplace=True)
-
-        # join ship-to
-        df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_ship")
+            df.rename(columns={c: f"{c}_s"}, inplace=True)
+        # join on ship-to
+        df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_h")
         for c in sold_cols:
-            df.rename(columns={c: f"{c}_ship"}, inplace=True)
-
-        # fill missing from ship-level
+            df.rename(columns={c: f"{c}_h"}, inplace=True)
+        # fill
         for c in sold_cols:
-            df[c] = df[f"{c}_sold"].fillna(df[f"{c}_ship"])
+            df[c] = df[f"{c}_s"].fillna(df[f"{c}_h"])
+        df.drop(columns=[f"{c}_s" for c in sold_cols] + [f"{c}_h" for c in sold_cols], inplace=True)
 
-        # drop intermediate
-        drop_cols = [f"{c}_sold" for c in sold_cols] + [f"{c}_ship" for c in sold_cols]
-        df.drop(columns=[c for c in drop_cols if c in df.columns], inplace=True)
-
-    # segmentation + tactic
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
 
-    # render
     segment_colors = {
         "ATTACK":     "#ff3333",
         "GROW":       "#ff9933",
@@ -299,7 +287,6 @@ def targeting_page():
         "MAINTAIN":   "#66cc66",
     }
 
-    # minimal table
     table_cols = [
         C["sold_to_name"], C["ship_to_name"], C["rep"], C["city"],
         "State", "Segment", "Recommended Tactic"
@@ -308,13 +295,12 @@ def targeting_page():
 
     return render_template(
         "targeting.html",
-        map_html= _make_map(df, segment_colors),
+        map_html=_make_map(df, segment_colors),
         table_columns=table_cols,
         table_rows=table_rows,
         momentum=momentum,
         recapture=recapture
     )
-
 
 @targeting_bp.route("/targeting/download")
 def targeting_download():
@@ -323,12 +309,11 @@ def targeting_download():
 
     df      = _load_customer()
     billing = _load_billing()
-
     if billing is not None:
         bill_idx = billing.set_index("CUSTOMER")
         bill_idx.index = bill_idx.index.astype(str)
-        df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_sold")
-        df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_ship")
+        df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_s")
+        df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_h")
 
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
@@ -343,9 +328,4 @@ def targeting_download():
     buf = io.BytesIO()
     df[raw_cols].to_csv(buf, index=False)
     buf.seek(0)
-    return send_file(
-        buf,
-        as_attachment=True,
-        download_name="target_accounts.csv",
-        mimetype="text/csv"
-    )
+    return send_file(buf, as_attachment=True, download_name="target_accounts.csv", mimetype="text/csv")
