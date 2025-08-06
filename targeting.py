@@ -15,7 +15,13 @@ def _resolve_path(base: str) -> str:
     raise FileNotFoundError(f"Cannot find {base}(.csv/.xlsx)")
 
 def _read_loose(base: str) -> pd.DataFrame:
-    """Try UTF-8 CSV → CP1252 CSV → Excel (openpyxl) → fallback CSV."""
+    """
+    Try:
+      1) UTF-8 CSV (skip bad lines)
+      2) CP1252 CSV (skip bad lines)
+      3) Excel via openpyxl
+      4) Fallback CSV
+    """
     path = _resolve_path(base)
     # 1) UTF-8 CSV
     try:
@@ -27,10 +33,10 @@ def _read_loose(base: str) -> pd.DataFrame:
         return pd.read_csv(path, dtype=str, encoding="cp1252", on_bad_lines="skip")
     except Exception:
         pass
-    # 3) Excel if extension matches
+    # 3) Excel
     if path.lower().endswith((".xls", ".xlsx")):
         return pd.read_excel(path, dtype=str, engine="openpyxl")
-    # 4) Final CSV fallback
+    # 4) Fallback CSV
     return pd.read_csv(path, dtype=str, on_bad_lines="skip")
 
 @targeting_bp.route("/targeting")
@@ -39,17 +45,23 @@ def targeting_page():
     cust = _read_loose(CUSTOMER_CSV)
     bill = _read_loose(BILLING_CSV)
 
+    # 1a) Strip whitespace from billing headers
+    bill.columns = bill.columns.str.strip()
+
     # 2) Pivot billing: CUSTOMER × Type → bool purchased
     bill["CUSTOMER"] = bill["CUSTOMER"].astype(str)
     bill["Type"]     = bill["Type"].astype(str)
     bill["bought"]   = True
+
     pivot = (
         bill
-        .pivot_table(index="CUSTOMER",
-                     columns="Type",
-                     values="bought",
-                     aggfunc="max",
-                     fill_value=False)
+        .pivot_table(
+            index="CUSTOMER",
+            columns="Type",
+            values="bought",
+            aggfunc="max",
+            fill_value=False
+        )
     )
 
     # 3) Master list of services
@@ -62,14 +74,16 @@ def targeting_page():
     # 4) Join to customer_report on Sold-to Name
     cust["Sold to Name"]   = cust["Sold to Name"].astype(str)
     cust["Sales Rep Name"] = cust["Sales Rep Name"].astype(str)
+
     df = cust.set_index("Sold to Name").join(pivot, how="left").fillna(False)
 
     # 5) Compute recommended services
     def recommend(row):
         return [svc for svc in SERVICES if not row.get(svc, False)]
+
     df["Recommended Services"] = df.apply(recommend, axis=1)
 
-    # 6) Group by territory
+    # 6) Group by territory (Sales Rep)
     rep_groups = {
         rep: [
             {"company": name, "services": row["Recommended Services"]}
