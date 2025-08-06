@@ -19,37 +19,33 @@ try:
 except ImportError:
     USE_ZIP_GEO = False
 
-# Blueprint definition
+# Blueprint
 targeting_bp = Blueprint("targeting", __name__, template_folder="templates")
 
-# ─── Config: file names (no extension needed) ────────────────────────────
+# ─── Config: file names ─────────────────────────────────────────────────
 CUSTOMER_CSV = os.environ.get("TARGETING_CUSTOMER_CSV", "customer_report")
-BILLING_CSV  = os.environ.get("TARGETING_BILLING_CSV", "customer_billing")
+BILLING_CSV  = os.environ.get("TARGETING_BILLING_CSV",  "customer_billing")
 
-# ─── Robust file readers ─────────────────────────────────────────────────
+# ─── Robust readers ──────────────────────────────────────────────────────
 def _resolve_path(base: str) -> str:
-    """Return the first existing file among base, base.csv, base.xlsx."""
-    for path in (base, f"{base}.csv", f"{base}.xlsx"):
-        if os.path.exists(path):
-            return path
+    for p in (base, f"{base}.csv", f"{base}.xlsx"):
+        if os.path.exists(p):
+            return p
     return base
 
 def _read_loose(path: str) -> pd.DataFrame:
-    """
-    Try reading as UTF-8 CSV, then CP1252 CSV, then as Excel.
-    """
-    resolved = _resolve_path(path)
+    path = _resolve_path(path)
     try:
-        return pd.read_csv(resolved, dtype=str, encoding="utf-8")
-    except (UnicodeDecodeError, Exception):
-        pass
-    try:
-        return pd.read_csv(resolved, dtype=str, encoding="cp1252", on_bad_lines="skip")
+        return pd.read_csv(path, dtype=str, encoding="utf-8")
     except Exception:
         pass
-    return pd.read_excel(resolved, dtype=str)
+    try:
+        return pd.read_csv(path, dtype=str, encoding="cp1252", on_bad_lines="skip")
+    except Exception:
+        pass
+    return pd.read_excel(path, dtype=str)
 
-# ─── Column mapping ──────────────────────────────────────────────────────
+# ─── Column map ──────────────────────────────────────────────────────────
 C = {
     "ship_to_id":   "Ship to ID",
     "sold_to_id":   "Sold to ID",
@@ -71,107 +67,127 @@ C = {
     "rental12":     "Rental Revenue R12",
 }
 
-# ─── Utility to parse currency strings ───────────────────────────────────
+# ─── Currency parser ─────────────────────────────────────────────────────
 def _to_number(x):
     if pd.isna(x):
         return None
     if isinstance(x, (int, float)):
         return float(x)
     s = str(x).strip()
-    negative = s.startswith("(") and s.endswith(")")
-    if negative:
+    neg = s.startswith("(") and s.endswith(")")
+    if neg:
         s = s[1:-1]
     s = s.replace("$", "").replace(",", "").replace("+", "").strip()
     if not s or s.upper() == "N/A":
         return None
     try:
-        val = float(s)
-        return -val if negative else val
+        v = float(s)
+        return -v if neg else v
     except ValueError:
         return None
 
-# ─── Load and process customer report ────────────────────────────────────
+# ─── Load customer report ─────────────────────────────────────────────────
 def _load_customer():
     path = _resolve_path(CUSTOMER_CSV)
     if not os.path.exists(path):
         raise FileNotFoundError(f"Missing {CUSTOMER_CSV} (csv/xlsx)")
     df = _read_loose(path)
-    # Ensure expected columns and types
+
+    # ensure all expected columns exist
     for col in C.values():
         if col not in df.columns:
             df[col] = pd.NA
-    # Convert numeric columns
+
+    # guarantee geo columns
+    df["Latitude"] = pd.NA
+    df["Longitude"] = pd.NA
+
+    # numeric conversions
     for key in ["r12","r13_24","r25_36","new36","used36","parts12","service12","ps12","rental12"]:
         df[C[key]] = df[C[key]].apply(_to_number)
-    # Derive state code
+
+    # derive state code
     df["State"] = df[C["county_state"]].astype(str).str[-2:].str.upper()
-    # Compute momentum %
+
+    # momentum %
     eps = 1e-9
     r12 = df[C["r12"]].fillna(0)
     r13 = df[C["r13_24"]].fillna(0)
     df["Momentum %"] = (r12 - r13) / (r13.abs() + eps)
-    # 3-year peak and recapture potential
+
+    # 3-year peak & recapture
     df["3Yr Peak ($)"] = df[[C["r12"],C["r13_24"],C["r25_36"]]].fillna(0).max(axis=1)
     df["Re-capture Potential ($)"] = (df["3Yr Peak ($)"] - r12).clip(lower=0)
-    # Breadth of categories
+
+    # breadth
     cats = [C["parts12"],C["service12"],C["rental12"],C["new36"],C["used36"]]
     df["Breadth"] = df[cats].gt(0).sum(axis=1)
-    # Flags
+
+    # flags
     df["Reactivated"] = (r12 > 0) & (r13 == 0)
     df["At Risk"]     = (r12 == 0) & (r13 > 0)
-    # Ensure string types for merge keys
+
+    # coerce join keys
     df[C["sold_to_name"]] = df[C["sold_to_name"]].astype(str)
     df[C["ship_to_name"]] = df[C["ship_to_name"]].astype(str)
-    # Geocode ZIP
-    df["ZIP5"] = df[C["zip"]].astype(str).str.extract(r"(\d{5})")[0]
-    df["Latitude"], df["Longitude"] = pd.NA, pd.NA
+
+    # optional ZIP→lat/lon
     if USE_ZIP_GEO:
         try:
+            df["ZIP5"] = df[C["zip"]].astype(str).str.extract(r"(\d{5})")[0]
             nomi = pgeocode.Nominatim("us")
             zips = df["ZIP5"].dropna().unique()
-            geo = nomi.query_postal_code(zips)
-            geo = geo[["postal_code","latitude","longitude"]].dropna()
-            geo.columns = ["ZIP5","Latitude","Longitude"]
-            df = df.merge(geo, on="ZIP5", how="left")
+            if len(zips):
+                geo = nomi.query_postal_code(zips)
+                geo = geo[["postal_code","latitude","longitude"]].dropna()
+                geo.columns = ["ZIP5","Latitude","Longitude"]
+                df = df.merge(geo, on="ZIP5", how="left")
         except Exception:
             pass
+
     return df
 
-# ─── Load and process billing data ───────────────────────────────────────
+# ─── Load billing data ────────────────────────────────────────────────────
 def _load_billing():
     path = _resolve_path(BILLING_CSV)
     if not os.path.exists(path):
         return None
     b = _read_loose(path)
+
     for col in ["Date","Type","REVENUE","CUSTOMER"]:
         if col not in b.columns:
             b[col] = pd.NA
-    # Normalize CUSTOMER as string
+
     b["CUSTOMER"] = b["CUSTOMER"].astype(str)
-    # Parse date as tz-naive
-    b["Date"] = pd.to_datetime(b["Date"], errors="coerce")
-    b["REVENUE"] = b["REVENUE"].apply(_to_number)
-    # Latest invoice date
+    b["Date"]     = pd.to_datetime(b["Date"], errors="coerce")
+    b["REVENUE"]  = b["REVENUE"].apply(_to_number)
+
     latest = b.groupby("CUSTOMER", dropna=False)["Date"].max().reset_index()
     latest.columns = ["CUSTOMER","Last Invoice Date"]
-    # Compute Days Ago as tz-naive
+
     today = pd.Timestamp.now().normalize()
     b["Days Ago"] = (today - b["Date"]).dt.days
-    # Rolling sums
-    def total_in(d): return b[b["Days Ago"] <= d].groupby("CUSTOMER")["REVENUE"].sum()
-    out = latest.merge(total_in(90).rename("Rev 90d"), on="CUSTOMER", how="left")
-    out = out.merge(total_in(180).rename("Rev 180d"), on="CUSTOMER", how="left")
-    out = out.merge(total_in(365).rename("Rev 365d"), on="CUSTOMER", how="left")
+
+    def total_in(days):
+        return b[b["Days Ago"] <= days].groupby("CUSTOMER")["REVENUE"].sum()
+
+    out = (
+        latest
+        .merge(total_in(90).rename("Rev 90d"),   on="CUSTOMER", how="left")
+        .merge(total_in(180).rename("Rev 180d"), on="CUSTOMER", how="left")
+        .merge(total_in(365).rename("Rev 365d"), on="CUSTOMER", how="left")
+    )
     out["Days Since Last Invoice"] = (today - out["Last Invoice Date"]).dt.days
     return out
 
-# ─── Segmentation & tactics ─────────────────────────────────────────────
+# ─── Segmentation & tactics ──────────────────────────────────────────────
 def _segment_row(r, momentum_thresh=0.20, recapture_thresh=100000):
-    r12 = r.get(C["r12"]) or 0.0
-    breadth = r.get("Breadth") or 0
-    momentum = r.get("Momentum %") or 0.0
+    r12       = r.get(C["r12"]) or 0.0
+    breadth   = r.get("Breadth") or 0
+    momentum  = r.get("Momentum %") or 0.0
     recapture = r.get("Re-capture Potential ($)") or 0.0
-    at_risk = bool(r.get("At Risk"))
+    at_risk   = bool(r.get("At Risk"))
+
     if at_risk or recapture >= recapture_thresh:
         return "ATTACK"
     if (r12 > 0 and breadth <= 1) or momentum >= momentum_thresh:
@@ -182,29 +198,36 @@ def _segment_row(r, momentum_thresh=0.20, recapture_thresh=100000):
 
 def _tactic(seg):
     return {
-        "ATTACK": "Win-back/displace: multi-thread, demo, sharp pricing, service rescue.",
-        "GROW": "Upsell/cross-sell: add PM contract, attachments, lithium conversion.",
-        "MAINTAIN": "Defend & delight: QBR cadence, SLA adherence, renewal focus.",
-        "TEST/EXPAND": "Low-friction pilot: starter order, trial service, quick win."
+        "ATTACK":     "Win-back/displace: multi-thread, demo, sharp pricing, service rescue.",
+        "GROW":       "Upsell/cross-sell: add PM contract, attachments, lithium conversion.",
+        "MAINTAIN":   "Defend & delight: QBR cadence, SLA adherence, renewal focus.",
+        "TEST/EXPAND":"Low-friction pilot: starter order, trial service, quick win."
     }.get(seg, "")
 
-# ─── Map HTML generator ─────────────────────────────────────────────────
+# ─── Map HTML generator ──────────────────────────────────────────────────
 def _make_map(df, segment_colors):
+    # guard missing geo cols
+    if "Latitude" not in df.columns or "Longitude" not in df.columns:
+        df["Latitude"] = pd.NA
+        df["Longitude"] = pd.NA
+
     if not FOLIUM_AVAILABLE:
-        return "<div style='padding:16px;background:#000;color:#ccc'>Map unavailable.</div>"
+        return "<div>Map unavailable; install folium.</div>"
+
     if df["Latitude"].notna().any() and df["Longitude"].notna().any():
-        mean_lat = df["Latitude"].dropna().astype(float).mean()
-        mean_lon = df["Longitude"].dropna().astype(float).mean()
-        m = folium.Map(location=[mean_lat, mean_lon], tiles="cartodbpositron", zoom_start=5)
+        lat = df["Latitude"].dropna().astype(float).mean()
+        lon = df["Longitude"].dropna().astype(float).mean()
+        m = folium.Map(location=[lat, lon], tiles="cartodbpositron", zoom_start=5)
     else:
         m = folium.Map(location=[39.8283, -98.5795], tiles="cartodbpositron", zoom_start=4)
+
     cluster = MarkerCluster().add_to(m)
     for _, row in df.iterrows():
-        lat, lon = row.get("Latitude"), row.get("Longitude")
-        if pd.isna(lat) or pd.isna(lon):
+        lt, ln = row["Latitude"], row["Longitude"]
+        if pd.isna(lt) or pd.isna(ln):
             continue
-        seg = row["Segment"]
-        color = segment_colors.get(seg, "gray")
+        seg    = row["Segment"]
+        color  = segment_colors.get(seg, "gray")
         radius = 6
         try:
             rec = float(row.get("Re-capture Potential ($)") or 0)
@@ -213,66 +236,101 @@ def _make_map(df, segment_colors):
         except:
             pass
         tooltip = folium.Tooltip(
-            f"<b>{row.get(C['sold_to_name'], '')}</b><br>"
-            f"{row.get(C['city'], '')}, {row.get('State', '')}<br>"
-            f"R12: ${(row.get(C['r12']) or 0):,.0f}<br>"
-            f"Momentum: {(row.get('Momentum %') or 0)*100:.1f}%<br>"
-            f"Re-capture: ${(row.get('Re-capture Potential ($)') or 0):,.0f}"
+            f"<b>{row[C['sold_to_name']]}</b><br>"
+            f"{row[C['city']]}, {row['State']}<br>"
+            f"R12: ${row[C['r12']]:,.0f}<br>"
+            f"Momentum: {row['Momentum %']*100:.1f}%<br>"
+            f"Re-capture: ${row['Re-capture Potential ($)']:,.0f}"
         )
         folium.CircleMarker(
-            location=[lat, lon],
-            radius=radius,
-            color=color,
-            fill=True,
-            fill_color=color,
-            fill_opacity=0.75,
-            opacity=0.9
+            location=[lt, ln], radius=radius,
+            color=color, fill=True, fill_color=color,
+            fill_opacity=0.75, opacity=0.9
         ).add_child(tooltip).add_to(cluster)
+
     return m._repr_html_()
 
-# ─── Flask routes ───────────────────────────────────────────────────────
+# ─── Routes ───────────────────────────────────────────────────────────────
 @targeting_bp.route("/targeting")
 def targeting_page():
-    momentum = float(request.args.get("momentum", 0.20))
-    recapture = float(request.args.get("recapture", 100000))
-    df = _load_customer()
+    momentum = float(request.args.get("momentum",  0.20))
+    recapture = float(request.args.get("recapture",100000))
+
+    df      = _load_customer()
     billing = _load_billing()
+
     if billing is not None:
-        df = df.merge(billing, left_on=C["sold_to_name"], right_on="CUSTOMER", how="left")
-        missing = df["Last Invoice Date"].isna()
-        if missing.any():
-            alt = df[missing].drop(columns=["CUSTOMER","Last Invoice Date","Rev 90d","Rev 180d","Rev 365d"], errors="ignore")
-            alt = alt.merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
-            df.loc[missing, ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]]] = alt[["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]].values
-    df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
+        bill_idx = billing.set_index("CUSTOMER")
+        bill_idx.index = bill_idx.index.astype(str)
+
+        # join sold-to
+        df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_s")
+        sold_cols = ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]
+        for c in sold_cols:
+            df.rename(columns={c: f"{c}_s"}, inplace=True)
+        # join ship-to
+        df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_h")
+        for c in sold_cols:
+            df.rename(columns={c: f"{c}_h"}, inplace=True)
+        # fill & cleanup
+        for c in sold_cols:
+            df[c] = df[f"{c}_s"].fillna(df[f"{c}_h"])
+        df.drop(columns=[f"{c}_s" for c in sold_cols] + [f"{c}_h" for c in sold_cols], inplace=True)
+
+    df["Segment"]           = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
-    segment_colors = {"ATTACK":"#ff3333","GROW":"#ff9933","TEST/EXPAND":"#33aaff","MAINTAIN":"#66cc66"}
+
+    segment_colors = {
+        "ATTACK":     "#ff3333",
+        "GROW":       "#ff9933",
+        "TEST/EXPAND":"#33aaff",
+        "MAINTAIN":   "#66cc66",
+    }
+
+    table_cols = [
+        C["sold_to_name"], C["ship_to_name"], C["rep"], C["city"],
+        "State", "Segment", "Recommended Tactic"
+    ]
+    table_rows = df[table_cols].values.tolist()
+
     return render_template(
         "targeting.html",
         map_html=_make_map(df, segment_colors),
-        table_columns=[],
-        table_rows=[],
+        table_columns=table_cols,
+        table_rows=table_rows,
         momentum=momentum,
         recapture=recapture
     )
 
 @targeting_bp.route("/targeting/download")
 def targeting_download():
-    momentum = float(request.args.get("momentum", 0.20))
-    recapture = float(request.args.get("recapture", 100000))
-    df = _load_customer()
+    momentum = float(request.args.get("momentum",  0.20))
+    recapture = float(request.args.get("recapture",100000))
+
+    df      = _load_customer()
     billing = _load_billing()
     if billing is not None:
-        df = df.merge(billing, left_on=C["sold_to_name"], right_on="CUSTOMER", how="left")
-    df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
+        bill_idx = billing.set_index("CUSTOMER")
+        bill_idx.index = bill_idx.index.astype(str)
+        df = df.join(bill_idx, on=C["sold_to_name"], rsuffix="_s")
+        df = df.join(bill_idx, on=C["ship_to_name"], rsuffix="_h")
+
+    df["Segment"]           = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
+
     raw_cols = [
         C["sold_to_name"], C["ship_to_name"], C["rep"], C["city"], "State",
-        C["r12"], C["r13_24"], C["r25_36"], "Momentum %", "Re-capture Potential ($)",
-        "Breadth", "Segment", "Recommended Tactic",
+        C["r12"], C["r13_24"], C["r25_36"], "Momentum %",
+        "Re-capture Potential ($)", "Breadth", "Segment", "Recommended Tactic",
         "Days Since Last Invoice", "Rev 90d", "Rev 180d", "Rev 365d"
     ]
+
     buf = io.BytesIO()
     df[raw_cols].to_csv(buf, index=False)
     buf.seek(0)
-    return send_file(buf, as_attachment=True, download_name="target_accounts.csv", mimetype="text/csv")
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name="target_accounts.csv",
+        mimetype="text/csv"
+    )
