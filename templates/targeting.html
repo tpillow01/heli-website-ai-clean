@@ -2,124 +2,46 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Account Targeting • Tynan Equipment AI</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <title>Territory Service Targets</title>
   <style>
-    /* lightweight tweaks to match your dark theme */
-    body { background:#0b0b0b; color:#e6e6e6; }
-    .page { max-width:1200px; margin:24px auto; padding:0 16px; }
-    .topbar { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
-    .topbar a.btn { text-decoration:none; }
-    .card {
-      background:#111; border:1px solid #222; border-radius:10px;
-      box-shadow:0 0 0 1px #000 inset; padding:14px; margin-bottom:16px;
+    body { font-family: sans-serif; padding: 1rem; }
+    h2 { margin-top: 2rem; }
+    table {
+      width: 100%; border-collapse: collapse; margin-bottom: 1.5rem;
     }
-    .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
-    .controls label { display:flex; flex-direction:column; font-size:.9rem; color:#ccc; }
-    .controls input {
-      background:#0f0f0f; color:#eee; border:1px solid #333; border-radius:8px; padding:6px 8px; outline:none;
+    th, td {
+      border: 1px solid #ccc; padding: 0.5rem; text-align: left;
     }
-    .controls input:focus { border-color:#cc0000; box-shadow:0 0 0 2px rgba(204,0,0,.25); }
-    .btn {
-      display:inline-flex; align-items:center; justify-content:center;
-      padding:8px 14px; border-radius:8px; border:1px solid #333;
-      background:#111; color:#cc0000; font-weight:600; cursor:pointer;
-    }
-    .btn:hover { border-color:#cc0000; background:#1a1a1a; }
-    .pill { font-size:.85rem; opacity:.85; }
-    .map-wrap { overflow:hidden; border-radius:10px; border:1px solid #222; }
-    .table-wrap { overflow:auto; border-radius:10px; border:1px solid #222; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { padding:10px 12px; border-bottom:1px solid #222; }
-    th { position:sticky; top:0; background:#151515; text-align:left; }
-    tr:hover td { background:#121212; }
-    .legend { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
-    .key { display:inline-flex; align-items:center; gap:6px; font-size:.9rem; color:#ccc; }
-    .dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
-    .dot.attack{ background:#ff3333; }
-    .dot.grow{ background:#ff9933; }
-    .dot.test{ background:#33aaff; }
-    .dot.maintain{ background:#66cc66; }
+    th { background: #f4f4f4; }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="topbar">
-      <a class="btn" href="{{ url_for('home') }}">← Back to Chat</a>
-      <div style="flex:1"></div>
-      <a class="btn" href="{{ url_for('targeting.targeting_download', momentum=momentum, recapture=recapture) }}">Download CSV</a>
-    </div>
+  <h1>Service Recommendations by Territory</h1>
 
-    <div class="card">
-      <h2 style="margin:0 0 10px;">Account Targeting</h2>
-      <div class="controls">
-        <label>
-          Momentum Threshold (%)
-          <input id="momentumInput" type="number" step="1" min="-100" max="500"
-                 value="{{ (momentum * 100) | round(0) }}" />
-        </label>
-        <label>
-          Re-capture Threshold ($)
-          <input id="recaptureInput" type="number" step="5000" min="0"
-                 value="{{ recapture | int }}" />
-        </label>
-        <button class="btn" id="applyBtn">Apply</button>
-        <span class="pill">Current: Momentum ≥ {{ (momentum*100)|round(1) }}%  •  Re-capture ≥ ${{ '{:,.0f}'.format(recapture) }}</span>
-      </div>
-      <div class="legend">
-        <span class="key"><span class="dot attack"></span> ATTACK</span>
-        <span class="key"><span class="dot grow"></span> GROW</span>
-        <span class="key"><span class="dot test"></span> TEST/EXPAND</span>
-        <span class="key"><span class="dot maintain"></span> MAINTAIN</span>
-      </div>
-    </div>
-
-    <div class="card map-wrap">
-      <!-- Folium map HTML -->
-      {{ map_html|safe }}
-    </div>
-
-    <div class="card table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {% for col in table_columns %}
-              <th>{{ col }}</th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in table_rows %}
-            <tr>
-              {% for cell in row %}
-                <td>{{ cell }}</td>
-              {% endfor %}
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="topbar" style="justify-content:flex-end;">
-      <a class="btn" href="{{ url_for('targeting.targeting_download', momentum=momentum, recapture=recapture) }}">Download CSV</a>
-    </div>
-  </div>
-
-  <script>
-    const mEl = document.getElementById('momentumInput');
-    const rEl = document.getElementById('recaptureInput');
-    document.getElementById('applyBtn').addEventListener('click', () => {
-      const mPct = parseFloat(mEl.value || '0');
-      const rVal = parseFloat(rEl.value || '0');
-      // Convert UI percent → server decimal (e.g., 20 → 0.20)
-      const mDec = isNaN(mPct) ? 0.20 : (mPct / 100);
-      const rNum = isNaN(rVal) ? 100000 : rVal;
-      const url = new URL(window.location.href);
-      url.searchParams.set('momentum', mDec.toString());
-      url.searchParams.set('recapture', rNum.toString());
-      window.location.href = url.toString();
-    });
-  </script>
+  {% for rep, entries in rep_groups.items() %}
+    <h2>Territory: {{ rep }}</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Services to Target</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in entries %}
+        <tr>
+          <td>{{ row.company }}</td>
+          <td>
+            {% if row.services %}
+              {{ row.services | join(', ') }}
+            {% else %}
+              <em>All services purchased</em>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endfor %}
 </body>
 </html>
