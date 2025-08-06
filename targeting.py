@@ -42,7 +42,7 @@ def _resolve_path(base: str) -> str:
             return p
     return base  # downstream will raise FileNotFoundError if missing
 
-# Your report headers (from the sample you shared)
+# Your report headers (from your sample)
 C = {
     "ship_to_id":   "Ship to ID",
     "sold_to_id":   "Sold to ID",
