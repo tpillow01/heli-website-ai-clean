@@ -149,7 +149,7 @@ def _load_billing():
     for col in ["Date","Type","REVENUE","CUSTOMER"]:
         if col not in b.columns:
             b[col] = pd.NA
-    # Parse date tz-naive
+    # Parse date as tz-naive
     b["Date"] = pd.to_datetime(b["Date"], errors="coerce")
     b["REVENUE"] = b["REVENUE"].apply(_to_number)
     # Latest invoice date
@@ -218,7 +218,7 @@ def _make_map(df, segment_colors):
             f"{row.get(C['city'], '')}, {row.get('State', '')}<br>"
             f"R12: ${(row.get(C['r12']) or 0):,.0f}<br>"
             f"Momentum: {(row.get('Momentum %') or 0)*100:.1f}%<br>"
-            f"Re-capture: ${(row.get('Re-capture Potential ($)') or 0):,.0f}"            
+            f"Re-capture: ${(row.get('Re-capture Potential ($)') or 0):,.0f}"
         )
         folium.CircleMarker(
             location=[lat, lon],
@@ -248,12 +248,15 @@ def targeting_page():
                 alt[["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]].values
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
-    # generate map and table as before...
     segment_colors = {"ATTACK":"#ff3333","GROW":"#ff9933","TEST/EXPAND":"#33aaff","MAINTAIN":"#66cc66"}
-    return render_template("targeting.html",
-                           map_html=_make_map(df, segment_colors),
-                           table_columns=[], table_rows=[],
-                           momentum=momentum, recapture=recapture)
+    return render_template(
+        "targeting.html",
+        map_html=_make_map(df, segment_colors),
+        table_columns=[],
+        table_rows=[],
+        momentum=momentum,
+        recapture=recapture
+    )
 
 @targeting_bp.route("/targeting/download")
 def targeting_download():
@@ -265,9 +268,12 @@ def targeting_download():
         df = df.merge(billing, left_on=C["sold_to_name"], right_on="CUSTOMER", how="left")
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
-    raw_cols = [C["sold_to_name"],C["ship_to_name"],C["rep"],C["city"],"State",
-                C["r12"],C["r13_24"],C["r25_36"],"Momentum %","Re-capture Potential ($)",
-                "Breadth","Segment","Recommended Tactic","Days Since Last Invoice","Rev 90d","Rev 180d","Rev 365d"]
+    raw_cols = [
+        C["sold_to_name"], C["ship_to_name"], C["rep"], C["city"], "State",
+        C["r12"], C["r13_24"], C["r25_36"], "Momentum %", "Re-capture Potential ($)",
+        "Breadth", "Segment", "Recommended Tactic",
+        "Days Since Last Invoice", "Rev 90d", "Rev 180d", "Rev 365d"
+    ]
     buf = io.BytesIO()
     df[raw_cols].to_csv(buf, index=False)
     buf.seek(0)
