@@ -243,7 +243,7 @@ def targeting_page():
         if missing.any():
             alt = df[missing].drop(columns=["CUSTOMER","Last Invoice Date","Rev 90d","Rev 180d","Rev 365d"], errors="ignore")
             alt = alt.merge(billing, left_on=C["ship_to_name"], right_on="CUSTOMER", how="left")
-            df.loc[missing, ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]] = alt[["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]].values
+            df.loc[missing, ["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]]] = alt[["Last Invoice Date","Rev 90d","Rev 180d","Rev 365d","Days Since Last Invoice"]].values
     df["Segment"] = df.apply(lambda r: _segment_row(r, momentum, recapture), axis=1)
     df["Recommended Tactic"] = df["Segment"].apply(_tactic)
     segment_colors = {"ATTACK":"#ff3333","GROW":"#ff9933","TEST/EXPAND":"#33aaff","MAINTAIN":"#66cc66"}
