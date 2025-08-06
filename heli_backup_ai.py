@@ -13,9 +13,6 @@ from openai import OpenAI
 from ai_logic import generate_forklift_context
 from data_sources import make_inquiry_targets  # used by /api/targets
 
-# >>> NEW: import the targeting blueprint
-from targeting import targeting_bp
-
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-insecure")
@@ -25,9 +22,6 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=bool(os.getenv("SESSION_COOKIE_SECURE", "1") == "1"),
 )
-
-# >>> NEW: register the targeting blueprint
-app.register_blueprint(targeting_bp)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
