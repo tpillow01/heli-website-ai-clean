@@ -41,6 +41,35 @@
     }
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
+
+    /* AI popup */
+    .ai-popup {
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      max-width: 400px;
+      padding: 18px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      z-index: 999;
+      overflow-y: auto;
+      max-height: 80vh;
+      font-family: system-ui, sans-serif;
+      white-space: pre-wrap;
+    }
+    .ai-popup h3 { margin-top: 0; font-size: 18px; color: #cc0000; }
+    .ai-popup .close-btn {
+      position: absolute;
+      top: 6px;
+      right: 10px;
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      color: #999;
+    }
+    .ai-popup .close-btn:hover { color: #333; }
   </style>
 </head>
 <body>
@@ -87,6 +116,11 @@
   </div>
 
   <div id="map"></div>
+  <div id="aiContainer" class="ai-popup" style="display:none;">
+    <button class="close-btn" onclick="document.getElementById('aiContainer').style.display='none'">×</button>
+    <h3>AI Insights</h3>
+    <div id="aiContent">Loading...</div>
+  </div>
 
   <script>
     const map = L.map('map', { scrollWheelZoom: true }).setView([39.8, -98.6], 4);
@@ -148,6 +182,26 @@
       return true;
     }
 
+    function askAIAboutCustomer(name) {
+      const container = document.getElementById("aiContainer");
+      const content = document.getElementById("aiContent");
+      container.style.display = "block";
+      content.textContent = "Loading...";
+
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: name, mode: "inquiry" })
+      })
+      .then(r => r.json())
+      .then(data => {
+        content.textContent = data.response || "No response.";
+      })
+      .catch(err => {
+        content.textContent = "❌ Error: " + err.message;
+      });
+    }
+
     function render() {
       layerGroup.clearLayers();
       if (heatLayer) {
@@ -168,11 +222,15 @@
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
-            `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
-             State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-             Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}`
-          );
+          const popupHtml = `
+            <b>${p.label}</b><br/>
+            ${p.full_address}<br/>
+            <i>${p.sales_rep || 'Unassigned'}</i><br/>
+            State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
+            Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/>
+            <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>
+          `;
+          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml);
           marker.addTo(group);
         });
         group.addTo(layerGroup);
@@ -222,7 +280,6 @@
       countyFilter.disabled = false;
     }
 
-    // Load points from API
     fetch('{{ url_for("api_locations") }}')
       .then(r => r.json())
       .then(points => {
@@ -236,7 +293,6 @@
         alert('Could not load locations:\n' + err.message);
       });
 
-    // Filters & events
     repFilter.addEventListener('change', render);
     segFilter.addEventListener('change', render);
     zipFilter.addEventListener('input', () => {
