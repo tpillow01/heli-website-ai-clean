@@ -399,77 +399,70 @@ def service_worker():
     return app.send_static_file('service-worker.js')
 
 # ─── AI Map Analysis Endpoint ─────────────────────────────────────────────
-@app.route("/api/ai_map_analysis", methods=["POST"])
+@app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     try:
-        import pandas as pd
+        name = request.json.get('customer', '').strip()
+        print(f"🔍 Looking up customer: {name}")
 
-        data = request.get_json()
-        customer_name = data.get("question", "").strip().lower()
-        print(f"🔍 Looking up customer: {customer_name}")
+        df = pd.read_csv('customer_report.csv')
 
-        # Load CSV
-        df = pd.read_csv("customer_report.csv", dtype=str)
-        df.columns = df.columns.str.strip()
-        df["Sold to Name"] = df["Sold to Name"].str.strip().str.lower()
+        # Try fuzzy matching on "Sold to Name"
+        match = df[df['Sold to Name'].str.lower().str.strip() == name.lower()]
 
-        # Match customer
-        row = df[df["Sold to Name"] == customer_name].head(1)
-        if row.empty:
+        if match.empty:
             print("❌ No match found for customer.")
-            return jsonify({"response": "Customer not found in report."})
+            return jsonify({'response': 'No matching customer found.'})
 
-        # Extract values
+        row = match.iloc[0]
+
+        # Extract revenue fields and convert to float safely
+        def safe_float(val):
+            try:
+                return float(str(val).replace('$', '').replace(',', '').strip())
+            except:
+                return 0.0
+
         fields = {
-            "New Equip R36 Revenue": row.iloc[0].get("New Equip R36 Revenue", "0") or "0",
-            "Used Equip R36 Revenue": row.iloc[0].get("Used Equip R36 Revenue", "0") or "0",
-            "Parts Revenue R12": row.iloc[0].get("Parts Revenue R12", "0") or "0",
-            "Service Revenue R12 (Includes GM)": row.iloc[0].get("Service Revenue R12 (Includes GM)", "0") or "0",
-            "Parts & Service Revenue R12": row.iloc[0].get("Parts & Service Revenue R12", "0") or "0",
-            "Rental Revenue R12": row.iloc[0].get("Rental Revenue R12", "0") or "0",
-            "Revenue Rolling 12 Months - Aftermarket": row.iloc[0].get("Revenue Rolling 12 Months - Aftermarket", "0") or "0",
-            "Revenue Rolling 13 - 24 Months - Aftermarket": row.iloc[0].get("Revenue Rolling 13 - 24 Months - Aftermarket", "0") or "0"
+            'New Equip R36 Revenue': safe_float(row['New Equip R36 Revenue']),
+            'Used Equip R36 Revenue': safe_float(row['Used Equip R36 Revenue']),
+            'Parts Revenue R12': safe_float(row['Parts Revenue R12']),
+            'Service Revenue R12 (Includes GM)': safe_float(row['Service Revenue R12 (Includes GM)']),
+            'Parts & Service Revenue R12': safe_float(row['Parts & Service Revenue R12']),
+            'Rental Revenue R12': safe_float(row['Rental Revenue R12']),
+            'Revenue Rolling 12 Months - Aftermarket': safe_float(row['Revenue Rolling 12 Months - Aftermarket']),
+            'Revenue Rolling 13 - 24 Months - Aftermarket': safe_float(row['Revenue Rolling 13 - 24 Months - Aftermarket']),
         }
 
-        # Clean and convert
-        def clean(v):
-            return float(str(v).replace("$", "").replace(",", "").strip() or "0")
-
-        metrics = {k: clean(v) for k, v in fields.items()}
-
-        # Format prompt
-        formatted = "\n".join([f"{k}: ${v:,.2f}" for k, v in metrics.items()])
-        prompt = f"""Customer: {row.iloc[0]['Sold to Name'].strip()}
+        prompt = f"""
+Customer: {name}
 Here are the latest financial metrics for this customer:
 
-{formatted}
+""" + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
 
 Based on these revenue metrics, give a short and clear insight:
 - What kind of customer is this?
 - What stands out?
 - Where is there potential to upsell forklifts, service, rentals, or parts?
+Keep it brief and analytic.
+"""
 
-Keep it brief and analytic."""
+        print("📤 Sending to OpenAI:\n", prompt)
 
-        print(f"\n🧠 Prompt being sent to AI:\n{prompt}\n")
-
-        response = client.chat.completions.create(
+        completion = client.chat.completions.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a financial sales assistant analyzing customer revenue."},
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.5
         )
 
-        reply = response.choices[0].message.content.strip()
-        print(f"✅ AI Response:\n{reply}\n")
+        ai_response = completion.choices[0].message.content.strip()
+        print("✅ Response:\n", ai_response)
 
-        return jsonify({"response": reply})
+        return jsonify({'response': ai_response})
 
     except Exception as e:
         print(f"❌ Error during AI map analysis: {e}")
-        return jsonify({"response": f"Error: {e}"}), 500
+        return jsonify({'response': f"Error: {e}"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))

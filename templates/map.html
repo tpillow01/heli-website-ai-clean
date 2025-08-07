@@ -315,6 +315,29 @@
     });
     countyFilter.addEventListener('change', render);
     heatToggle.addEventListener('change', render);
+
+    document.addEventListener("click", function (e) {
+  if (e.target && e.target.classList.contains("run-ai-btn")) {
+    const button = e.target;
+    const customerName = button.getAttribute("data-customer");
+    const aiContainer = document.getElementById("aiContainer");
+    aiContainer.innerHTML = `<h2>AI Insights</h2><p><em>Analyzing ${customerName}...</em></p>`;
+    aiContainer.classList.add("open");
+
+    fetch("/api/ai_map_analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: customerName })
+    })
+    .then(res => res.json())
+    .then(data => {
+      aiContainer.innerHTML = `<h2>AI Insights</h2><p>${data.response || "No response."}</p>`;
+    })
+    .catch(err => {
+      aiContainer.innerHTML = `<h2>AI Insights</h2><p>Error loading insights.</p>`;
+    });
+  }
+});
   </script>
 </body>
 </html>
