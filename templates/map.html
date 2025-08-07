@@ -4,12 +4,10 @@
   <meta charset="utf-8" />
   <title>Customer Map (Segment / Territory / Geo Filters)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
   <style>
     :root {
       --brand: #cc0000;
@@ -81,17 +79,14 @@
         ZIP
         <input id="zipFilter" type="text" placeholder="Exact ZIP" size="8" />
       </label>
+      <label>
+        <input type="checkbox" id="heatToggle"> Heatmap Mode
+      </label>
       <a href="{{ url_for('home') }}" aria-label="Back to Chat">← Back to Chat</a>
     </div>
   </div>
 
   <div id="map"></div>
-
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
 
   <script>
     const map = L.map('map', { scrollWheelZoom: true }).setView([39.8, -98.6], 4);
@@ -100,12 +95,10 @@
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
-    // Distinct palette (Tableau-like 20)
     const palette = [
-      '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
-      '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
-      '#393b79','#637939','#8c6d31','#843c39','#7b4173',
-      '#3182bd','#e6550d','#31a354','#756bb1','#969696'
+      '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2',
+      '#7f7f7f','#bcbd22','#17becf','#393b79','#637939','#8c6d31','#843c39',
+      '#7b4173','#3182bd','#e6550d','#31a354','#756bb1','#969696'
     ];
     const repIndex = new Map();
     const colorForRep = (rep) => {
@@ -116,13 +109,14 @@
     let allPoints = [];
     let layerGroup = L.featureGroup().addTo(map);
     let legendControl;
+    let heatLayer = null;
 
-    // Controls
     const repFilter    = document.getElementById('repFilter');
     const segFilter    = document.getElementById('segFilter');
     const stateFilter  = document.getElementById('stateFilter');
     const countyFilter = document.getElementById('countyFilter');
     const zipFilter    = document.getElementById('zipFilter');
+    const heatToggle   = document.getElementById('heatToggle');
 
     function markerStyle(rep) {
       const base = colorForRep(rep || 'Unassigned');
@@ -137,7 +131,6 @@
     function withinSegFilter(pt) {
       const want = segFilter.value;
       if (want === '__ALL__') return true;
-      // Prefer explicit segment's letter; else fall back to size_letter
       const segLetter = (pt.segment && /^[ABCD]/.test(pt.segment)) ? pt.segment[0] : (pt.size_letter || 'C');
       return segLetter === want;
     }
@@ -157,27 +150,39 @@
 
     function render() {
       layerGroup.clearLayers();
+      if (heatLayer) {
+        map.removeLayer(heatLayer);
+        heatLayer = null;
+      }
+
       const toShow = allPoints.filter(p =>
         withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
       );
 
-      const group = L.featureGroup();
-      toShow.forEach(p => {
-        const style = markerStyle(p.sales_rep);
-        const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
-          `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
-           State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-           Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}`
-        );
-        marker.addTo(group);
-      });
-      group.addTo(layerGroup);
+      if (heatToggle.checked) {
+        const heatPoints = toShow
+          .filter(p => p.lat && p.lon && p.total_r12 > 0)
+          .map(p => [p.lat, p.lon, p.total_r12 || 0]);
+        heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
+      } else {
+        const group = L.featureGroup();
+        toShow.forEach(p => {
+          const style = markerStyle(p.sales_rep);
+          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
+            `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
+             State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
+             Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}`
+          );
+          marker.addTo(group);
+        });
+        group.addTo(layerGroup);
 
-      if (toShow.length) {
-        map.fitBounds(group.getBounds().pad(0.2));
+        if (toShow.length) {
+          map.fitBounds(group.getBounds().pad(0.2));
+        }
+
+        updateLegend();
       }
-
-      updateLegend();
     }
 
     function updateLegend() {
@@ -217,37 +222,21 @@
       countyFilter.disabled = false;
     }
 
-    // Load points
-  // ...
-   fetch('{{ url_for("api_locations") }}')
-    .then(async (r) => {
-      if (!r.ok) {
-        const rc = r.clone(); // clone before consuming body
-        let msg = `HTTP ${r.status}`;
-        try {
-          const body = await rc.json();
-          if (body && body.error) msg += ` — ${body.error}`;
-        } catch {
-          const text = await r.text(); // safe now because we cloned
-          msg += ` — ${text.slice(0, 300)}`;
-        }
-        throw new Error(msg);
-      }
-      return r.json();
-    })
-    .then(points => {
-      allPoints = points || [];
-      populateRepFilter(allPoints);
-      populateStateFilter(allPoints);
-      render();
-    })
-    .catch(err => {
-      console.error(err);
-      alert('Could not load locations:\n' + err.message);
-    });
-  // ...
+    // Load points from API
+    fetch('{{ url_for("api_locations") }}')
+      .then(r => r.json())
+      .then(points => {
+        allPoints = points || [];
+        populateRepFilter(allPoints);
+        populateStateFilter(allPoints);
+        render();
+      })
+      .catch(err => {
+        console.error(err);
+        alert('Could not load locations:\n' + err.message);
+      });
 
-    // Events
+    // Filters & events
     repFilter.addEventListener('change', render);
     segFilter.addEventListener('change', render);
     zipFilter.addEventListener('input', () => {
@@ -265,6 +254,7 @@
       render();
     });
     countyFilter.addEventListener('change', render);
+    heatToggle.addEventListener('change', render);
   </script>
 </body>
 </html>
