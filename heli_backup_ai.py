@@ -402,8 +402,11 @@ def service_worker():
 @app.route("/api/ai_map_analysis", methods=["POST"])
 def ai_map_analysis():
     try:
+        import pandas as pd
+
         data = request.get_json()
         customer_name = data.get("question", "").strip().lower()
+        print(f"🔍 Looking up customer: {customer_name}")
 
         # Load CSV
         df = pd.read_csv("customer_report.csv", dtype=str)
@@ -413,6 +416,7 @@ def ai_map_analysis():
         # Match customer
         row = df[df["Sold to Name"] == customer_name].head(1)
         if row.empty:
+            print("❌ No match found for customer.")
             return jsonify({"response": "Customer not found in report."})
 
         # Extract values
@@ -427,7 +431,7 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket": row.iloc[0].get("Revenue Rolling 13 - 24 Months - Aftermarket", "0") or "0"
         }
 
-        # Clean dollar values (strip $ and commas)
+        # Clean and convert
         def clean(v):
             return float(str(v).replace("$", "").replace(",", "").strip() or "0")
 
@@ -447,19 +451,25 @@ Based on these revenue metrics, give a short and clear insight:
 
 Keep it brief and analytic."""
 
+        print(f"\n🧠 Prompt being sent to AI:\n{prompt}\n")
+
         response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "You are a financial sales assistant analyzing customer revenue."},
-                      {"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You are a financial sales assistant analyzing customer revenue."},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.5
         )
+
         reply = response.choices[0].message.content.strip()
+        print(f"✅ AI Response:\n{reply}\n")
+
         return jsonify({"response": reply})
 
     except Exception as e:
         print(f"❌ Error during AI map analysis: {e}")
         return jsonify({"response": f"Error: {e}"}), 500
-
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
