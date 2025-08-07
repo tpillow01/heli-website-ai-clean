@@ -434,15 +434,14 @@ def ai_map_analysis():
         if not customer:
             return jsonify({"error": "Customer name required"}), 400
 
-        # Find the row for this customer in customer_report.csv
         import pandas as pd
         df = pd.read_csv("customer_report.csv")
-        row = df[df['CUSTOMER'].str.strip().str.lower() == customer.strip().lower()]
+        df['Sold to Name'] = df['Sold to Name'].astype(str).str.strip()
+        row = df[df['Sold to Name'].str.lower() == customer.strip().lower()]
 
         if row.empty:
             return jsonify({"error": f"No invoice data found for {customer}"}), 404
 
-        # Extract relevant invoice fields
         r = row.iloc[0]
         fields = {
             "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
@@ -455,27 +454,29 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
         }
 
-        # Format for AI input
         prompt = f"""
             Customer: {customer}
             Here are the latest financial metrics for this customer:
 
             """ + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
 
+
             Based on these revenue metrics, give a short and clear insight:
             - What kind of customer is this?
             - What stands out?
             - Where is there potential to upsell forklifts, service, rentals, or parts?
+
             Keep it brief and analytical.
             """
 
-        # Call OpenAI
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "You're a forklift sales expert."},
-                      {"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You're a forklift sales expert."},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.3,
         )
 
@@ -484,7 +485,3 @@ def ai_map_analysis():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-if __name__ == "__main__":
-    app.run(debug=True, port=int(os.getenv("PORT", 5000)))

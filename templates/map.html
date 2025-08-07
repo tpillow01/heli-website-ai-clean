@@ -166,18 +166,28 @@
       );
 
       if (heatToggle.checked) {
-        const heatPoints = toShow.filter(p => p.lat && p.lon && p.total_r12 > 0).map(p => [p.lat, p.lon, p.total_r12 || 0]);
+        const heatPoints = toShow
+          .filter(p => p.lat && p.lon && p.total_r12 > 0)
+          .map(p => [p.lat, p.lon, p.total_r12 || 0]);
         heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
       } else {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const marker = L.circleMarker([p.lat, p.lon], style);
-          addAIButtonToPopup(marker, p.label);
+          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
+            `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
+            State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
+            Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/><br/>
+            <button onclick="runAiAnalysis('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>`
+          );
           marker.addTo(group);
         });
         group.addTo(layerGroup);
-        if (toShow.length) map.fitBounds(group.getBounds().pad(0.2));
+
+        if (toShow.length) {
+          map.fitBounds(group.getBounds().pad(0.2));
+        }
+
         updateLegend();
       }
     }
@@ -258,7 +268,7 @@ function addAIButtonToPopup(marker, customerName) {
       <button onclick="runMapAI('${customerName.replace(/'/g, "\\'")}')">Run AI Analysis</button>
     `);
   }
-  
+
   function runMapAI(customerName) {
     const sidebar = document.createElement("div");
     sidebar.className = "ai-popup";
