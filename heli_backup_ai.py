@@ -403,68 +403,63 @@ def service_worker():
 def ai_map_analysis():
     try:
         data = request.get_json()
-        customer_name = data.get("question", "").strip()
+        customer_name = data.get("question", "").strip().lower()
 
-        if not customer_name:
-            return jsonify({"response": "❌ No customer name provided."}), 400
-
-        # Load CSV data
-        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        # Load CSV
+        df = pd.read_csv("customer_report.csv", dtype=str)
+        df.columns = df.columns.str.strip()
+        df["Sold to Name"] = df["Sold to Name"].str.strip().str.lower()
 
         # Match customer
-        match = df[df["Sold to Name"].str.lower() == customer_name.lower()]
-        if match.empty:
-            return jsonify({"response": f"❌ Customer '{customer_name}' not found."}), 404
+        row = df[df["Sold to Name"] == customer_name].head(1)
+        if row.empty:
+            return jsonify({"response": "Customer not found in report."})
 
-        row = match.iloc[0]
-
-        # Safe float conversion
-        def safe_float(val):
-            try:
-                return float(str(val).replace("$", "").replace(",", "").strip())
-            except:
-                return 0.0
-
-        # Pull the required fields
+        # Extract values
         fields = {
-            "New Equip R36 Revenue": row.get("New Equip R36 Revenue", "0"),
-            "Used Equip R36 Revenue": row.get("Used Equip R36 Revenue", "0"),
-            "Parts Revenue R12": row.get("Parts Revenue R12", "0"),
-            "Service Revenue R12 (Includes GM)": row.get("Service Revenue R12 (Includes GM)", "0"),
-            "Parts & Service Revenue R12": row.get("Parts & Service Revenue R12", "0"),
-            "Rental Revenue R12": row.get("Rental Revenue R12", "0"),
-            "Revenue Rolling 12 Months - Aftermarket": row.get("Revenue Rolling 12 Months - Aftermarket", "0"),
-            "Revenue Rolling 13 - 24 Months - Aftermarket": row.get("Revenue Rolling 13 - 24 Months - Aftermarket", "0")
+            "New Equip R36 Revenue": row.iloc[0].get("New Equip R36 Revenue", "0") or "0",
+            "Used Equip R36 Revenue": row.iloc[0].get("Used Equip R36 Revenue", "0") or "0",
+            "Parts Revenue R12": row.iloc[0].get("Parts Revenue R12", "0") or "0",
+            "Service Revenue R12 (Includes GM)": row.iloc[0].get("Service Revenue R12 (Includes GM)", "0") or "0",
+            "Parts & Service Revenue R12": row.iloc[0].get("Parts & Service Revenue R12", "0") or "0",
+            "Rental Revenue R12": row.iloc[0].get("Rental Revenue R12", "0") or "0",
+            "Revenue Rolling 12 Months - Aftermarket": row.iloc[0].get("Revenue Rolling 12 Months - Aftermarket", "0") or "0",
+            "Revenue Rolling 13 - 24 Months - Aftermarket": row.iloc[0].get("Revenue Rolling 13 - 24 Months - Aftermarket", "0") or "0"
         }
 
-        # Format the prompt
-        metrics = "\n".join([f"{k}: ${safe_float(v):,.2f}" for k, v in fields.items()])
-        prompt = f"""Customer: {customer_name}
+        # Clean dollar values (strip $ and commas)
+        def clean(v):
+            return float(str(v).replace("$", "").replace(",", "").strip() or "0")
+
+        metrics = {k: clean(v) for k, v in fields.items()}
+
+        # Format prompt
+        formatted = "\n".join([f"{k}: ${v:,.2f}" for k, v in metrics.items()])
+        prompt = f"""Customer: {row.iloc[0]['Sold to Name'].strip()}
 Here are the latest financial metrics for this customer:
 
-{metrics}
+{formatted}
 
 Based on these revenue metrics, give a short and clear insight:
 - What kind of customer is this?
 - What stands out?
 - Where is there potential to upsell forklifts, service, rentals, or parts?
+
 Keep it brief and analytic."""
 
-        # Send to OpenAI
-        completion = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You're an AI forklift sales strategist. Analyze financial data and provide concise insights."},
-                {"role": "user", "content": prompt}
-            ]
+            messages=[{"role": "system", "content": "You are a financial sales assistant analyzing customer revenue."},
+                      {"role": "user", "content": prompt}],
+            temperature=0.5
         )
-
-        reply = completion.choices[0].message.content.strip()
+        reply = response.choices[0].message.content.strip()
         return jsonify({"response": reply})
 
     except Exception as e:
-        print("❌ Error during AI map analysis:", str(e))
-        return jsonify({"response": f"❌ Error: {str(e)}"}), 500
+        print(f"❌ Error during AI map analysis: {e}")
+        return jsonify({"response": f"Error: {e}"}), 500
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
