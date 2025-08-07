@@ -1,5 +1,6 @@
 import os
 import json
+import pandas as pd
 import difflib
 import sqlite3
 from datetime import timedelta
@@ -397,68 +398,73 @@ def inquiry_preview():
 def service_worker():
     return app.send_static_file('service-worker.js')
 
-@app.route('/api/ai_map_analysis', methods=['POST'])
+# ─── AI Map Analysis Endpoint ─────────────────────────────────────────────
+@app.route("/api/ai_map_analysis", methods=["POST"])
 def ai_map_analysis():
     try:
-        customer = request.json.get('customer')
-        if not customer:
-            return jsonify({"error": "Customer name required"}), 400
+        data = request.get_json()
+        customer_name = data.get("question", "").strip()
 
-        import pandas as pd
-        df = pd.read_csv("customer_report.csv")
+        if not customer_name:
+            return jsonify({"response": "❌ No customer name provided."}), 400
 
-        row = df[df['Sold to Name'].str.strip().str.lower() == customer.strip().lower()]
-        if row.empty:
-            return jsonify({"error": f"No data found for {customer}"}), 404
+        # Load CSV data
+        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
 
-        r = row.iloc[0]
+        # Match customer
+        match = df[df["Sold to Name"].str.lower() == customer_name.lower()]
+        if match.empty:
+            return jsonify({"response": f"❌ Customer '{customer_name}' not found."}), 404
 
+        row = match.iloc[0]
+
+        # Safe float conversion
+        def safe_float(val):
+            try:
+                return float(str(val).replace("$", "").replace(",", "").strip())
+            except:
+                return 0.0
+
+        # Pull the required fields
         fields = {
-            "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
-            "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
-            "Parts Revenue R12": r.get("Parts Revenue R12", 0),
-            "Service Revenue R12 (Includes GM)": r.get("Service Revenue R12 (Includes GM)", 0),
-            "Parts & Service Revenue R12": r.get("Parts & Service Revenue R12", 0),
-            "Rental Revenue R12": r.get("Rental Revenue R12", 0),
-            "Revenue Rolling 12 Months - Aftermarket": r.get("Revenue Rolling 12 Months - Aftermarket", 0),
-            "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
+            "New Equip R36 Revenue": row.get("New Equip R36 Revenue", "0"),
+            "Used Equip R36 Revenue": row.get("Used Equip R36 Revenue", "0"),
+            "Parts Revenue R12": row.get("Parts Revenue R12", "0"),
+            "Service Revenue R12 (Includes GM)": row.get("Service Revenue R12 (Includes GM)", "0"),
+            "Parts & Service Revenue R12": row.get("Parts & Service Revenue R12", "0"),
+            "Rental Revenue R12": row.get("Rental Revenue R12", "0"),
+            "Revenue Rolling 12 Months - Aftermarket": row.get("Revenue Rolling 12 Months - Aftermarket", "0"),
+            "Revenue Rolling 13 - 24 Months - Aftermarket": row.get("Revenue Rolling 13 - 24 Months - Aftermarket", "0")
         }
 
-        # ✅ Build prompt string
-        prompt = f"""
-Customer: {customer}
+        # Format the prompt
+        metrics = "\n".join([f"{k}: ${safe_float(v):,.2f}" for k, v in fields.items()])
+        prompt = f"""Customer: {customer_name}
 Here are the latest financial metrics for this customer:
 
-""" + "\n".join([f"{k}: ${float(v):,.2f}" for k, v in fields.items()]) + """
+{metrics}
 
 Based on these revenue metrics, give a short and clear insight:
 - What kind of customer is this?
 - What stands out?
 - Where is there potential to upsell forklifts, service, rentals, or parts?
-Keep it brief and analytic.
-"""
+Keep it brief and analytic."""
 
-        # ✅ LOG PROMPT FOR DEBUGGING
-        print("📦 Sending this prompt to OpenAI:")
-        print(prompt)
-
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = client.chat.completions.create(
+        # Send to OpenAI
+        completion = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You're a forklift sales strategist."},
+                {"role": "system", "content": "You're an AI forklift sales strategist. Analyze financial data and provide concise insights."},
                 {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
+            ]
         )
 
-        analysis = response.choices[0].message.content.strip()
-        return jsonify({"result": analysis})
+        reply = completion.choices[0].message.content.strip()
+        return jsonify({"response": reply})
 
     except Exception as e:
-        print("❌ Error during AI map analysis:", e)
-        return jsonify({"error": str(e)}), 500
+        print("❌ Error during AI map analysis:", str(e))
+        return jsonify({"response": f"❌ Error: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
