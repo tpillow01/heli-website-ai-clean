@@ -154,43 +154,48 @@
       return true;
     }
 
-    function render() {
-      layerGroup.clearLayers();
-      if (heatLayer) {
-        map.removeLayer(heatLayer);
-        heatLayer = null;
-      }
+ function render() {
+  layerGroup.clearLayers();
+  if (heatLayer) {
+    map.removeLayer(heatLayer);
+    heatLayer = null;
+  }
 
-      const toShow = allPoints.filter(p =>
-        withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
-      );
+  const toShow = allPoints.filter(p =>
+    withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
+  );
 
-      if (heatToggle.checked) {
-        const heatPoints = toShow
-          .filter(p => p.lat && p.lon && p.total_r12 > 0)
-          .map(p => [p.lat, p.lon, p.total_r12 || 0]);
-        heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
-      } else {
-        const group = L.featureGroup();
-        toShow.forEach(p => {
-          const style = markerStyle(p.sales_rep);
-          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(
-            `<b>${p.label}</b><br/>${p.full_address}<br/><i>${p.sales_rep || 'Unassigned'}</i><br/>
-            State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-            Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/><br/>
-            <button onclick="runAiAnalysis('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>`
-          );
-          marker.addTo(group);
-        });
-        group.addTo(layerGroup);
+  if (heatToggle.checked) {
+    const heatPoints = toShow
+      .filter(p => p.lat && p.lon && p.total_r12 > 0)
+      .map(p => [p.lat, p.lon, p.total_r12 || 0]);
+    heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
+  } else {
+    const group = L.featureGroup();
+    toShow.forEach(p => {
+      const style = markerStyle(p.sales_rep);
+      const popupContent = `
+        <b>${p.label}</b><br/>
+        ${p.address || ''}<br/>
+        ${p.city || ''}, ${p.state || ''} ${p.zip || ''}<br/>
+        ${p.county || ''}<br/>
+        Segment: ${p.segment || '-'}<br/>
+        R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/><br/>
+        <button onclick="runMapAI('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>
+      `;
 
-        if (toShow.length) {
-          map.fitBounds(group.getBounds().pad(0.2));
-        }
+      const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(popupContent);
+      marker.addTo(group);
+    });
+    group.addTo(layerGroup);
 
-        updateLegend();
-      }
+    if (toShow.length) {
+      map.fitBounds(group.getBounds().pad(0.2));
     }
+
+    updateLegend();
+  }
+}
 
     function updateLegend() {
       if (legendControl) map.removeControl(legendControl);

@@ -434,50 +434,51 @@ def ai_map_analysis():
         if not customer:
             return jsonify({"error": "Customer name required"}), 400
 
+        # Load data and match by 'Sold to Name'
         import pandas as pd
         df = pd.read_csv("customer_report.csv")
-        df['Sold to Name'] = df['Sold to Name'].astype(str).str.strip()
-        row = df[df['Sold to Name'].str.lower() == customer.strip().lower()]
 
+        row = df[df['Sold to Name'].str.strip().str.lower() == customer.strip().lower()]
         if row.empty:
             return jsonify({"error": f"No invoice data found for {customer}"}), 404
 
+        # Extract relevant values and coerce to numeric
         r = row.iloc[0]
+        def num(col): return pd.to_numeric(r.get(col, 0), errors='coerce') or 0
+
         fields = {
-            "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
-            "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
-            "Parts Revenue R12": r.get("Parts Revenue R12", 0),
-            "Service Revenue R12 (Includes GM)": r.get("Service Revenue R12 (Includes GM)", 0),
-            "Parts & Service Revenue R12": r.get("Parts & Service Revenue R12", 0),
-            "Rental Revenue R12": r.get("Rental Revenue R12", 0),
-            "Revenue Rolling 12 Months - Aftermarket": r.get("Revenue Rolling 12 Months - Aftermarket", 0),
-            "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
+            "New Equip R36 Revenue": num("New Equip R36 Revenue"),
+            "Used Equip R36 Revenue": num("Used Equip R36 Revenue"),
+            "Parts Revenue R12": num("Parts Revenue R12"),
+            "Service Revenue R12 (Includes GM)": num("Service Revenue R12 (Includes GM)"),
+            "Parts & Service Revenue R12": num("Parts & Service Revenue R12"),
+            "Rental Revenue R12": num("Rental Revenue R12"),
+            "Revenue Rolling 12 Months - Aftermarket": num("Revenue Rolling 12 Months - Aftermarket"),
+            "Revenue Rolling 13 - 24 Months - Aftermarket": num("Revenue Rolling 13 - 24 Months - Aftermarket"),
         }
 
         prompt = f"""
-            Customer: {customer}
-            Here are the latest financial metrics for this customer:
+Customer: {customer}
+Here are the latest financial metrics for this customer:
 
-            """ + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
+""" + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
 
-
-            Based on these revenue metrics, give a short and clear insight:
-            - What kind of customer is this?
-            - What stands out?
-            - Where is there potential to upsell forklifts, service, rentals, or parts?
-
-            Keep it brief and analytical.
-            """
+Based on these revenue metrics, give a short and clear insight:
+- What kind of customer is this?
+- What stands out?
+- Where is there potential to upsell forklifts, service, rentals, or parts?
+Keep it brief and analytical.
+"""
 
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You're a forklift sales expert."},
+                {"role": "system", "content": "You're a forklift sales strategist. Analyze revenue data and identify upsell opportunities."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
+            temperature=0.4,
         )
 
         analysis = response.choices[0].message.content.strip()
@@ -485,3 +486,4 @@ def ai_map_analysis():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
