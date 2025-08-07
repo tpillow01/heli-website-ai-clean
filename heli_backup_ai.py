@@ -399,34 +399,70 @@ def service_worker():
 
 # [ADD THIS JUST ABOVE: if __name__ == "__main__":]
 
-# ─── AI Insight API (uses billing_utils.py) ──────────────────────────────
-@app.route("/api/insight")
-@login_required
-def api_insight():
-    from billing_utils import load_billing_data, get_customer_insight
-    customer = request.args.get("name", "").strip()
-    if not customer:
-        return jsonify({"error": "Missing ?name parameter"}), 400
-
-    summary = load_billing_data()
-    base_insight = get_customer_insight(customer, summary)
-
+@app.route('/api/ai_map_analysis', methods=['POST'])
+def ai_map_analysis():
     try:
-        gpt_response = client.chat.completions.create(
+        customer = request.json.get('customer')
+        if not customer:
+            return jsonify({"error": "Customer name required"}), 400
+
+        import pandas as pd
+        df = pd.read_csv("customer_report.csv")
+
+        # Match customer name from Sold to Name column
+        row = df[df['Sold to Name'].str.strip().str.lower() == customer.strip().lower()]
+        if row.empty:
+            return jsonify({"error": f"No invoice data found for {customer}"}), 404
+
+        r = row.iloc[0]
+        fields = {
+            "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
+            "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
+            "Parts Revenue R12": r.get("Parts Revenue R12", 0),
+            "Service Revenue R12 (Includes GM)": r.get("Service Revenue R12 (Includes GM)", 0),
+            "Parts & Service Revenue R12": r.get("Parts & Service Revenue R12", 0),
+            "Rental Revenue R12": r.get("Rental Revenue R12", 0),
+            "Revenue Rolling 12 Months - Aftermarket": r.get("Revenue Rolling 12 Months - Aftermarket", 0),
+            "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
+        }
+
+        # Convert any strings to numbers safely
+        for k in fields:
+            try:
+                fields[k] = float(str(fields[k]).replace("$", "").replace(",", "").strip())
+            except:
+                fields[k] = 0.0
+
+        # Build AI prompt
+        prompt = f"""
+Customer: {customer}
+Here are the latest financial metrics for this customer:
+
+""" + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
+
+Based on these revenue metrics, give a short and clear insight:
+- What kind of customer is this?
+- What stands out?
+- Where is there potential to upsell forklifts, service, rentals, or parts?
+Keep it brief and analytic.
+"""
+
+        # Call OpenAI
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are a helpful sales assistant. Provide a smart sales insight for the customer based on their billing summary."},
-                {"role": "user", "content": base_insight}
-            ]
+                {"role": "system", "content": "You're a forklift sales expert."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
         )
-        ai_tip = gpt_response.choices[0].message.content.strip()
-    except Exception as e:
-        ai_tip = f"❌ AI Error: {e}"
 
-    return jsonify({
-        "summary": base_insight,
-        "ai_tip": ai_tip
-    })
+        return jsonify({"result": response.choices[0].message.content.strip()})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
