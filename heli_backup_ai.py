@@ -407,14 +407,14 @@ def ai_map_analysis():
         import pandas as pd
         df = pd.read_csv("customer_report.csv")
 
-        # Match customer name in "Sold to Name"
+        # Match on Sold to Name
         row = df[df['Sold to Name'].str.strip().str.lower() == customer.strip().lower()]
-
         if row.empty:
-            return jsonify({"error": f"No invoice data found for {customer}"}), 404
+            return jsonify({"error": f"No data found for {customer}"}), 404
 
         r = row.iloc[0]
 
+        # Fields to show in prompt
         fields = {
             "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
             "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
@@ -426,7 +426,7 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
         }
 
-        # Format the AI prompt
+        # Format prompt
         prompt = f"""
 Customer: {customer}
 Here are the latest financial metrics for this customer:
@@ -440,20 +440,19 @@ Based on these revenue metrics, give a short and clear insight:
 Keep it brief and analytic.
 """
 
-        # Call OpenAI
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You're a forklift sales expert. Analyze financial data to find upsell opportunities."},
+                {"role": "system", "content": "You're a forklift sales strategist."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3
+            temperature=0.3,
         )
 
-        result = response.choices[0].message.content.strip()
-        return jsonify({"result": result})
+        analysis = response.choices[0].message.content.strip()
+        return jsonify({"result": analysis})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
