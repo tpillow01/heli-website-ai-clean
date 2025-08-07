@@ -407,14 +407,12 @@ def ai_map_analysis():
         import pandas as pd
         df = pd.read_csv("customer_report.csv")
 
-        # Match on Sold to Name
         row = df[df['Sold to Name'].str.strip().str.lower() == customer.strip().lower()]
         if row.empty:
             return jsonify({"error": f"No data found for {customer}"}), 404
 
         r = row.iloc[0]
 
-        # Fields to show in prompt
         fields = {
             "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
             "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
@@ -426,7 +424,7 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
         }
 
-        # Format prompt
+        # ✅ Build prompt string
         prompt = f"""
 Customer: {customer}
 Here are the latest financial metrics for this customer:
@@ -439,6 +437,10 @@ Based on these revenue metrics, give a short and clear insight:
 - Where is there potential to upsell forklifts, service, rentals, or parts?
 Keep it brief and analytic.
 """
+
+        # ✅ LOG PROMPT FOR DEBUGGING
+        print("📦 Sending this prompt to OpenAI:")
+        print(prompt)
 
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -455,6 +457,7 @@ Keep it brief and analytic.
         return jsonify({"result": analysis})
 
     except Exception as e:
+        print("❌ Error during AI map analysis:", e)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
