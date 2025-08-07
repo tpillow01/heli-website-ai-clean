@@ -154,48 +154,33 @@
       return true;
     }
 
- function render() {
-  layerGroup.clearLayers();
-  if (heatLayer) {
-    map.removeLayer(heatLayer);
-    heatLayer = null;
-  }
+    function render() {
+      layerGroup.clearLayers();
+      if (heatLayer) {
+        map.removeLayer(heatLayer);
+        heatLayer = null;
+      }
 
-  const toShow = allPoints.filter(p =>
-    withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
-  );
+      const toShow = allPoints.filter(p =>
+        withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
+      );
 
-  if (heatToggle.checked) {
-    const heatPoints = toShow
-      .filter(p => p.lat && p.lon && p.total_r12 > 0)
-      .map(p => [p.lat, p.lon, p.total_r12 || 0]);
-    heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
-  } else {
-    const group = L.featureGroup();
-    toShow.forEach(p => {
-      const style = markerStyle(p.sales_rep);
-      const popupContent = `
-        <b>${p.label}</b><br/>
-        ${p.address || ''}<br/>
-        ${p.city || ''}, ${p.state || ''} ${p.zip || ''}<br/>
-        ${p.county || ''}<br/>
-        Segment: ${p.segment || '-'}<br/>
-        R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/><br/>
-        <button onclick="runMapAI('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>
-      `;
-
-      const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(popupContent);
-      marker.addTo(group);
-    });
-    group.addTo(layerGroup);
-
-    if (toShow.length) {
-      map.fitBounds(group.getBounds().pad(0.2));
+      if (heatToggle.checked) {
+        const heatPoints = toShow.filter(p => p.lat && p.lon && p.total_r12 > 0).map(p => [p.lat, p.lon, p.total_r12 || 0]);
+        heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
+      } else {
+        const group = L.featureGroup();
+        toShow.forEach(p => {
+          const style = markerStyle(p.sales_rep);
+          const marker = L.circleMarker([p.lat, p.lon], style);
+          addAIButtonToPopup(marker, p.label);
+          marker.addTo(group);
+        });
+        group.addTo(layerGroup);
+        if (toShow.length) map.fitBounds(group.getBounds().pad(0.2));
+        updateLegend();
+      }
     }
-
-    updateLegend();
-  }
-}
 
     function updateLegend() {
       if (legendControl) map.removeControl(legendControl);
@@ -267,43 +252,39 @@
     heatToggle.addEventListener('change', render);
 
     // ✅ AI Button Logic
-function addAIButtonToPopup(marker, customerName) {
-    marker.bindPopup(`
-      <b>${customerName}</b><br/>
-      <button onclick="runMapAI('${customerName.replace(/'/g, "\\'")}')">Run AI Analysis</button>
-    `);
-  }
+    function addAIButtonToPopup(marker, customerName) {
+      marker.bindPopup(`
+        <b>${customerName}</b><br/>
+        <button onclick="runAI('${customerName.replace(/'/g, "\\'")}')">Run AI Analysis</button>
+      `);
+    }
 
-  function runMapAI(customerName) {
-    const sidebar = document.createElement("div");
-    sidebar.className = "ai-popup";
-    sidebar.innerHTML = `
-      <div class="ai-header">
-        <strong>AI Insights</strong>
-        <button onclick="this.parentElement.parentElement.remove()">×</button>
-      </div>
-      <div class="ai-content">Loading insights for <b>${customerName}</b>...</div>
-    `;
-    document.body.appendChild(sidebar);
+    function runAI(customerName) {
+      const sidebar = document.createElement("div");
+      sidebar.className = "ai-popup";
+      sidebar.innerHTML = `
+        <div class="ai-header">
+          <strong>AI Insights</strong>
+          <button onclick="this.parentElement.parentElement.remove()">×</button>
+        </div>
+        <div class="ai-content">Loading insights for <b>${customerName}</b>...</div>
+      `;
+      document.body.appendChild(sidebar);
 
-    fetch("/api/ai_map_analysis", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer: customerName }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const content = sidebar.querySelector(".ai-content");
-        if (data.result) {
-          content.innerHTML = `<pre>${data.result}</pre>`;
-        } else {
-          content.innerHTML = `<div style="color:red">Error: ${data.error || 'No result returned'}</div>`;
-        }
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: customerName, mode: "inquiry" }),
       })
-      .catch((err) => {
-        sidebar.querySelector(".ai-content").textContent = "Error: " + err.message;
-      });
-  }
-</script>
+        .then((r) => r.json())
+        .then((data) => {
+          const content = sidebar.querySelector(".ai-content");
+          content.innerHTML = `<pre>${data.answer || 'No response'}</pre>`;
+        })
+        .catch((err) => {
+          sidebar.querySelector(".ai-content").textContent = "Error: " + err.message;
+        });
+    }
+  </script>
 </body>
 </html>
