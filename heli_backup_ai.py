@@ -397,8 +397,6 @@ def inquiry_preview():
 def service_worker():
     return app.send_static_file('service-worker.js')
 
-# [ADD THIS JUST ABOVE: if __name__ == "__main__":]
-
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     try:
@@ -409,12 +407,14 @@ def ai_map_analysis():
         import pandas as pd
         df = pd.read_csv("customer_report.csv")
 
-        # Match customer name from Sold to Name column
+        # Match customer name in "Sold to Name"
         row = df[df['Sold to Name'].str.strip().str.lower() == customer.strip().lower()]
+
         if row.empty:
             return jsonify({"error": f"No invoice data found for {customer}"}), 404
 
         r = row.iloc[0]
+
         fields = {
             "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
             "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
@@ -426,19 +426,12 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
         }
 
-        # Convert any strings to numbers safely
-        for k in fields:
-            try:
-                fields[k] = float(str(fields[k]).replace("$", "").replace(",", "").strip())
-            except:
-                fields[k] = 0.0
-
-        # Build AI prompt
+        # Format the AI prompt
         prompt = f"""
 Customer: {customer}
 Here are the latest financial metrics for this customer:
 
-""" + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
+""" + "\n".join([f"{k}: ${float(v):,.2f}" for k, v in fields.items()]) + """
 
 Based on these revenue metrics, give a short and clear insight:
 - What kind of customer is this?
@@ -453,13 +446,14 @@ Keep it brief and analytic.
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You're a forklift sales expert."},
+                {"role": "system", "content": "You're a forklift sales expert. Analyze financial data to find upsell opportunities."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
+            temperature=0.3
         )
 
-        return jsonify({"result": response.choices[0].message.content.strip()})
+        result = response.choices[0].message.content.strip()
+        return jsonify({"result": result})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
