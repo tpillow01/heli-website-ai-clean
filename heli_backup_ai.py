@@ -398,5 +398,35 @@ def inquiry_preview():
 def service_worker():
     return app.send_static_file('service-worker.js')
 
+# ─── AI Insight API (uses billing_utils.py) ──────────────────────────────
+@app.route("/api/insight")
+@login_required
+def api_insight():
+    from billing_utils import load_billing_data, get_customer_insight
+    customer = request.args.get("name", "").strip()
+    if not customer:
+        return jsonify({"error": "Missing ?name parameter"}), 400
+
+    summary = load_billing_data()
+    base_insight = get_customer_insight(customer, summary)
+
+    try:
+        gpt_response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful sales assistant. Provide a smart sales insight for the customer based on their billing summary."},
+                {"role": "user", "content": base_insight}
+            ]
+        )
+        ai_tip = gpt_response.choices[0].message.content.strip()
+    except Exception as e:
+        ai_tip = f"❌ AI Error: {e}"
+
+    return jsonify({
+        "summary": base_insight,
+        "ai_tip": ai_tip
+    })
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
