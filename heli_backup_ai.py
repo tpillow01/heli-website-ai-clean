@@ -158,8 +158,6 @@ def chat():
         from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
 
         qnorm = _norm_name(user_q)
-
-        # try to lock onto a known label present in the question
         chosen_name = None
         try:
             for it in make_inquiry_targets():
@@ -180,7 +178,6 @@ def chat():
                 )
             })
 
-        # Optional: attach up to 5 recent invoices
         recent_block = ""
         if brief.get("recent_invoices"):
             five = brief["recent_invoices"][:5]
@@ -194,7 +191,6 @@ def chat():
                     lines.append(line)
                 recent_block = "\n".join(lines)
 
-        # Strong, structured system prompt with explicit rules and formatting
         system_prompt = {
              "role": "system",
              "content": (
@@ -214,12 +210,9 @@ def chat():
                  "- Top offerings: e.g., Parts ($#,###), Service ($#,###)\n"
                  "- Frequency: Average of N days between invoices\n"
                  "\n"
--                "Visit Plan\n"
--                "- Lead with: Adding another offering this quarter. This is to increase the breadth of offerings and revenue.\n"
--                "- Optional backup: Discuss increasing frequency of service if applicable.\n"
-+                "Visit Plan\n"
-+                "- Lead with: <one offering> (Service, Parts, Rental or New Equipment) — choose the category with the highest billing total in the context block, and briefly why that gap or trend suggests this focus.\n"
-+                "- Optional backup: <one secondary area> tied to the next-highest billing category.\n"
+                 "Visit Plan\n"
+                 "- Lead with: <one offering> (Service, Parts, Rental or New Equipment) — choose the category with the highest billing total in the context block, and briefly why that gap or trend suggests this focus.\n"
+                 "- Optional backup: <one secondary area> tied to the next-highest billing category.\n"
                  "\n"
                  "Next Level (from <LETTER><NUM> → next better only)\n"
                  "- Relationship requirement: specify exactly how many new distinct offerings are needed to reach the next tier (do not skip tiers).\n"
@@ -239,7 +232,6 @@ def chat():
              )
          }
 
-        # Order context so the model sees the data first, then the user
         messages = [
             system_prompt,
             {"role": "system", "content": brief["context_block"]},
@@ -260,7 +252,6 @@ def chat():
             ai_reply = f"❌ Internal error: {e}"
 
         tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
-        # Prepend tag line and a blank line for readability
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
     # ───────── Recommendation mode (existing flow) ─────────
@@ -282,19 +273,42 @@ def chat():
     system_prompt = {
         "role": "system",
         "content": (
-            "You are a helpful, detailed Heli Forklift sales assistant.\n"
-            "Use these sections in order if present:\n"
-            "Customer Profile:, Model:, Power:, Capacity:, Tire Type:, Attachments:, Comparison:, Sales Pitch Techniques:, Common Objections:.\n"
-            "List details using hyphens and indent sub-points.\n"
-            "Only cite forklift Model codes exactly as in the data (e.g., CPD25, CQD16).\n"
-            "End with Sales Pitch Techniques and Common Objections."
+            "You are a friendly, expert Heli Forklift sales assistant.\n"
+            "When a user asks for a recommendation, always respond in the following structured sections, in order:\n\n"
+            "Customer Profile:\n"
+            "- Company: <Account Name>\n"
+            "- Industry: <Industry>\n"
+            "- SIC Code: <SIC Code>\n"
+            "- Fleet Size: <Total Company Fleet Size>\n"
+            "- Truck Types: <Truck Types at Location>\n\n"
+            "Model:\n"
+            "- List one or more forklift model codes (e.g., CPD25, CQD16) that best fit the customer's needs.\n\n"
+            "Power:\n"
+            "- Specify power options (electric, LPG, diesel) with brief pros/cons tailored to their environment.\n\n"
+            "Capacity:\n"
+            "- Recommend capacity range with rationale (e.g., \"2.5–3.5 ton for medium-duty warehouse use\").\n\n"
+            "Tire Type:\n"
+            "- Suggest cushion or pneumatic tires, based on indoor/outdoor use and floor conditions.\n\n"
+            "Attachments:\n"
+            "- Propose any useful attachments (e.g., side shifters, fork positioners) tied to their operation.\n\n"
+            "Comparison:\n"
+            "- If offering multiple models, include a brief bullet-list comparison of key specs.\n\n"
+            "Sales Pitch Techniques:\n"
+            "- Two concise, persuasive talking points (e.g., cost-savings, uptime benefits).\n\n"
+            "Common Objections:\n"
+            "- Two likely customer concerns plus how to overcome each.\n\n"
+            "Guidelines:\n"
+            "- Cite model codes exactly as they appear in models.json.\n"
+            "- Use hyphens for bullets; indent sub-points by two spaces.\n"
+            "- Keep each bullet to one clear sentence.\n"
+            "- Write in a confident, consultative tone; no unnecessary jargon.\n\n"
+            "Now, based on the user’s question and their Customer Profile, fill in each section with tailored, data-driven recommendations."
         )
     }
 
     messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
 
     try:
-        # Optional token guard — skip quietly if tiktoken is missing
         import tiktoken
         enc = tiktoken.encoding_for_model("gpt-4")
         while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
@@ -346,7 +360,6 @@ def map_page():
 def api_locations():
     from data_sources import get_locations_with_geo
     items = get_locations_with_geo()
-    # ensure valid JSON (no NaN)
     return Response(json.dumps(items, allow_nan=False), mimetype="application/json")
 
 # Debug endpoint to inspect server-side aggregates
