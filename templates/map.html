@@ -42,48 +42,48 @@
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
 
-    /* AI popup */
+    /* ✅ AI Sidebar Popup */
     .ai-popup {
       position: fixed;
-      top: 80px;
+      top: 20px;
       right: 20px;
-      max-width: 400px;
-      padding: 18px;
-      background: #fff;
-      border-radius: 10px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.25);
-      z-index: 999;
-      overflow-y: auto;
+      width: 320px;
       max-height: 80vh;
-      font-family: system-ui, sans-serif;
-      white-space: pre-wrap;
+      background: #fff;
+      border: 2px solid #cc0000;
+      border-radius: 8px;
+      box-shadow: 0 0 10px #0003;
+      z-index: 9999;
+      padding: 16px;
+      overflow-y: auto;
     }
-    .ai-popup h3 { margin-top: 0; font-size: 18px; color: #cc0000; }
-    .ai-popup .close-btn {
-      position: absolute;
-      top: 6px;
-      right: 10px;
-      background: none;
+    .ai-popup .ai-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .ai-popup button {
+      background: #cc0000;
+      color: #fff;
       border: none;
-      font-size: 18px;
+      border-radius: 4px;
+      padding: 4px 8px;
       cursor: pointer;
-      color: #999;
     }
-    .ai-popup .close-btn:hover { color: #333; }
+    .ai-popup pre {
+      white-space: pre-wrap;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
   <div class="topbar">
     <div class="title">Customer Map</div>
     <div class="controls">
-      <label>
-        Territory
-        <select id="repFilter">
-          <option value="__ALL__">All</option>
-        </select>
-      </label>
-      <label>
-        Segment
+      <label>Territory <select id="repFilter"><option value="__ALL__">All</option></select></label>
+      <label>Segment
         <select id="segFilter">
           <option value="__ALL__">All</option>
           <option value="A">A only</option>
@@ -92,35 +92,15 @@
           <option value="D">D only</option>
         </select>
       </label>
-      <label>
-        State
-        <select id="stateFilter">
-          <option value="__ALL__">All</option>
-        </select>
-      </label>
-      <label>
-        County
-        <select id="countyFilter" disabled>
-          <option value="__ALL__">All</option>
-        </select>
-      </label>
-      <label>
-        ZIP
-        <input id="zipFilter" type="text" placeholder="Exact ZIP" size="8" />
-      </label>
-      <label>
-        <input type="checkbox" id="heatToggle"> Heatmap Mode
-      </label>
-      <a href="{{ url_for('home') }}" aria-label="Back to Chat">← Back to Chat</a>
+      <label>State <select id="stateFilter"><option value="__ALL__">All</option></select></label>
+      <label>County <select id="countyFilter" disabled><option value="__ALL__">All</option></select></label>
+      <label>ZIP <input id="zipFilter" type="text" placeholder="Exact ZIP" size="8" /></label>
+      <label><input type="checkbox" id="heatToggle"> Heatmap Mode</label>
+      <a href="{{ url_for('home') }}">← Back to Chat</a>
     </div>
   </div>
 
   <div id="map"></div>
-  <div id="aiContainer" class="ai-popup" style="display:none;">
-    <button class="close-btn" onclick="document.getElementById('aiContainer').style.display='none'">×</button>
-    <h3>AI Insights</h3>
-    <div id="aiContent">Loading...</div>
-  </div>
 
   <script>
     const map = L.map('map', { scrollWheelZoom: true }).setView([39.8, -98.6], 4);
@@ -129,11 +109,7 @@
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
-    const palette = [
-      '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2',
-      '#7f7f7f','#bcbd22','#17becf','#393b79','#637939','#8c6d31','#843c39',
-      '#7b4173','#3182bd','#e6550d','#31a354','#756bb1','#969696'
-    ];
+    const palette = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf','#393b79','#637939','#8c6d31','#843c39','#7b4173','#3182bd','#e6550d','#31a354','#756bb1','#969696'];
     const repIndex = new Map();
     const colorForRep = (rep) => {
       if (!repIndex.has(rep)) repIndex.set(rep, repIndex.size % palette.length);
@@ -142,8 +118,7 @@
 
     let allPoints = [];
     let layerGroup = L.featureGroup().addTo(map);
-    let legendControl;
-    let heatLayer = null;
+    let legendControl, heatLayer = null;
 
     const repFilter    = document.getElementById('repFilter');
     const segFilter    = document.getElementById('segFilter');
@@ -172,34 +147,11 @@
     function withinStateCountyZip(pt) {
       const st = stateFilter.value;
       if (st !== '__ALL__' && (pt.state || '') !== st) return false;
-
       const cy = countyFilter.value;
       if (!countyFilter.disabled && cy !== '__ALL__' && (pt.county || '') !== cy) return false;
-
       const z = zipFilter.value.trim();
       if (z && (pt.zip || '') !== z) return false;
-
       return true;
-    }
-
-    function askAIAboutCustomer(name) {
-      const container = document.getElementById("aiContainer");
-      const content = document.getElementById("aiContent");
-      container.style.display = "block";
-      content.textContent = "Loading...";
-
-      fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: name, mode: "inquiry" })
-      })
-      .then(r => r.json())
-      .then(data => {
-        content.textContent = data.response || "No response.";
-      })
-      .catch(err => {
-        content.textContent = "❌ Error: " + err.message;
-      });
     }
 
     function render() {
@@ -214,31 +166,18 @@
       );
 
       if (heatToggle.checked) {
-        const heatPoints = toShow
-          .filter(p => p.lat && p.lon && p.total_r12 > 0)
-          .map(p => [p.lat, p.lon, p.total_r12 || 0]);
+        const heatPoints = toShow.filter(p => p.lat && p.lon && p.total_r12 > 0).map(p => [p.lat, p.lon, p.total_r12 || 0]);
         heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
       } else {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const popupHtml = `
-            <b>${p.label}</b><br/>
-            ${p.full_address}<br/>
-            <i>${p.sales_rep || 'Unassigned'}</i><br/>
-            State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-            Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/>
-            <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>
-          `;
-          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml);
+          const marker = L.circleMarker([p.lat, p.lon], style);
+          addAIButtonToPopup(marker, p.label);
           marker.addTo(group);
         });
         group.addTo(layerGroup);
-
-        if (toShow.length) {
-          map.fitBounds(group.getBounds().pad(0.2));
-        }
-
+        if (toShow.length) map.fitBounds(group.getBounds().pad(0.2));
         updateLegend();
       }
     }
@@ -311,6 +250,41 @@
     });
     countyFilter.addEventListener('change', render);
     heatToggle.addEventListener('change', render);
+
+    // ✅ AI Button Logic
+    function addAIButtonToPopup(marker, customerName) {
+      marker.bindPopup(`
+        <b>${customerName}</b><br/>
+        <button onclick="runAI('${customerName.replace(/'/g, "\\'")}')">Run AI Analysis</button>
+      `);
+    }
+
+    function runAI(customerName) {
+      const sidebar = document.createElement("div");
+      sidebar.className = "ai-popup";
+      sidebar.innerHTML = `
+        <div class="ai-header">
+          <strong>AI Insights</strong>
+          <button onclick="this.parentElement.parentElement.remove()">×</button>
+        </div>
+        <div class="ai-content">Loading insights for <b>${customerName}</b>...</div>
+      `;
+      document.body.appendChild(sidebar);
+
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: customerName, mode: "inquiry" }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          const content = sidebar.querySelector(".ai-content");
+          content.innerHTML = `<pre>${data.answer || 'No response'}</pre>`;
+        })
+        .catch((err) => {
+          sidebar.querySelector(".ai-content").textContent = "Error: " + err.message;
+        });
+    }
   </script>
 </body>
 </html>
