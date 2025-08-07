@@ -188,14 +188,18 @@
       container.style.display = "block";
       content.textContent = "Loading...";
 
-      fetch("/api/chat", {
+      fetch("/api/ai_map_analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: name, mode: "inquiry" })
+        body: JSON.stringify({ customer: name })
       })
       .then(r => r.json())
       .then(data => {
-        content.textContent = data.response || "No response.";
+        if (data.error) {
+          content.textContent = "❌ Error: " + data.error;
+        } else {
+          content.textContent = data.result || "No response.";
+        }
       })
       .catch(err => {
         content.textContent = "❌ Error: " + err.message;
