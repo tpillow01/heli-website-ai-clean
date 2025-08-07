@@ -426,6 +426,64 @@ def api_insight():
         "summary": base_insight,
         "ai_tip": ai_tip
     })
+ 
+@app.route('/api/ai_map_analysis', methods=['POST'])
+def ai_map_analysis():
+    try:
+        customer = request.json.get('customer')
+        if not customer:
+            return jsonify({"error": "Customer name required"}), 400
+
+        # Find the row for this customer in customer_report.csv
+        import pandas as pd
+        df = pd.read_csv("customer_report.csv")
+        row = df[df['CUSTOMER'].str.strip().str.lower() == customer.strip().lower()]
+
+        if row.empty:
+            return jsonify({"error": f"No invoice data found for {customer}"}), 404
+
+        # Extract relevant invoice fields
+        r = row.iloc[0]
+        fields = {
+            "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
+            "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
+            "Parts Revenue R12": r.get("Parts Revenue R12", 0),
+            "Service Revenue R12 (Includes GM)": r.get("Service Revenue R12 (Includes GM)", 0),
+            "Parts & Service Revenue R12": r.get("Parts & Service Revenue R12", 0),
+            "Rental Revenue R12": r.get("Rental Revenue R12", 0),
+            "Revenue Rolling 12 Months - Aftermarket": r.get("Revenue Rolling 12 Months - Aftermarket", 0),
+            "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
+        }
+
+        # Format for AI input
+        prompt = f"""
+            Customer: {customer}
+            Here are the latest financial metrics for this customer:
+
+            """ + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
+
+            Based on these revenue metrics, give a short and clear insight:
+            - What kind of customer is this?
+            - What stands out?
+            - Where is there potential to upsell forklifts, service, rentals, or parts?
+            Keep it brief and analytical.
+            """
+
+        # Call OpenAI
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You're a forklift sales expert."},
+                      {"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+
+        analysis = response.choices[0].message.content.strip()
+        return jsonify({"result": analysis})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

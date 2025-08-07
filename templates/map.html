@@ -252,39 +252,43 @@
     heatToggle.addEventListener('change', render);
 
     // ✅ AI Button Logic
-    function addAIButtonToPopup(marker, customerName) {
-      marker.bindPopup(`
-        <b>${customerName}</b><br/>
-        <button onclick="runAI('${customerName.replace(/'/g, "\\'")}')">Run AI Analysis</button>
-      `);
-    }
+function addAIButtonToPopup(marker, customerName) {
+    marker.bindPopup(`
+      <b>${customerName}</b><br/>
+      <button onclick="runMapAI('${customerName.replace(/'/g, "\\'")}')">Run AI Analysis</button>
+    `);
+  }
+  
+  function runMapAI(customerName) {
+    const sidebar = document.createElement("div");
+    sidebar.className = "ai-popup";
+    sidebar.innerHTML = `
+      <div class="ai-header">
+        <strong>AI Insights</strong>
+        <button onclick="this.parentElement.parentElement.remove()">×</button>
+      </div>
+      <div class="ai-content">Loading insights for <b>${customerName}</b>...</div>
+    `;
+    document.body.appendChild(sidebar);
 
-    function runAI(customerName) {
-      const sidebar = document.createElement("div");
-      sidebar.className = "ai-popup";
-      sidebar.innerHTML = `
-        <div class="ai-header">
-          <strong>AI Insights</strong>
-          <button onclick="this.parentElement.parentElement.remove()">×</button>
-        </div>
-        <div class="ai-content">Loading insights for <b>${customerName}</b>...</div>
-      `;
-      document.body.appendChild(sidebar);
-
-      fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: customerName, mode: "inquiry" }),
+    fetch("/api/ai_map_analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer: customerName }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const content = sidebar.querySelector(".ai-content");
+        if (data.result) {
+          content.innerHTML = `<pre>${data.result}</pre>`;
+        } else {
+          content.innerHTML = `<div style="color:red">Error: ${data.error || 'No result returned'}</div>`;
+        }
       })
-        .then((r) => r.json())
-        .then((data) => {
-          const content = sidebar.querySelector(".ai-content");
-          content.innerHTML = `<pre>${data.answer || 'No response'}</pre>`;
-        })
-        .catch((err) => {
-          sidebar.querySelector(".ai-content").textContent = "Error: " + err.message;
-        });
-    }
-  </script>
+      .catch((err) => {
+        sidebar.querySelector(".ai-content").textContent = "Error: " + err.message;
+      });
+  }
+</script>
 </body>
 </html>
