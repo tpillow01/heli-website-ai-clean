@@ -399,134 +399,145 @@ def service_worker():
     return app.send_static_file('service-worker.js')
 
 # ─── AI Map Analysis Endpoint ─────────────────────────────────────────────
-@app.route('/api/ai_map_analysis', methods=['POST'])
+@app.route("/api/ai_map_analysis", methods=["POST"])
+@login_required
 def ai_map_analysis():
     """
-    Returns a spending overview pulled directly from customer_report.csv
-    for the selected customer. Matches on 'Sold to Name', and further
-    narrows by city/zip/address if provided.
+    Looks up a customer by name in customer_report.csv using fuzzy matching
+    (Sold to Name and Ship to Name), sanitizes all $/comma/() money fields,
+    and sends the SHORT insight prompt to OpenAI.
     """
+    import re
+    import pandas as pd
+    from difflib import SequenceMatcher
+
+    payload = request.get_json(force=True) or {}
+    raw_name = (payload.get("customer") or "").strip()
+    if not raw_name:
+        return jsonify({"error": "Customer name required"}), 400
+
+    def norm_name(s: str) -> str:
+        s = str(s or "").lower()
+        # remove punctuation
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        # drop common suffixes
+        s = re.sub(r"\b(the|inc|llc|l\.l\.c\.|co|company|corp|corporation|ltd|lp|l\.p\.)\b", " ", s)
+        # collapse whitespace
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def money_to_float(v) -> float:
+        if v is None:
+            return 0.0
+        s = str(v).strip()
+        # handle (1,234.56) negatives
+        neg = False
+        if s.startswith("(") and s.endswith(")"):
+            neg = True
+            s = s[1:-1]
+        s = s.replace("$", "").replace(",", "").strip()
+        if s == "" or s.upper() == "N/A":
+            x = 0.0
+        else:
+            try:
+                x = float(s)
+            except Exception:
+                m = re.search(r"-?\d+(\.\d+)?", s)
+                x = float(m.group(0)) if m else 0.0
+        return -x if neg else x
+
+    # Load CSV as strings to avoid dtype surprises
     try:
-        import pandas as pd
-
-        payload  = request.get_json(force=True) or {}
-        customer = (payload.get('customer') or '').strip()
-        city     = (payload.get('city') or '').strip()
-        zip_code = (payload.get('zip') or '').strip()
-        address  = (payload.get('address') or '').strip()
-
-        if not customer:
-            return jsonify({"error": "Customer name required"}), 400
-
-        # Read all as strings; we’ll normalize money ourselves
-        df = pd.read_csv("customer_report.csv", dtype=str, keep_default_na=False)
-
-        def norm(s): return str(s).strip().casefold()
-
-        # 1) match Sold to Name
-        subset = df[df.get('Sold to Name', '').astype(str).map(norm) == norm(customer)].copy()
-
-        # 2) narrow by City
-        if not subset.empty and city:
-            narrowed = subset[subset.get('City', '').astype(str).map(norm) == norm(city)]
-            if not narrowed.empty:
-                subset = narrowed
-
-        # 3) narrow by Zip Code
-        if not subset.empty and zip_code:
-            z = str(zip_code).strip()
-            narrowed = subset[subset.get('Zip Code', '').astype(str).str.strip() == z]
-            if not narrowed.empty:
-                subset = narrowed
-
-        # 4) narrow by Address (contains)
-        if not subset.empty and address:
-            adr = norm(address)
-            narrowed = subset[subset.get('Address', '').astype(str).map(norm).str.contains(adr, na=False)]
-            if not narrowed.empty:
-                subset = narrowed
-
-        if subset.empty:
-            return jsonify({"error": f"No data found for {customer}"}), 404
-
-        # If multiple remain, pick the one with largest Aftermarket R12
-        money_cols_for_pick = "Revenue Rolling 12 Months - Aftermarket"
-        def money_to_float(x):
-            s = str(x).replace("$", "").replace(",", "").strip()
-            try: return float(s)
-            except: return 0.0
-
-        if len(subset) > 1 and money_cols_for_pick in subset.columns:
-            subset = subset.copy()
-            subset["__r12__"] = subset[money_cols_for_pick].map(money_to_float)
-            subset = subset.loc[[subset["__r12__"].idxmax()]]
-
-        r = subset.iloc[0]
-
-        # Columns to display (present if available)
-        display_cols = [
-            "New Equip R36 Revenue",
-            "Used Equip R36 Revenue",
-            "Parts Revenue R12",
-            "Service Revenue R12 (Includes GM)",
-            "Parts & Service Revenue R12",
-            "Rental Revenue R12",
-            "Allied Equipment Revenue R12",
-            "Revenue Rolling 12 Months - Aftermarket",
-            "Revenue Rolling 13 - 24 Months - Aftermarket",
-            "Revenue Rolling 25 - 36 Months - Aftermarket",
-        ]
-
-        def fmt_money(x):
-            v = money_to_float(x)
-            return f"${v:,.2f}"
-
-        # Segment comes from the exact column you specified
-        segment = r.get("R12 Segment (Ship to ID)", "")
-
-        lines = [f"Customer: {customer}"]
-        if r.get("City") or r.get("Zip Code"):
-            lines.append(f"Location: {r.get('City','').strip()} {r.get('Zip Code','').strip()}".strip())
-        if segment:
-            lines.append(f"R12 Segment (Ship to ID): {segment}")
-        if r.get("Sales Rep Name"):
-            lines.append(f"Sales Rep: {r.get('Sales Rep Name')}")
-
-        lines.append("")
-        lines.append("Spending Overview (from customer_report.csv):")
-        for col in display_cols:
-            if col in subset.columns:
-                lines.append(f"- {col}: {fmt_money(r.get(col, '0'))}")
-
-        # You asked to show spending; keep AI commentary minimal (optional).
-        # Comment the next block if you want NO AI at all.
-        try:
-            metrics_block = "\n".join(lines)
-            ai_prompt = (
-                metrics_block
-                + "\n\nIn 2 short bullets max, note 1 standout and 1 upsell angle. Be concise."
-            )
-            resp = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You're a concise forklift sales strategist."},
-                    {"role": "user", "content": ai_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=180,
-            )
-            ai_note = resp.choices[0].message.content.strip()
-            if ai_note:
-                lines += ["", "Quick Insight:", ai_note]
-        except Exception as _:
-            # If OpenAI fails, we still return the spending overview
-            pass
-
-        return jsonify({"response": "\n".join(lines)})
-
+        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
     except Exception as e:
-        print("❌ Error during AI map analysis:", e)
-        return jsonify({"error": str(e)}), 500
+        print("❌ Failed to read customer_report.csv:", e)
+        return jsonify({"error": "Unable to read customer_report.csv"}), 500
+
+    if df.empty:
+        return jsonify({"error": "customer_report.csv is empty"}), 500
+
+    # Prepare normalized columns for matching
+    sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
+    ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
+    if not sold_col and not ship_col:
+        return jsonify({"error": "CSV lacks 'Sold to Name' / 'Ship to Name' columns"}), 500
+
+    df["_sold_norm"] = df[sold_col].map(norm_name) if sold_col else ""
+    df["_ship_norm"] = df[ship_col].map(norm_name) if ship_col else ""
+    target = norm_name(raw_name)
+
+    # Score rows by best of sold/ship similarity
+    def row_score(i: int) -> float:
+        a = df.at[i, "_sold_norm"]
+        b = df.at[i, "_ship_norm"]
+        return max(SequenceMatcher(None, target, a).ratio(),
+                   SequenceMatcher(None, target, b).ratio())
+
+    best_idx = 0
+    best_score = -1.0
+    for i in range(len(df)):
+        sc = row_score(i)
+        if sc > best_score:
+            best_idx, best_score = i, sc
+
+    print(f"🔍 Looking up customer: {raw_name}")
+    print(f"   → best match @ row {best_idx} (score={best_score:.2f}) "
+          f"sold='{df.at[best_idx, sold_col] if sold_col else ''}' "
+          f"ship='{df.at[best_idx, ship_col] if ship_col else ''}'")
+
+    if best_score < 0.72:
+        print("❌ No strong match for customer.")
+        return jsonify({"error": "Could not confidently match that customer in the report."}), 200
+
+    r = df.iloc[best_idx]
+
+    # Columns to send to the AI
+    cols = [
+        "New Equip R36 Revenue",
+        "Used Equip R36 Revenue",
+        "Parts Revenue R12",
+        "Service Revenue R12 (Includes GM)",
+        "Parts & Service Revenue R12",
+        "Rental Revenue R12",
+        "Revenue Rolling 12 Months - Aftermarket",
+        "Revenue Rolling 13 - 24 Months - Aftermarket",
+    ]
+
+    # Build metrics dict (robust dollar parsing)
+    metrics = {c: money_to_float(r.get(c, "")) for c in cols}
+
+    # Build EXACT prompt format you asked for
+    lines = [f"{c}: ${metrics[c]:,.2f}" for c in cols]
+    prompt = (
+        f"Customer: {raw_name}\n"
+        f"Here are the latest financial metrics for this customer:\n\n"
+        + "\n".join(lines)
+        + "\n\nBased on these revenue metrics, give a short and clear insight:\n"
+          "- What kind of customer is this?\n"
+          "- What stands out?\n"
+          "- Where is there potential to upsell forklifts, service, rentals, or parts?\n"
+          "Keep it brief and analytic."
+    )
+
+    print("📤 Sending to OpenAI:\n", prompt)
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You're a forklift sales strategist."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=450,
+        )
+        analysis = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        print("❌ OpenAI error:", e)
+        return jsonify({"error": f"OpenAI error: {e}"}), 500
+
+    print("✅ Response:\n", analysis)
+    return jsonify({"response": analysis})
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
