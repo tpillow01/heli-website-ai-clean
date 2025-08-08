@@ -157,26 +157,62 @@
     const zipFilter    = document.getElementById('zipFilter');
     const heatToggle   = document.getElementById('heatToggle');
 
-    // --- NEW: segment maps pulled from /api/segments (Sold-to segment) ---
-    let segMaps = null; // {by_exact, by_norm, by_norm_zip, by_norm_city_state}
-
     function markerStyle(rep) {
       const base = colorForRep(rep || 'Unassigned');
       return { radius: 7, weight: 1, color: '#333', fillColor: base, fillOpacity: 0.9 };
     }
 
-    // helpers to clean/derive fields client-side
-    function moneyToNumber(v) {
-      if (v === null || v === undefined) return 0;
-      const s = String(v).replace(/\$/g, '').replace(/,/g, '').trim();
-      const n = parseFloat(s);
-      return Number.isFinite(n) ? n : 0;
+    // ---------- SEGMENT LOOKUP (from /api/segments) ----------
+    let SEG_INDEX = { by_exact:{}, by_norm:{}, by_norm_zip:{}, by_norm_city_state:{} };
+
+    function normCompanyName(s) {
+      if (!s) return '';
+      s = s.toLowerCase();
+      // remove company suffixes
+      s = s.replace(/\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b/gi, '');
+      s = s.replace(/[^a-z0-9]+/g, ' ');
+      s = s.replace(/\s+/g, ' ').trim();
+      return s;
+    }
+    function normCity(s) {
+      return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    function zip5(z) {
+      const m = String(z||'').match(/\d{5}/);
+      return m ? m[0] : '';
+    }
+    function lookupSegmentForPoint(p) {
+      const name  = p.label || '';
+      const city  = p.city || '';
+      const state = (p.state || '').toUpperCase();
+      const z5    = zip5(p.zip);
+
+      // 1) exact name
+      if (SEG_INDEX.by_exact[name]) return SEG_INDEX.by_exact[name];
+
+      const n = normCompanyName(name);
+      if (!n) return '';
+
+      // 2) norm + zip
+      if (z5 && SEG_INDEX.by_norm_zip[`${n}|${z5}`]) return SEG_INDEX.by_norm_zip[`${n}|${z5}`];
+
+      // 3) norm + city + state
+      const nc = normCity(city);
+      if (nc && state && SEG_INDEX.by_norm_city_state[`${n}|${nc}|${state}`])
+        return SEG_INDEX.by_norm_city_state[`${n}|${nc}|${state}`];
+
+      // 4) bare normalized
+      if (SEG_INDEX.by_norm[n]) return SEG_INDEX.by_norm[n];
+
+      // 5) fallback (whatever came from locations API)
+      return p.segment || '';
     }
 
+    // --- helpers to clean/derive fields client-side ---
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
 
-      // County/State might be "Marion IN"
+      // County/State can be like "Marion IN"
       let state = p.state || p.State || '';
       let county = p.county || p.County || '';
       const countyStateRaw = p['County State'] || p.county_state || '';
@@ -200,9 +236,8 @@
 
       const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
 
-      // Aftermarket R12 for heat; won't affect segment
-      let total_r12 = p['Revenue Rolling 12 Months - Aftermarket'];
-      total_r12 = moneyToNumber(total_r12);
+      // DO NOT trust p.segment; we’ll fetch from /api/segments
+      const segment = ''; // placeholder; we’ll compute at popup time
 
       // Coords sanity
       let lat = p.lat, lon = p.lon;
@@ -212,7 +247,7 @@
         lat = null; lon = null;
       }
 
-      return { label, full_address, address, city, state, county, zip, sales_rep, total_r12, lat, lon };
+      return { label, full_address, address, city, state, county, zip, sales_rep, segment, lat, lon };
     }
 
     function withinRepFilter(pt) {
@@ -223,9 +258,10 @@
     function withinSegFilter(pt) {
       const want = segFilter.value;
       if (want === '__ALL__') return true;
-      // Seg filter still needs a letter; if we don't have a segment map yet, let it pass
-      const s = segmentForPoint(pt);
-      return s ? s[0] === want : true;
+      // segment like "D3" → first letter
+      const seg = lookupSegmentForPoint(pt) || '';
+      const letter = seg ? seg[0] : '';
+      return letter === want;
     }
 
     function withinStateCountyZip(pt) {
@@ -239,41 +275,6 @@
       if (z && (pt.zip || '') !== z) return false;
 
       return true;
-    }
-
-    // --- NEW: normalization + segment lookup using segMaps ---
-    function normName(s) {
-      if (!s) return "";
-      s = s.toLowerCase()
-           .replace(/\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b/g, "")
-           .replace(/[^a-z0-9]+/g, " ")
-           .trim()
-           .replace(/\s+/g, " ");
-      return s;
-    }
-    function normCity(s) {
-      return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
-    }
-    function zip5(z) {
-      const m = String(z || "").match(/\d{5}/);
-      return m ? m[0] : "";
-    }
-    function segmentForPoint(pt) {
-      if (!segMaps) return pt.segment || null; // fallback if not loaded yet
-
-      const name = pt.label || "";
-      const n = normName(name);
-      const z = zip5(pt.zip);
-      const c = normCity(pt.city);
-      const st = (pt.state || "").toUpperCase();
-
-      // try keys in priority order
-      if (segMaps.by_exact && segMaps.by_exact[name]) return segMaps.by_exact[name];
-      if (segMaps.by_norm_zip && n && z && segMaps.by_norm_zip[`${n}|${z}`]) return segMaps.by_norm_zip[`${n}|${z}`];
-      if (segMaps.by_norm_city_state && n && c && st && segMaps.by_norm_city_state[`${n}|${c}|${st}`]) return segMaps.by_norm_city_state[`${n}|${c}|${st}`];
-      if (segMaps.by_norm && n && segMaps.by_norm[n]) return segMaps.by_norm[n];
-
-      return pt.segment || null;
     }
 
     // GLOBAL so inline onclick can call it
@@ -313,21 +314,19 @@
       );
 
       if (heatToggle.checked) {
-        const heatPoints = toShow
-          .filter(p => p.total_r12 > 0)
-          .map(p => [p.lat, p.lon, p.total_r12 || 0]);
+        const heatPoints = toShow.map(p => [p.lat, p.lon, 1]);
         heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
       } else {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const segText = segmentForPoint(p) || '-';
+          const seg = lookupSegmentForPoint(p) || '-';
           const popupHtml = `
             <b>${p.label}</b><br/>
             ${p.full_address}<br/>
             <i>${p.sales_rep || 'Unassigned'}</i><br/>
             State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-            Segment: ${segText} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/>
+            Segment: ${seg}<br/>
             <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}')">Run AI Analysis</button>
           `;
           L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);
@@ -387,22 +386,21 @@
       countyFilter.disabled = false;
     }
 
-    // Load points + segments, then render
+    // --------- INITIAL LOAD: segments then locations ----------
     Promise.all([
-      fetch('{{ url_for("api_locations") }}').then(r => r.json()),
-      fetch('/api/segments').then(r => r.json()).catch(() => null)
+      fetch('{{ url_for("api_segments") }}').then(r => r.json()).then(idx => { SEG_INDEX = idx || SEG_INDEX; }),
+      fetch('{{ url_for("api_locations") }}').then(r => r.json())
     ])
-      .then(([points, seg]) => {
-        allPoints = points || [];
-        segMaps = seg; // may be null; handled in segmentForPoint
-        populateRepFilter(allPoints);
-        populateStateFilter(allPoints);
-        render();
-      })
-      .catch(err => {
-        console.error(err);
-        alert('Could not load data:\n' + err.message);
-      });
+    .then(([, points]) => {
+      allPoints = points || [];
+      populateRepFilter(allPoints);
+      populateStateFilter(allPoints);
+      render();
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Could not load data:\n' + err.message);
+    });
 
     // Events
     repFilter.addEventListener('change', render);

@@ -8,6 +8,8 @@ from datetime import timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
+# add at top with your other Flask imports
+from flask import make_response
 from openai import OpenAI
 
 from ai_logic import generate_forklift_context
@@ -338,10 +340,24 @@ def api_modes():
     ])
 
 # Map routes
+# ─── Map page (no-cache, cache-bust token) ───────────────────────────────
 @app.route("/map")
 @login_required
 def map_page():
-    return render_template("map.html")
+    """
+    Serve map.html and force no-cache so front-end changes show up immediately.
+    Also passes a simple cache-bust token you can use in the template if needed.
+    """
+    import time
+    asset_version = os.getenv("ASSET_VERSION") or str(int(time.time()))
+    html = render_template("map.html", asset_version=asset_version)
+
+    resp = make_response(html)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
 
 @app.route("/api/locations")
 @login_required
@@ -618,7 +634,7 @@ def api_segments():
     import pandas as pd, re
     from flask import jsonify
 
-    SEG_COL   = "R12 Segment (Ship to ID)"
+    SEG_COL   = "R12 Segment (Sold to ID)"
     SOLD_COL  = "Sold to Name"
     SHIP_COL  = "Ship to Name"
     ADDR_COL  = "Address"
