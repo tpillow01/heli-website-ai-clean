@@ -423,3 +423,39 @@ body {
   white-space: pre-wrap;
   font-size: 13px;
 }
+
+.ai-sidebar {
+  position: fixed;
+  top: 0;
+  right: -400px;
+  width: 400px;
+  height: 100%;
+  background: #111;
+  color: #fff;
+  box-shadow: -2px 0 6px rgba(0,0,0,0.5);
+  overflow-y: auto;
+  z-index: 999;
+  transition: right 0.3s ease-in-out;
+  padding: 20px;
+}
+
+.ai-sidebar.visible {
+  right: 0;
+}
+
+.ai-sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.close-ai-btn {
+  background: #cc0000;
+  color: #fff;
+  font-size: 24px;
+  border: none;
+  align-self: flex-end;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 4px;
+}

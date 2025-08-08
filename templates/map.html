@@ -42,7 +42,7 @@
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
 
-    /* AI popup */
+    /* AI popup (sidebar card) */
     .ai-popup {
       position: fixed;
       top: 80px;
@@ -52,13 +52,14 @@
       background: #fff;
       border-radius: 10px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.25);
-      z-index: 999;
+      z-index: 9999;
       overflow-y: auto;
       max-height: 80vh;
       font-family: system-ui, sans-serif;
       white-space: pre-wrap;
+      display: none; /* we toggle this to block when opened */
     }
-    .ai-popup h3 { margin-top: 0; font-size: 18px; color: #cc0000; }
+    .ai-popup h3 { margin: 0 0 8px 0; font-size: 18px; color: var(--brand); }
     .ai-popup .close-btn {
       position: absolute;
       top: 6px;
@@ -70,6 +71,7 @@
       color: #999;
     }
     .ai-popup .close-btn:hover { color: #333; }
+    .ai-popup pre { margin: 0; font-size: 13px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -116,7 +118,9 @@
   </div>
 
   <div id="map"></div>
-  <div id="aiContainer" class="ai-popup" style="display:none;">
+
+  <!-- AI Insights Sidebar Card -->
+  <div id="aiContainer" class="ai-popup">
     <button class="close-btn" onclick="document.getElementById('aiContainer').style.display='none'">×</button>
     <h3>AI Insights</h3>
     <div id="aiContent">Loading...</div>
@@ -172,40 +176,37 @@
     function withinStateCountyZip(pt) {
       const st = stateFilter.value;
       if (st !== '__ALL__' && (pt.state || '') !== st) return false;
-
       const cy = countyFilter.value;
       if (!countyFilter.disabled && cy !== '__ALL__' && (pt.county || '') !== cy) return false;
-
       const z = zipFilter.value.trim();
       if (z && (pt.zip || '') !== z) return false;
-
       return true;
     }
 
-  async function askAIAboutCustomer(name) {
-    const container = document.getElementById('aiContainer');
-    const content = document.getElementById('aiContent');
-    container.classList.add('visible');
-    content.innerHTML = `<p><em>Loading AI analysis for <b>${name}</b>...</em></p>`;
+    // --- AI sidebar trigger (keeps your popup the same) ---
+    async function askAIAboutCustomer(name) {
+      const container = document.getElementById('aiContainer');
+      const content = document.getElementById('aiContent');
+      container.style.display = 'block'; // <-- show the card
+      content.innerHTML = `<p><em>Loading AI analysis for <b>${name}</b>...</em></p>`;
 
-    try {
-      const res = await fetch("/api/ai_map_analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer: name })
-      });
-
-      const data = await res.json();
-
-      if (data.error) {
-        content.innerHTML = `<p><strong>Error:</strong> ${data.error}</p>`;
-      } else {
-        content.innerHTML = `<h2>AI Insights</h2><p>${data.response}</p>`;
+      try {
+        const res = await fetch("/api/ai_map_analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customer: name })
+        });
+        const data = await res.json();
+        if (data.error) {
+          content.innerHTML = `<p><strong>Error:</strong> ${data.error}</p>`;
+        } else {
+          // Use <pre> to preserve bullets/line breaks from the model
+          content.innerHTML = `<pre>${(data.response || '').trim()}</pre>`;
+        }
+      } catch (err) {
+        content.innerHTML = `<p><strong>Network Error:</strong> ${err.message}</p>`;
       }
-    } catch (err) {
-      content.innerHTML = `<p><strong>Network Error:</strong> ${err.message}</p>`;
     }
-  }
 
     function render() {
       layerGroup.clearLayers();
@@ -285,6 +286,7 @@
       countyFilter.disabled = false;
     }
 
+    // Load points
     fetch('{{ url_for("api_locations") }}')
       .then(r => r.json())
       .then(points => {
@@ -298,6 +300,7 @@
         alert('Could not load locations:\n' + err.message);
       });
 
+    // Events
     repFilter.addEventListener('change', render);
     segFilter.addEventListener('change', render);
     zipFilter.addEventListener('input', () => {
@@ -316,29 +319,6 @@
     });
     countyFilter.addEventListener('change', render);
     heatToggle.addEventListener('change', render);
-
-    document.addEventListener("click", function (e) {
-  if (e.target && e.target.classList.contains("run-ai-btn")) {
-    const button = e.target;
-    const customerName = button.getAttribute("data-customer");
-    const aiContainer = document.getElementById("aiContainer");
-    aiContainer.innerHTML = `<h2>AI Insights</h2><p><em>Analyzing ${customerName}...</em></p>`;
-    aiContainer.classList.add("open");
-
-    fetch("/api/ai_map_analysis", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: customerName })
-    })
-    .then(res => res.json())
-    .then(data => {
-      aiContainer.innerHTML = `<h2>AI Insights</h2><p>${data.response || "No response."}</p>`;
-    })
-    .catch(err => {
-      aiContainer.innerHTML = `<h2>AI Insights</h2><p>Error loading insights.</p>`;
-    });
-  }
-});
   </script>
 </body>
 </html>
