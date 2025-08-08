@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <title>Customer Map (Segment / Territory / Geo Filters)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 
@@ -22,9 +23,7 @@
       gap: 10px; flex-wrap: wrap;
     }
     .title { font-weight: 600; }
-    .controls {
-      display:flex; gap:8px; align-items:center; flex-wrap:wrap;
-    }
+    .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .controls label { font-size: 13px; color:#333; display:flex; gap:6px; align-items:center; }
     .controls select, .controls input[type="text"] {
       padding: 6px 10px; border-radius: 8px; border:1px solid #d0d0d5; background:#fff; font-size:14px;
@@ -33,7 +32,9 @@
       padding:6px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; text-decoration:none; color:var(--ink);
     }
     .controls a:hover { border-color: var(--brand); color: var(--brand); }
+
     #map { height: calc(100vh - 60px); width: 100vw; }
+
     .legend {
       background: white; padding: 8px 10px; border-radius: 6px;
       box-shadow: 0 1px 4px rgba(0,0,0,0.2); font: 12px/1.1 system-ui, sans-serif;
@@ -42,22 +43,22 @@
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
 
-    /* AI popup (sidebar card) */
+    /* AI Insights sidebar card */
     .ai-popup {
       position: fixed;
       top: 80px;
       right: 20px;
       max-width: 400px;
+      max-height: 80vh;
       padding: 18px;
       background: #fff;
       border-radius: 10px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.25);
-      z-index: 9999;
+      z-index: 2147483647; /* always on top */
       overflow-y: auto;
-      max-height: 80vh;
       font-family: system-ui, sans-serif;
       white-space: pre-wrap;
-      display: none; /* we toggle this to block when opened */
+      display: none; /* shown when AI runs */
     }
     .ai-popup h3 { margin: 0 0 8px 0; font-size: 18px; color: var(--brand); }
     .ai-popup .close-btn {
@@ -161,6 +162,75 @@
       return { radius: 7, weight: 1, color: '#333', fillColor: base, fillOpacity: 0.9 };
     }
 
+    // --- helpers to clean/derive fields client-side ---
+    function moneyToNumber(v) {
+      if (v === null || v === undefined) return 0;
+      const s = String(v).replace(/\$/g, '').replace(/,/g, '').trim();
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function deriveFields(p) {
+      // Label preference
+      const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
+
+      // County/State can be combined like "Marion IN"
+      let state = p.state || p.State || '';
+      let county = p.county || p.County || '';
+      const countyStateRaw = p['County State'] || p.county_state || '';
+      if ((!county || !state) && countyStateRaw) {
+        const parts = String(countyStateRaw).trim().split(/\s+/);
+        if (parts.length >= 2) {
+          state = state || parts[parts.length - 1];
+          county = county || parts.slice(0, -1).join(' ');
+        }
+      }
+
+      const address1 = p.Address || p.address || '';
+      const city = p.City || p.city || '';
+      const zip = String(p['Zip Code'] || p.zip || '').trim();
+
+      const full_address = p.full_address || [
+        address1,
+        [city, state].filter(Boolean).join(', '),
+        zip
+      ].filter(Boolean).join(' ').trim();
+
+      // sales rep
+      const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
+
+      // Segment/size
+      const segment = p.segment || p['R12 Segment (Sold to ID)'] || p['R12 Segment (Ship to ID)'] || p['R12 Segment'] || '';
+      const size_letter = p.size_letter || p.size || '';
+
+      // Total R12: use provided or derive from known fields
+      let total_r12 = p.total_r12;
+      if (total_r12 == null || total_r12 === '') {
+        // Try "Parts & Service Revenue R12" then "Revenue Rolling 12 Months - Aftermarket"
+        if (p['Parts & Service Revenue R12'] != null && p['Parts & Service Revenue R12'] !== '') {
+          total_r12 = moneyToNumber(p['Parts & Service Revenue R12']);
+        } else if (p['Revenue Rolling 12 Months - Aftermarket'] != null && p['Revenue Rolling 12 Months - Aftermarket'] !== '') {
+          total_r12 = moneyToNumber(p['Revenue Rolling 12 Months - Aftermarket']);
+        } else {
+          total_r12 = 0;
+        }
+      } else {
+        total_r12 = moneyToNumber(total_r12);
+      }
+
+      // Coords
+      let lat = p.lat, lon = p.lon;
+      // Ensure numbers
+      lat = lat == null ? null : parseFloat(lat);
+      lon = lon == null ? null : parseFloat(lon);
+      // Basic sanity
+      if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
+        lat = null; lon = null;
+      }
+
+      return { label, full_address, sales_rep, state, county, zip, segment, size_letter, total_r12, lat, lon };
+    }
+
     function withinRepFilter(pt) {
       const want = repFilter.value;
       return want === '__ALL__' || (pt.sales_rep || 'Unassigned') === want;
@@ -176,37 +246,37 @@
     function withinStateCountyZip(pt) {
       const st = stateFilter.value;
       if (st !== '__ALL__' && (pt.state || '') !== st) return false;
+
       const cy = countyFilter.value;
       if (!countyFilter.disabled && cy !== '__ALL__' && (pt.county || '') !== cy) return false;
+
       const z = zipFilter.value.trim();
       if (z && (pt.zip || '') !== z) return false;
+
       return true;
     }
 
-    // --- AI sidebar trigger (keeps your popup the same) ---
-    async function askAIAboutCustomer(name) {
+    // GLOBAL so inline onclick can call it
+    window.askAIAboutCustomer = async function(name) {
       const container = document.getElementById('aiContainer');
       const content = document.getElementById('aiContent');
-      container.style.display = 'block'; // <-- show the card
+
+      container.style.display = 'block';
       content.innerHTML = `<p><em>Loading AI analysis for <b>${name}</b>...</em></p>`;
 
       try {
-        const res = await fetch("/api/ai_map_analysis", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch('/api/ai_map_analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ customer: name })
         });
         const data = await res.json();
-        if (data.error) {
-          content.innerHTML = `<p><strong>Error:</strong> ${data.error}</p>`;
-        } else {
-          // Use <pre> to preserve bullets/line breaks from the model
-          content.innerHTML = `<pre>${(data.response || '').trim()}</pre>`;
-        }
+        const text = (data.response ?? data.result ?? '').toString().trim();
+        content.innerHTML = text ? `<pre>${text}</pre>` : `<p><strong>Note:</strong> Server returned an empty response.</p>`;
       } catch (err) {
         content.innerHTML = `<p><strong>Network Error:</strong> ${err.message}</p>`;
       }
-    }
+    };
 
     function render() {
       layerGroup.clearLayers();
@@ -215,19 +285,24 @@
         heatLayer = null;
       }
 
-      const toShow = allPoints.filter(p =>
+      // Derive/clean all points client-side to prevent bad displays
+      const derived = (allPoints || []).map(deriveFields)
+        .filter(p => p.lat != null && p.lon != null); // only valid coords
+
+      const toShow = derived.filter(p =>
         withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
       );
 
       if (heatToggle.checked) {
         const heatPoints = toShow
-          .filter(p => p.lat && p.lon && p.total_r12 > 0)
+          .filter(p => p.total_r12 > 0)
           .map(p => [p.lat, p.lon, p.total_r12 || 0]);
         heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
       } else {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
+          // 🔒 Popup layout unchanged — just feeding corrected fields
           const popupHtml = `
             <b>${p.label}</b><br/>
             ${p.full_address}<br/>
@@ -236,8 +311,7 @@
             Segment: ${p.segment || '-'} | Size: ${p.size_letter || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/>
             <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}')">Run AI Analysis</button>
           `;
-          const marker = L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml);
-          marker.addTo(group);
+          L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);
         });
         group.addTo(layerGroup);
 
@@ -245,13 +319,13 @@
           map.fitBounds(group.getBounds().pad(0.2));
         }
 
-        updateLegend();
+        updateLegend(derived);
       }
     }
 
-    function updateLegend() {
+    function updateLegend(derivedPoints) {
       if (legendControl) map.removeControl(legendControl);
-      const entries = Array.from(new Set(allPoints.map(p => p.sales_rep || 'Unassigned'))).sort();
+      const entries = Array.from(new Set(derivedPoints.map(p => p.sales_rep || 'Unassigned'))).sort();
       legendControl = L.control({ position: 'bottomright' });
       legendControl.onAdd = () => {
         const div = L.DomUtil.create('div', 'legend');
@@ -269,19 +343,27 @@
     }
 
     function populateRepFilter(points) {
-      const reps = Array.from(new Set(points.map(p => p.sales_rep || 'Unassigned'))).sort();
+      const reps = Array.from(new Set(points.map(p => (p.sales_rep || p['Sales Rep Name'] || 'Unassigned')))).sort();
       repFilter.innerHTML = `<option value="__ALL__">All</option>` + reps.map(r => `<option>${r}</option>`).join('');
     }
 
     function populateStateFilter(points) {
-      const states = Array.from(new Set(points.map(p => p.state).filter(Boolean))).sort();
+      const states = Array.from(new Set(points.map(p => (p.state || p.State || (String(p['County State']||'').trim().split(/\s+/).pop()) )).filter(Boolean))).sort();
       stateFilter.innerHTML = `<option value="__ALL__">All</option>` + states.map(s => `<option value="${s}">${s}</option>`).join('');
       countyFilter.innerHTML = `<option value="__ALL__">All</option>`;
       countyFilter.disabled = true;
     }
 
     function populateCountyFilter(points, stateCode) {
-      const counties = Array.from(new Set(points.filter(p => p.state === stateCode).map(p => p.county).filter(Boolean))).sort();
+      const counties = Array.from(new Set(points.map(p => {
+        let county = p.county || p.County || '';
+        if (!county && p['County State']) {
+          const parts = String(p['County State']).trim().split(/\s+/);
+          if (parts.length >= 2) county = parts.slice(0, -1).join(' ');
+        }
+        const pState = p.state || p.State || (String(p['County State']||'').trim().split(/\s+/).pop());
+        return (pState === stateCode) ? county : null;
+      }).filter(Boolean))).sort();
       countyFilter.innerHTML = `<option value="__ALL__">All</option>` + counties.map(c => `<option value="${c}">${c}</option>`).join('');
       countyFilter.disabled = false;
     }
