@@ -399,211 +399,316 @@ def service_worker():
     return app.send_static_file('service-worker.js')
 
 # ─── AI Map Analysis Endpoint ─────────────────────────────────────────────
-@app.route("/api/ai_map_analysis", methods=["POST"])
-@login_required
+@app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     """
-    Looks up a customer by name in customer_report.csv using fuzzy matching
-    (Sold to Name and Ship to Name), sanitizes all $/comma/() money fields,
-    and sends the SHORT insight prompt to OpenAI.
+    Build AI insight from customer_report.csv using the *correct* row(s):
+      - Prefer Sold to Name / Ship to Name exact (case-insensitive)
+      - Then normalized name (strip suffixes/punct)
+      - If zip/city/state provided, use them to disambiguate
+      - If multiple rows match, aggregate by Sold to ID (company-level)
     """
     import re
     import pandas as pd
-    from difflib import SequenceMatcher
+    from difflib import get_close_matches
 
-    payload = request.get_json(force=True) or {}
-    raw_name = (payload.get("customer") or "").strip()
-    if not raw_name:
-        return jsonify({"error": "Customer name required"}), 400
+    try:
+        payload = request.get_json(force=True) or {}
+        customer_raw = (payload.get('customer') or '').strip()
+        zip_hint     = (payload.get('zip') or '').strip()
+        city_hint    = (payload.get('city') or '').strip()
+        state_hint   = (payload.get('state') or '').strip().upper()
 
-    def norm_name(s: str) -> str:
-        s = str(s or "").lower()
-        # remove punctuation
-        s = re.sub(r"[^a-z0-9\s]", " ", s)
-        # drop common suffixes
-        s = re.sub(r"\b(the|inc|llc|l\.l\.c\.|co|company|corp|corporation|ltd|lp|l\.p\.)\b", " ", s)
-        # collapse whitespace
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+        if not customer_raw:
+            return jsonify({"error": "Customer name required"}), 400
 
-    def money_to_float(v) -> float:
-        if v is None:
-            return 0.0
-        s = str(v).strip()
-        # handle (1,234.56) negatives
-        neg = False
-        if s.startswith("(") and s.endswith(")"):
-            neg = True
-            s = s[1:-1]
-        s = s.replace("$", "").replace(",", "").strip()
-        if s == "" or s.upper() == "N/A":
-            x = 0.0
-        else:
+        # ---- load and normalize CSV (all as strings) ----
+        try:
+            df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        except Exception as e:
+            print("❌ ai_map_analysis read error:", e)
+            return jsonify({"error": "Could not read customer_report.csv"}), 500
+
+        # Column names used
+        SOLD  = "Sold to Name"
+        SHIP  = "Ship to Name"
+        SOLD_ID = "Sold to ID"
+        CITY  = "City"
+        ZIP   = "Zip Code"
+        CST   = "County State"  # e.g., "Marion IN" => IN
+
+        REV_COLS = [
+            "New Equip R36 Revenue",
+            "Used Equip R36 Revenue",
+            "Parts Revenue R12",
+            "Service Revenue R12 (Includes GM)",
+            "Parts & Service Revenue R12",
+            "Rental Revenue R12",
+            "Revenue Rolling 12 Months - Aftermarket",
+            "Revenue Rolling 13 - 24 Months - Aftermarket",
+        ]
+
+        # helpers
+        def strip_suffixes(s: str) -> str:
+            return re.sub(
+                r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+                "", s or "", flags=re.IGNORECASE
+            )
+
+        def norm_name(s: str) -> str:
+            s = strip_suffixes(s)
+            s = s.lower()
+            s = re.sub(r"[^a-z0-9]+", " ", s)
+            return re.sub(r"\s+", " ", s).strip()
+
+        def state_from_cst(v: str) -> str:
+            parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
+            return parts[-1].upper() if len(parts) >= 2 else ""
+
+        def zip5(z: str) -> str:
+            m = re.search(r"\d{5}", (z or ""))
+            return m.group(0) if m else ""
+
+        def money_to_float(v) -> float:
+            if v is None:
+                return 0.0
+            s = str(v).strip()
+            if s == "":
+                return 0.0
+            s = s.replace("$", "").replace(",", "").strip()
             try:
-                x = float(s)
+                return float(s)
             except Exception:
+                # handle things like "$0 " or stray chars
                 m = re.search(r"-?\d+(\.\d+)?", s)
-                x = float(m.group(0)) if m else 0.0
-        return -x if neg else x
+                return float(m.group(0)) if m else 0.0
 
-    # Load CSV as strings to avoid dtype surprises
-    try:
-        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        # Precompute normalized name, zip5, city/state for each row
+        df["_sold_norm"] = df[SOLD].apply(norm_name)
+        df["_ship_norm"] = df[SHIP].apply(norm_name)
+        df["_zip5"]      = df[ZIP].apply(zip5)
+        df["_city_norm"] = df[CITY].str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True).str.replace(r"\s+", " ", regex=True).str.strip()
+        df["_state"]     = df[CST].apply(state_from_cst)
+
+        cust_norm = norm_name(customer_raw)
+        zip_norm  = zip5(zip_hint)
+        city_norm = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
+        state_abbr = state_hint
+
+        # ---- build candidate masks in decreasing strictness ----
+        # 1) exact case-insensitive on sold/ship
+        m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
+
+        # 2) normalized name match
+        m_norm = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
+
+        # refine by zip/city/state if provided
+        def refine(mask):
+            m = mask.copy()
+            if zip_norm:
+                m = m & (df["_zip5"] == zip_norm)
+            if city_norm:
+                m = m & (df["_city_norm"] == city_norm)
+            if state_abbr:
+                m = m & (df["_state"] == state_abbr)
+            return m
+
+        # Try strict → less strict
+        masks = [
+            refine(m_exact),
+            refine(m_norm),
+            m_exact,
+            m_norm
+        ]
+
+        hit = None
+        for mk in masks:
+            cand = df[mk]
+            if not cand.empty:
+                hit = cand
+                break
+
+        # 3) last-resort fuzzy on normalized names
+        if hit is None:
+            all_norms = list(set(df["_sold_norm"].tolist() + df["_ship_norm"].tolist()))
+            guess = get_close_matches(cust_norm, all_norms, n=1, cutoff=0.92)
+            if guess:
+                g = guess[0]
+                hit = df[(df["_sold_norm"] == g) | (df["_ship_norm"] == g)]
+
+        if hit is None or hit.empty:
+            print("❌ No match found for:", customer_raw)
+            return jsonify({"error": f"No data found for {customer_raw}"}), 200
+
+        # If multiple rows, aggregate by Sold to ID if available, else by Sold to Name
+        chosen_group_id = ""
+        if (hit[SOLD_ID] != "").any():
+            chosen_group_id = hit[SOLD_ID].iloc[0]
+            group_df = df[df[SOLD_ID] == chosen_group_id]
+        else:
+            # Fallback: aggregate all rows whose sold-to name normalizes to the same value
+            base_norm = hit[SOLD].iloc[0]
+            base_norm = norm_name(base_norm)
+            group_df = df[df[SOLD].apply(norm_name) == base_norm]
+
+        # Build numeric totals
+        totals = {}
+        for col in REV_COLS:
+            if col in group_df.columns:
+                totals[col] = money_to_float(group_df[col].map(money_to_float).sum())
+            else:
+                totals[col] = 0.0
+
+        # Prefer a readable company display name
+        display_name = customer_raw
+        if not display_name and not hit.empty:
+            display_name = hit[SOLD].iloc[0] or hit[SHIP].iloc[0]
+
+        # Format the metrics block
+        lines = [f"Customer: {display_name}",
+                 "Here are the latest financial metrics for this customer:",
+                 ""]
+        for k in REV_COLS:
+            lines.append(f"{k}: ${totals[k]:,.2f}")
+        metrics_block = "\n".join(lines)
+
+        # Build the specific AI prompt you requested
+        prompt = f"""{metrics_block}
+
+Based on these revenue metrics, give a short and clear insight:
+- What kind of customer is this?
+- What stands out?
+- Where is there potential to upsell forklifts, service, rentals, or parts?
+Keep it brief and analytic.
+"""
+
+        # Call OpenAI
+        try:
+            oai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            resp = oai.chat.completions.create(
+                model="gpt-4",
+                temperature=0.3,
+                messages=[
+                    {"role": "system", "content": "You are a forklift sales strategist. Be concise and analytical."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            analysis = resp.choices[0].message.content.strip()
+        except Exception as e:
+            print("❌ OpenAI error:", e)
+            analysis = None
+
+        # Return result (and include the metrics we used so you can eyeball in UI/logs if needed)
+        return jsonify({
+            "result": analysis or metrics_block,   # fall back to metrics block if AI call fails
+            "metrics": totals,
+            "matched_rows": int(len(hit)),
+            "aggregated": bool(chosen_group_id),
+            "group_id": chosen_group_id
+        })
+
     except Exception as e:
-        print("❌ Failed to read customer_report.csv:", e)
-        return jsonify({"error": "Unable to read customer_report.csv"}), 500
-
-    if df.empty:
-        return jsonify({"error": "customer_report.csv is empty"}), 500
-
-    # Prepare normalized columns for matching
-    sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
-    ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
-    if not sold_col and not ship_col:
-        return jsonify({"error": "CSV lacks 'Sold to Name' / 'Ship to Name' columns"}), 500
-
-    df["_sold_norm"] = df[sold_col].map(norm_name) if sold_col else ""
-    df["_ship_norm"] = df[ship_col].map(norm_name) if ship_col else ""
-    target = norm_name(raw_name)
-
-    # Score rows by best of sold/ship similarity
-    def row_score(i: int) -> float:
-        a = df.at[i, "_sold_norm"]
-        b = df.at[i, "_ship_norm"]
-        return max(SequenceMatcher(None, target, a).ratio(),
-                   SequenceMatcher(None, target, b).ratio())
-
-    best_idx = 0
-    best_score = -1.0
-    for i in range(len(df)):
-        sc = row_score(i)
-        if sc > best_score:
-            best_idx, best_score = i, sc
-
-    print(f"🔍 Looking up customer: {raw_name}")
-    print(f"   → best match @ row {best_idx} (score={best_score:.2f}) "
-          f"sold='{df.at[best_idx, sold_col] if sold_col else ''}' "
-          f"ship='{df.at[best_idx, ship_col] if ship_col else ''}'")
-
-    if best_score < 0.72:
-        print("❌ No strong match for customer.")
-        return jsonify({"error": "Could not confidently match that customer in the report."}), 200
-
-    r = df.iloc[best_idx]
-
-    # Columns to send to the AI
-    cols = [
-        "New Equip R36 Revenue",
-        "Used Equip R36 Revenue",
-        "Parts Revenue R12",
-        "Service Revenue R12 (Includes GM)",
-        "Parts & Service Revenue R12",
-        "Rental Revenue R12",
-        "Revenue Rolling 12 Months - Aftermarket",
-        "Revenue Rolling 13 - 24 Months - Aftermarket",
-    ]
-
-    # Build metrics dict (robust dollar parsing)
-    metrics = {c: money_to_float(r.get(c, "")) for c in cols}
-
-    # Build EXACT prompt format you asked for
-    lines = [f"{c}: ${metrics[c]:,.2f}" for c in cols]
-    prompt = (
-        f"Customer: {raw_name}\n"
-        f"Here are the latest financial metrics for this customer:\n\n"
-        + "\n".join(lines)
-        + "\n\nBased on these revenue metrics, give a short and clear insight:\n"
-          "- What kind of customer is this?\n"
-          "- What stands out?\n"
-          "- Where is there potential to upsell forklifts, service, rentals, or parts?\n"
-          "Keep it brief and analytic."
-    )
-
-    print("📤 Sending to OpenAI:\n", prompt)
-
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You're a forklift sales strategist."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_tokens=450,
-        )
-        analysis = (resp.choices[0].message.content or "").strip()
-    except Exception as e:
-        print("❌ OpenAI error:", e)
-        return jsonify({"error": f"OpenAI error: {e}"}), 500
-
-    print("✅ Response:\n", analysis)
-    return jsonify({"response": analysis})
+        print("❌ Error during AI map analysis:", e)
+        return jsonify({"error": str(e)}), 500
 
 # --- Segment lookup for map popups (from customer_report.csv) -----------------
 @app.route("/api/segments")
 @login_required
 def api_segments():
     """
-    Returns segment lookups from customer_report.csv:
-      - by_exact: exact string → segment
-      - by_norm: normalized string (lowercased, no punctuation, suffixes removed) → segment
-    We index by BOTH "Sold to Name" and "Ship to Name" so map labels have a better chance to match.
+    Build multiple lookup keys from customer_report.csv so the map can find the
+    correct segment even when names collide:
+
+    Returns JSON with:
+      - by_exact:            "Sold to Name" or "Ship to Name"  → segment
+      - by_norm:             norm(name)                        → segment
+      - by_norm_zip:         norm(name)|zip5                   → segment
+      - by_norm_city_state:  norm(name)|norm(city)|state_abbr  → segment
+
+    Where norm() lowercases, removes punctuation and company suffixes (Inc/LLC/etc).
     """
     import pandas as pd, re
     from flask import jsonify
 
-    SEG_COL  = "R12 Segment (Ship to ID)"
-    SOLD_COL = "Sold to Name"
-    SHIP_COL = "Ship to Name"
+    SEG_COL   = "R12 Segment (Ship to ID)"
+    SOLD_COL  = "Sold to Name"
+    SHIP_COL  = "Ship to Name"
+    ADDR_COL  = "Address"
+    CITY_COL  = "City"
+    ZIP_COL   = "Zip Code"
+    CST_COL   = "County State"  # e.g., "Marion IN" → state = "IN"
 
     try:
         df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
     except Exception as e:
         print("❌ /api/segments read error:", e)
-        return jsonify({"by_exact": {}, "by_norm": {}}), 200
-
-    # Normalizers
-    def norm_base(s: str) -> str:
-        s = (s or "").lower()
-        s = re.sub(r"[^a-z0-9]+", " ", s)  # remove punctuation
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+        return jsonify({"by_exact": {}, "by_norm": {}, "by_norm_zip": {}, "by_norm_city_state": {}}), 200
 
     def strip_suffixes(s: str) -> str:
-        # kill common company suffixes (inc, llc, co, corp, ltd, etc.)
-        s = re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                   "", s, flags=re.IGNORECASE)
+        # remove common company suffixes
+        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+                      "", s, flags=re.IGNORECASE)
+
+    def norm_name(s: str) -> str:
+        s = strip_suffixes(s or "")
+        s = s.lower()
+        s = re.sub(r"[^a-z0-9]+", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
 
-    def norm_full(s: str) -> str:
-        return norm_base(strip_suffixes(s))
+    def norm_city(s: str) -> str:
+        s = (s or "").lower()
+        s = re.sub(r"[^a-z0-9]+", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    def state_from_county_state(v: str) -> str:
+        # "Marion IN" → "IN"
+        parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
+        return parts[-1] if len(parts) >= 2 else ""
+
+    def zip5(z: str) -> str:
+        m = re.search(r"\d{5}", (z or ""))
+        return m.group(0) if m else ""
 
     by_exact = {}
-    by_norm  = {}
+    by_norm = {}
+    by_norm_zip = {}
+    by_norm_city_state = {}
 
     for _, row in df.iterrows():
         seg = (row.get(SEG_COL, "") or "").strip()
         if not seg:
             continue
 
-        # consider both names
+        city  = (row.get(CITY_COL, "") or "").strip()
+        zipc  = zip5(row.get(ZIP_COL, ""))
+        state = (state_from_county_state(row.get(CST_COL, "")) or "").strip().upper()
+
         for col in (SOLD_COL, SHIP_COL):
             name = (row.get(col, "") or "").strip()
             if not name:
                 continue
 
-            # exact key
-            if name not in by_exact:
-                by_exact[name] = seg
+            # exact
+            by_exact.setdefault(name, seg)
 
-            # normalized key
-            key_norm = norm_full(name)
-            if key_norm and key_norm not in by_norm:
-                by_norm[key_norm] = seg
+            # normalized
+            n = norm_name(name)
+            if n:
+                by_norm.setdefault(n, seg)
 
-    return jsonify({"by_exact": by_exact, "by_norm": by_norm})
+                if zipc:
+                    by_norm_zip.setdefault(f"{n}|{zipc}", seg)
 
+                if city and state:
+                    by_norm_city_state.setdefault(f"{n}|{norm_city(city)}|{state}", seg)
+
+    return jsonify({
+        "by_exact": by_exact,
+        "by_norm": by_norm,
+        "by_norm_zip": by_norm_zip,
+        "by_norm_city_state": by_norm_city_state
+    })
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
