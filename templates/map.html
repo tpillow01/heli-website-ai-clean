@@ -173,7 +173,7 @@
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
 
-      // County/State can be like "Marion IN"
+      // County/State might be like "Marion IN"
       let state = p.state || p.State || '';
       let county = p.county || p.County || '';
       const countyStateRaw = p['County State'] || p.county_state || '';
@@ -197,10 +197,10 @@
 
       const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
 
-      // Use the exact column you asked for
+      // Exact segment column you wanted
       const segment = p['R12 Segment (Ship to ID)'] || p.segment || '';
 
-      // Use Aftermarket R12 as the revenue value for popup
+      // Aftermarket R12 used ONLY for heatmap weight; not shown in popup anymore
       let total_r12 = p['Revenue Rolling 12 Months - Aftermarket'];
       total_r12 = moneyToNumber(total_r12);
 
@@ -285,13 +285,13 @@
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          // Popup layout unchanged; values come from corrected fields
+          // Popup now shows segment only (no R12), as requested
           const popupHtml = `
             <b>${p.label}</b><br/>
             ${p.full_address}<br/>
             <i>${p.sales_rep || 'Unassigned'}</i><br/>
             State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-            Segment: ${p.segment || '-'} | R12: $${(p.total_r12 ?? 0).toLocaleString()}<br/>
+            Segment: ${p.segment || '-'}<br/>
             <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}')">Run AI Analysis</button>
           `;
           L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);

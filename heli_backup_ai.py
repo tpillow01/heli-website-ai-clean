@@ -402,12 +402,14 @@ def service_worker():
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     """
-    Look up the exact row for a customer in customer_report.csv.
-    If multiple rows share the same Sold to Name, further narrow by city/zip/address.
-    Falls back to the highest 'Revenue Rolling 12 Months - Aftermarket' if still ambiguous.
+    Returns a spending overview pulled directly from customer_report.csv
+    for the selected customer. Matches on 'Sold to Name', and further
+    narrows by city/zip/address if provided.
     """
     try:
-        payload = request.get_json(force=True) or {}
+        import pandas as pd
+
+        payload  = request.get_json(force=True) or {}
         customer = (payload.get('customer') or '').strip()
         city     = (payload.get('city') or '').strip()
         zip_code = (payload.get('zip') or '').strip()
@@ -416,106 +418,111 @@ def ai_map_analysis():
         if not customer:
             return jsonify({"error": "Customer name required"}), 400
 
-        import pandas as pd
-        # Read as strings to avoid dtype surprises; we’ll coerce as needed
+        # Read all as strings; we’ll normalize money ourselves
         df = pd.read_csv("customer_report.csv", dtype=str, keep_default_na=False)
 
-        # Normalize helper
-        def norm(s):
-            return str(s).strip().casefold()
+        def norm(s): return str(s).strip().casefold()
 
-        # Filter by Sold to Name first
-        mask = df.get('Sold to Name', '').astype(str).map(norm) == norm(customer)
-        subset = df[mask].copy()
+        # 1) match Sold to Name
+        subset = df[df.get('Sold to Name', '').astype(str).map(norm) == norm(customer)].copy()
 
-        # Narrow by city if given
-        if city and not subset.empty:
-            m2 = subset.get('City', '').astype(str).map(norm) == norm(city)
-            sub2 = subset[m2]
-            if not sub2.empty:
-                subset = sub2
+        # 2) narrow by City
+        if not subset.empty and city:
+            narrowed = subset[subset.get('City', '').astype(str).map(norm) == norm(city)]
+            if not narrowed.empty:
+                subset = narrowed
 
-        # Narrow by ZIP if given
-        if zip_code and not subset.empty:
+        # 3) narrow by Zip Code
+        if not subset.empty and zip_code:
             z = str(zip_code).strip()
-            m2 = subset.get('Zip Code', '').astype(str).str.strip() == z
-            sub2 = subset[m2]
-            if not sub2.empty:
-                subset = sub2
+            narrowed = subset[subset.get('Zip Code', '').astype(str).str.strip() == z]
+            if not narrowed.empty:
+                subset = narrowed
 
-        # Narrow by address (contains) if given
-        if address and not subset.empty:
+        # 4) narrow by Address (contains)
+        if not subset.empty and address:
             adr = norm(address)
-            m2 = subset.get('Address', '').astype(str).map(norm).str.contains(adr, na=False)
-            sub2 = subset[m2]
-            if not sub2.empty:
-                subset = sub2
+            narrowed = subset[subset.get('Address', '').astype(str).map(norm).str.contains(adr, na=False)]
+            if not narrowed.empty:
+                subset = narrowed
 
         if subset.empty:
             return jsonify({"error": f"No data found for {customer}"}), 404
 
-        # If still multiple, pick the row with the largest R12 Aftermarket
+        # If multiple remain, pick the one with largest Aftermarket R12
+        money_cols_for_pick = "Revenue Rolling 12 Months - Aftermarket"
         def money_to_float(x):
             s = str(x).replace("$", "").replace(",", "").strip()
-            try:
-                return float(s)
-            except:
-                return 0.0
+            try: return float(s)
+            except: return 0.0
 
-        if len(subset) > 1:
+        if len(subset) > 1 and money_cols_for_pick in subset.columns:
             subset = subset.copy()
-            subset["__r12__"] = subset.get(
-                "Revenue Rolling 12 Months - Aftermarket", ""
-            ).map(money_to_float)
+            subset["__r12__"] = subset[money_cols_for_pick].map(money_to_float)
             subset = subset.loc[[subset["__r12__"].idxmax()]]
 
         r = subset.iloc[0]
 
-        fields = {
-            "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
-            "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
-            "Parts Revenue R12": r.get("Parts Revenue R12", 0),
-            "Service Revenue R12 (Includes GM)": r.get("Service Revenue R12 (Includes GM)", 0),
-            "Parts & Service Revenue R12": r.get("Parts & Service Revenue R12", 0),
-            "Rental Revenue R12": r.get("Rental Revenue R12", 0),
-            "Revenue Rolling 12 Months - Aftermarket": r.get("Revenue Rolling 12 Months - Aftermarket", 0),
-            "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
-        }
+        # Columns to display (present if available)
+        display_cols = [
+            "New Equip R36 Revenue",
+            "Used Equip R36 Revenue",
+            "Parts Revenue R12",
+            "Service Revenue R12 (Includes GM)",
+            "Parts & Service Revenue R12",
+            "Rental Revenue R12",
+            "Allied Equipment Revenue R12",
+            "Revenue Rolling 12 Months - Aftermarket",
+            "Revenue Rolling 13 - 24 Months - Aftermarket",
+            "Revenue Rolling 25 - 36 Months - Aftermarket",
+        ]
 
-        # Build prompt with normalized currency
         def fmt_money(x):
             v = money_to_float(x)
             return f"${v:,.2f}"
 
-        metrics_block = "\n".join([f"{k}: {fmt_money(v)}" for k, v in fields.items()])
+        # Segment comes from the exact column you specified
+        segment = r.get("R12 Segment (Ship to ID)", "")
 
-        prompt = f"""Customer: {customer}
-Here are the latest financial metrics for this customer:
+        lines = [f"Customer: {customer}"]
+        if r.get("City") or r.get("Zip Code"):
+            lines.append(f"Location: {r.get('City','').strip()} {r.get('Zip Code','').strip()}".strip())
+        if segment:
+            lines.append(f"R12 Segment (Ship to ID): {segment}")
+        if r.get("Sales Rep Name"):
+            lines.append(f"Sales Rep: {r.get('Sales Rep Name')}")
 
-{metrics_block}
+        lines.append("")
+        lines.append("Spending Overview (from customer_report.csv):")
+        for col in display_cols:
+            if col in subset.columns:
+                lines.append(f"- {col}: {fmt_money(r.get(col, '0'))}")
 
-Based on these revenue metrics, give a short and clear insight:
-- What kind of customer is this?
-- What stands out?
-- Where is there potential to upsell forklifts, service, rentals, or parts?
-Keep it brief and analytic.
-"""
+        # You asked to show spending; keep AI commentary minimal (optional).
+        # Comment the next block if you want NO AI at all.
+        try:
+            metrics_block = "\n".join(lines)
+            ai_prompt = (
+                metrics_block
+                + "\n\nIn 2 short bullets max, note 1 standout and 1 upsell angle. Be concise."
+            )
+            resp = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You're a concise forklift sales strategist."},
+                    {"role": "user", "content": ai_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=180,
+            )
+            ai_note = resp.choices[0].message.content.strip()
+            if ai_note:
+                lines += ["", "Quick Insight:", ai_note]
+        except Exception as _:
+            # If OpenAI fails, we still return the spending overview
+            pass
 
-        print("🔍 Selected row for:", customer, "| City:", city, "| ZIP:", zip_code, "| Address:", address)
-        print("📤 Sending to OpenAI:\n", prompt)
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You're a forklift sales strategist."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-        )
-        analysis = response.choices[0].message.content.strip()
-        print("✅ Response:\n", analysis)
-
-        return jsonify({"response": analysis})
+        return jsonify({"response": "\n".join(lines)})
 
     except Exception as e:
         print("❌ Error during AI map analysis:", e)
