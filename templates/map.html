@@ -186,16 +186,15 @@
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
 
-      // Best-effort address framing from locations
       const address = p.Address || p.address || "";
       const city    = p.City || p.city || "";
-      const state   = p.state || p.State || "";
+      let state     = p.state || p.State || "";
       const zip     = zip5(p['Zip Code'] || p.zip || "");
       let county    = p.county || p.County || "";
+
       if (!state && p['County State']) {
-        // infer state from "County State"
         const sAbbr = stateFromCountyState(p['County State']);
-        if (sAbbr) { /* not mutating state if set */ }
+        if (sAbbr) state = sAbbr;
       }
       if (!county && p['County State']) {
         const parts = String(p['County State']).trim().split(/\s+/);
@@ -231,25 +230,20 @@
       const st = (pt.state || '').toUpperCase();
       const cityNorm = (pt.city || '').toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
-      // try exact → stripped exact → norm+zip → norm+city+state → norm-only
-      const ex = segmentsIndex.by_exact || {};
-      const byNorm = segmentsIndex.by_norm || {};
-      const byZIP  = segmentsIndex.by_norm_zip || {};
-      const byCS   = segmentsIndex.by_norm_city_state || {};
+      const ex    = segmentsIndex.by_exact || {};
+      const byNorm= segmentsIndex.by_norm || {};
+      const byZIP = segmentsIndex.by_norm_zip || {};
+      const byCS  = segmentsIndex.by_norm_city_state || {};
 
-      // exact (as-is)
       if (ex[name]) return ex[name];
 
-      // exact with stripped suffixes (common mismatch)
       const stripped = stripSuffixes(name).trim();
       if (ex[stripped]) return ex[stripped];
 
-      // normalized keys
       if (z && byZIP[`${n}|${z}`]) return byZIP[`${n}|${z}`];
       if (cityNorm && st && byCS[`${n}|${cityNorm}|${st}`]) return byCS[`${n}|${cityNorm}|${st}`];
       if (byNorm[n]) return byNorm[n];
 
-      // fallback to whatever was on the point
       return pt.segment || '-';
     }
 
@@ -294,10 +288,17 @@
           body: JSON.stringify({ customer: name, city, state, zip })
         });
         const data = await res.json();
-        const text = (data.result ?? data.response ?? '').toString().trim();
-        content.innerHTML = text
-          ? `<pre>${text}</pre>`
-          : `<p><strong>Note:</strong> Server returned an empty response.</p>`;
+
+        const metrics = (data.metrics || '').toString().trim();
+        const aiText  = (data.result  || data.response || '').toString().trim();
+
+        if (metrics || aiText) {
+          content.innerHTML =
+            (metrics ? `<pre>${metrics}</pre><hr>` : '') +
+            (aiText ? `<pre>${aiText}</pre>` : '');
+        } else {
+          content.innerHTML = `<p><strong>Note:</strong> Server returned an empty response.</p>`;
+        }
       } catch (err) {
         content.innerHTML = `<p><strong>Network Error:</strong> ${err.message}</p>`;
       }
@@ -308,7 +309,6 @@
       layerGroup.clearLayers();
       if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
 
-      // derive fields and resolve segment
       const derived = (allPoints || []).map(deriveFields)
         .filter(p => p.lat != null && p.lon != null)
         .map(p => ({ ...p, _resolvedSegment: resolveSegmentForPoint(p) }));
@@ -318,8 +318,6 @@
       );
 
       if (heatToggle.checked) {
-        // Heat uses a neutral weight (1) since popup no longer shows R12;
-        // you can wire a numeric field if you want to weight by spend.
         const heatPoints = toShow.map(p => [p.lat, p.lon, 1]);
         heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
       } else {
