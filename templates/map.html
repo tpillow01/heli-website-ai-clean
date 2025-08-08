@@ -157,17 +157,32 @@
     const zipFilter    = document.getElementById('zipFilter');
     const heatToggle   = document.getElementById('heatToggle');
 
-    // Segment index from /api/segments
+    // ---------- Segment index from /api/segments ----------
     let SEGMENTS = { by_exact: {}, by_norm: {} };
-    function normName(s) {
-      return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+
+    function stripSuffixesJS(s) {
+      return (s || "")
+        .replace(/\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+    function normNameJS(s) {
+      return stripSuffixesJS(s)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     }
     function getSegmentFor(label) {
       if (!label) return "-";
-      return SEGMENTS.by_exact[label] || SEGMENTS.by_norm[normName(label)] || "-";
+      if (SEGMENTS.by_exact[label]) return SEGMENTS.by_exact[label];
+      const stripped = stripSuffixesJS(label);
+      if (SEGMENTS.by_exact[stripped]) return SEGMENTS.by_exact[stripped];
+      const key = normNameJS(label);
+      return SEGMENTS.by_norm[key] || "-";
     }
 
-    // Trust the fields coming from /api/locations (customer_location.csv)
+    // ---------- Use fields from /api/locations (customer_location.csv) ----------
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
       const full_address = p.full_address || '';
@@ -177,8 +192,7 @@
       const sales_rep = p.sales_rep || 'Unassigned';
       const lat = (p.lat !== null && p.lat !== undefined) ? parseFloat(p.lat) : null;
       const lon = (p.lon !== null && p.lon !== undefined) ? parseFloat(p.lon) : null;
-      // heat weight if provided (not shown in popup)
-      const total_r12 = Number(p.total_r12 || 0);
+      const total_r12 = Number(p.total_r12 || 0); // heat weight only
       return { label, full_address, state, county, zip, sales_rep, lat, lon, total_r12 };
     }
 
@@ -203,16 +217,14 @@
     function withinStateCountyZip(pt) {
       const st = stateFilter.value;
       if (st !== '__ALL__' && (pt.state || '') !== st) return false;
-
       const cy = countyFilter.value;
       if (!countyFilter.disabled && cy !== '__ALL__' && (pt.county || '') !== cy) return false;
-
       const z = zipFilter.value.trim();
       if (z && (pt.zip || '') !== z) return false;
-
       return true;
     }
 
+    // ---------- AI sidebar ----------
     window.askAIAboutCustomer = async function(name) {
       const container = document.getElementById('aiContainer');
       const content = document.getElementById('aiContent');
@@ -234,6 +246,7 @@
       }
     };
 
+    // ---------- Render ----------
     function render() {
       layerGroup.clearLayers();
       if (heatLayer) {

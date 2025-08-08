@@ -539,5 +539,71 @@ def ai_map_analysis():
     print("✅ Response:\n", analysis)
     return jsonify({"response": analysis})
 
+# --- Segment lookup for map popups (from customer_report.csv) -----------------
+@app.route("/api/segments")
+@login_required
+def api_segments():
+    """
+    Returns segment lookups from customer_report.csv:
+      - by_exact: exact string → segment
+      - by_norm: normalized string (lowercased, no punctuation, suffixes removed) → segment
+    We index by BOTH "Sold to Name" and "Ship to Name" so map labels have a better chance to match.
+    """
+    import pandas as pd, re
+    from flask import jsonify
+
+    SEG_COL  = "R12 Segment (Ship to ID)"
+    SOLD_COL = "Sold to Name"
+    SHIP_COL = "Ship to Name"
+
+    try:
+        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+    except Exception as e:
+        print("❌ /api/segments read error:", e)
+        return jsonify({"by_exact": {}, "by_norm": {}}), 200
+
+    # Normalizers
+    def norm_base(s: str) -> str:
+        s = (s or "").lower()
+        s = re.sub(r"[^a-z0-9]+", " ", s)  # remove punctuation
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def strip_suffixes(s: str) -> str:
+        # kill common company suffixes (inc, llc, co, corp, ltd, etc.)
+        s = re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+                   "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def norm_full(s: str) -> str:
+        return norm_base(strip_suffixes(s))
+
+    by_exact = {}
+    by_norm  = {}
+
+    for _, row in df.iterrows():
+        seg = (row.get(SEG_COL, "") or "").strip()
+        if not seg:
+            continue
+
+        # consider both names
+        for col in (SOLD_COL, SHIP_COL):
+            name = (row.get(col, "") or "").strip()
+            if not name:
+                continue
+
+            # exact key
+            if name not in by_exact:
+                by_exact[name] = seg
+
+            # normalized key
+            key_norm = norm_full(name)
+            if key_norm and key_norm not in by_norm:
+                by_norm[key_norm] = seg
+
+    return jsonify({"by_exact": by_exact, "by_norm": by_norm})
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
