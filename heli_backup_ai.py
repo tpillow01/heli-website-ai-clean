@@ -337,18 +337,6 @@ def api_modes():
         {"id": "inquiry",        "label": "Customer Inquiry"}
     ])
 
-@app.route("/api/targets")
-def api_targets():
-    mode = (request.args.get("mode") or "recommendation").lower()
-    if mode == "inquiry":
-        return jsonify(make_inquiry_targets())
-    items = []
-    for i, a in enumerate(account_data):
-        label = a.get("Account Name") or f"Account {i+1}"
-        _id   = str(a.get("Account Name", label))
-        items.append({"id": _id, "label": label})
-    return jsonify(items)
-
 # Map routes
 @app.route("/map")
 @login_required
