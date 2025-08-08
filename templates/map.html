@@ -202,7 +202,7 @@
       return p.segment || '';
     }
 
-    // --- helpers to clean/derive fields client-side (format lines exactly like you asked) ---
+    // --- helpers to clean/derive fields client-side (format lines like your mockup) ---
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
 
@@ -249,11 +249,11 @@
     }
 
     function withinSegFilter(pt) {
+      // Keep filter by A/B/C/D (first letter), but show full code in popup
       const want = segFilter.value;
       if (want === '__ALL__') return true;
       const seg = lookupSegmentForPoint(pt) || '';
-      const letter = seg ? seg[0] : '';
-      return letter === want;
+      return seg.startsWith(want);
     }
 
     function withinStateCountyZip(pt) {
@@ -314,15 +314,14 @@
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const segFull = lookupSegmentForPoint(p) || '-';
-          const segLetter = segFull ? segFull[0] : '-';
+          const segFull = lookupSegmentForPoint(p) || '-';   // <= show full, e.g., "C3"
           const popupHtml = `
             <div style="font:14px/1.35 system-ui, sans-serif;">
               <div style="font-weight:700;">${p.label}</div>
               <div>${p.full_address}</div>
               <div>${p.sales_rep || 'Unassigned'}</div>
               <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
-              <div>Segment: ${segLetter}</div>
+              <div>Segment: ${segFull}</div>
               <div style="margin-top:6px;">
                 <button style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
                         onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')">

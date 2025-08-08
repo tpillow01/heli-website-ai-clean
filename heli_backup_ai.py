@@ -339,8 +339,7 @@ def api_modes():
         {"id": "inquiry",        "label": "Customer Inquiry"}
     ])
 
-# Map routes
-# ─── Map page (no-cache, cache-bust token) ───────────────────────────────
+# ─── Map routes ───────────────────────────────────────────────────────────
 # ─── Map routes ───────────────────────────────────────────────────────────
 @app.route("/map")
 @login_required
@@ -366,6 +365,7 @@ def api_locations():
     """
     import csv, json, re
     import pandas as pd
+    from difflib import get_close_matches
     from flask import Response
 
     # -------- helpers --------
@@ -413,8 +413,12 @@ def api_locations():
 
     try:
         rep_df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
-        REP_CANDS = ["Sales Rep Name", "Rep Name", "Sales Rep", "Territory"]
-        REP_COL = next((c for c in REP_CANDS if c in rep_df.columns), None)
+
+        # Use ONLY the column you said
+        if "Sales Rep Name" in rep_df.columns:
+            REP_COL = "Sales Rep Name"
+        else:
+            REP_COL = None
 
         if REP_COL:
             SOLD_COL = "Sold to Name"
@@ -454,9 +458,13 @@ def api_locations():
                     st = r.get("_state", "")
                     if cn and st:
                         rep_idx_norm_city_state.setdefault(f"{nval}|{cn}|{st}", rep)
+
+            rep_norm_keys = list(rep_idx_norm.keys())
+        else:
+            rep_norm_keys = []
     except Exception as e:
         print("⚠️ customer_report.csv not available for rep coloring:", e)
-        # rep lookups will just return None → "Unassigned"
+        rep_norm_keys = []
 
     def lookup_rep(name: str, city: str, state: str, zipc: str) -> str:
         if not name:
@@ -477,6 +485,11 @@ def api_locations():
             return rep_idx_norm_city_state[key_cs]
         if n in rep_idx_norm:
             return rep_idx_norm[n]
+        # fuzzy fallback to reduce "Unassigned"
+        if rep_norm_keys:
+            guess = get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
+            if guess:
+                return rep_idx_norm.get(guess[0])
         return None
 
     # -------- read customer_location.csv and emit points --------
@@ -514,7 +527,6 @@ def api_locations():
                     "sales_rep": rep,
                     "lat": lat,
                     "lon": lon,
-                    # compatibility field some client code reads:
                     "County State": cs_raw
                 })
     except FileNotFoundError:
@@ -535,18 +547,14 @@ def service_worker():
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     """
-    Build AI insight from customer_report.csv using the *correct* row(s):
-      - Prefer Sold to Name / Ship to Name exact (case-insensitive)
-      - Then normalized name (strip suffixes/punct)
-      - If zip/city/state provided, use them to disambiguate
-      - If multiple rows match, aggregate by Sold to ID (company-level)
+    Build AI insight from customer_report.csv using the *correct* row(s).
+    Returns a brief analysis that includes the actual dollar figures.
     """
-    import re
+    import re, os
     import pandas as pd
     from flask import jsonify, request
     from difflib import get_close_matches
     from openai import OpenAI
-    import os
 
     try:
         payload = request.get_json(force=True) or {}
@@ -558,20 +566,19 @@ def ai_map_analysis():
         if not customer_raw:
             return jsonify({"error": "Customer name required"}), 400
 
-        # ---- load and normalize CSV (all as strings) ----
         try:
             df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
         except Exception as e:
             print("❌ ai_map_analysis read error:", e)
             return jsonify({"error": "Could not read customer_report.csv"}), 500
 
-        # Column names used
         SOLD  = "Sold to Name"
         SHIP  = "Ship to Name"
         SOLD_ID = "Sold to ID"
         CITY  = "City"
         ZIP   = "Zip Code"
-        CST   = "County State"  # e.g., "Marion IN" => IN
+        CST   = "County State"
+        SEG   = "R12 Segment (Sold to ID)"
 
         REV_COLS = [
             "New Equip R36 Revenue",
@@ -584,45 +591,35 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket",
         ]
 
-        # helpers
         def strip_suffixes(s: str) -> str:
-            return re.sub(
-                r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                "", s or "", flags=re.IGNORECASE
-            )
-
+            return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+                          "", s or "", flags=re.IGNORECASE)
         def norm_name(s: str) -> str:
             s = strip_suffixes(s)
             s = s.lower()
             s = re.sub(r"[^a-z0-9]+", " ", s)
             return re.sub(r"\s+", " ", s).strip()
-
         def state_from_cst(v: str) -> str:
             parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
             return parts[-1].upper() if len(parts) >= 2 else ""
-
         def zip5(z: str) -> str:
             m = re.search(r"\d{5}", (z or ""))
             return m.group(0) if m else ""
-
         def money_to_float(v) -> float:
             if v is None:
                 return 0.0
-            s = str(v).strip()
-            if s == "":
-                return 0.0
-            s = s.replace("$", "").replace(",", "").strip()
+            s = str(v).strip().replace("$","").replace(",","")
             try:
-                return float(s)
+                return float(s) if s else 0.0
             except Exception:
                 m = re.search(r"-?\d+(\.\d+)?", s)
                 return float(m.group(0)) if m else 0.0
 
-        # Precompute normalized name, zip5, city/state for each row
         df["_sold_norm"] = df[SOLD].apply(norm_name)
         df["_ship_norm"] = df[SHIP].apply(norm_name)
         df["_zip5"]      = df[ZIP].apply(zip5)
-        df["_city_norm"] = df[CITY].str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True).str.replace(r"\s+", " ", regex=True).str.strip()
+        df["_city_norm"] = df[CITY].str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True)\
+                                    .str.replace(r"\s+", " ", regex=True).str.strip()
         df["_state"]     = df[CST].apply(state_from_cst)
 
         cust_norm = norm_name(customer_raw)
@@ -630,7 +627,6 @@ def ai_map_analysis():
         city_norm = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
         state_abbr = state_hint
 
-        # ---- build candidate masks in decreasing strictness ----
         m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
         m_norm  = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
 
@@ -659,12 +655,10 @@ def ai_map_analysis():
                 g = guess[0]
                 hit = df[(df["_sold_norm"] == g) | (df["_ship_norm"] == g)]
 
-        if hit is None or hit.empty:
+        if hit is None or hit.empty():
             print("❌ No match found for:", customer_raw)
             return jsonify({"error": f"No data found for {customer_raw}"}), 200
 
-        # If multiple rows, aggregate by Sold to ID if available, else by Sold to Name
-        chosen_group_id = ""
         if (hit[SOLD_ID] != "").any():
             chosen_group_id = hit[SOLD_ID].iloc[0]
             group_df = df[df[SOLD_ID] == chosen_group_id]
@@ -674,27 +668,32 @@ def ai_map_analysis():
 
         totals = {}
         for col in REV_COLS:
-            if col in group_df.columns:
-                totals[col] = group_df[col].map(money_to_float).sum()
-            else:
-                totals[col] = 0.0
+            totals[col] = group_df[col].map(money_to_float).sum() if col in group_df.columns else 0.0
+
+        seg_val = ""
+        if SEG in group_df.columns and not group_df[SEG].empty:
+            seg_val = str(group_df[SEG].mode().iat[0]).strip()
 
         display_name = customer_raw or (hit[SOLD].iloc[0] or hit[SHIP].iloc[0])
 
-        lines = [f"Customer: {display_name}",
-                 "Here are the latest financial metrics for this customer:",
-                 ""]
+        # build a short metrics preface + top drivers
+        lines = [f"Customer: {display_name}"]
+        if seg_val:
+            lines.append(f"Segment: {seg_val}")
+        lines.append("Key financial metrics:")
         for k in REV_COLS:
-          lines.append(f"{k}: ${totals[k]:,.2f}")
+            lines.append(f"- {k}: ${totals[k]:,.2f}")
         metrics_block = "\n".join(lines)
 
+        # Make the model include numbers in its narrative
         prompt = f"""{metrics_block}
 
-Based on these revenue metrics, give a short and clear insight:
-- What kind of customer is this?
-- What stands out?
-- Where is there potential to upsell forklifts, service, rentals, or parts?
-Keep it brief and analytic.
+Write a concise analysis that USES the dollar figures above in your sentences.
+Requirements:
+- Reference at least the three largest figures by name and amount.
+- 2–4 bullet points on what's driving results (with numbers inline).
+- 1–3 bullets for next actions (upsell forklifts, service, rentals, parts), also referencing numbers where relevant.
+Keep it crisp and sales-focused.
 """
 
         try:
@@ -715,9 +714,9 @@ Keep it brief and analytic.
         return jsonify({
             "result": analysis or metrics_block,
             "metrics": totals,
+            "segment": seg_val,
             "matched_rows": int(len(hit)),
-            "aggregated": bool(chosen_group_id),
-            "group_id": chosen_group_id
+            "aggregated": bool((hit[SOLD_ID] != "").any()),
         })
 
     except Exception as e:
@@ -729,16 +728,6 @@ Keep it brief and analytic.
 @app.route("/api/segments")
 @login_required
 def api_segments():
-    """
-    Build multiple lookup keys from customer_report.csv so the map can find the
-    correct segment even when names collide:
-
-    Returns JSON with:
-      - by_exact:            "Sold to Name" or "Ship to Name"  → segment
-      - by_norm:             norm(name)                        → segment
-      - by_norm_zip:         norm(name)|zip5                   → segment
-      - by_norm_city_state:  norm(name)|norm(city)|state_abbr  → segment
-    """
     import pandas as pd, re
     from flask import jsonify
 
@@ -747,7 +736,7 @@ def api_segments():
     SHIP_COL  = "Ship to Name"
     CITY_COL  = "City"
     ZIP_COL   = "Zip Code"
-    CST_COL   = "County State"  # e.g., "Marion IN" → state = "IN"
+    CST_COL   = "County State"
 
     try:
         df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
@@ -758,23 +747,19 @@ def api_segments():
     def strip_suffixes(s: str) -> str:
         return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                       "", s, flags=re.IGNORECASE)
-
     def norm_name(s: str) -> str:
         s = strip_suffixes(s or "")
         s = s.lower()
         s = re.sub(r"[^a-z0-9]+", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
-
     def norm_city(s: str) -> str:
         s = (s or "").lower()
         s = re.sub(r"[^a-z0-9]+", " ", s)
         return re.sub(r"\s+", " ", s).strip()
-
     def state_from_county_state(v: str) -> str:
         parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return parts[-1] if len(parts) >= 2 else ""
-
     def zip5(z: str) -> str:
         m = re.search(r"\d{5}", (z or ""))
         return m.group(0) if m else ""
@@ -816,7 +801,6 @@ def api_segments():
         "by_norm_zip": by_norm_zip,
         "by_norm_city_state": by_norm_city_state
     })
-
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
