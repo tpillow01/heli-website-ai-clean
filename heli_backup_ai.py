@@ -547,10 +547,10 @@ def service_worker():
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     """
-    Build AI insight from customer_report.csv using the *correct* row(s).
+    Build AI insight from customer_report.csv using the correct row(s).
     Returns a brief analysis that includes the actual dollar figures.
     """
-    import re, os
+    import os, re
     import pandas as pd
     from flask import jsonify, request
     from difflib import get_close_matches
@@ -572,13 +572,14 @@ def ai_map_analysis():
             print("❌ ai_map_analysis read error:", e)
             return jsonify({"error": "Could not read customer_report.csv"}), 500
 
-        SOLD  = "Sold to Name"
-        SHIP  = "Ship to Name"
+        # Columns
+        SOLD    = "Sold to Name"
+        SHIP    = "Ship to Name"
         SOLD_ID = "Sold to ID"
-        CITY  = "City"
-        ZIP   = "Zip Code"
-        CST   = "County State"
-        SEG   = "R12 Segment (Sold to ID)"
+        CITY    = "City"
+        ZIP     = "Zip Code"
+        CST     = "County State"
+        SEG     = "R12 Segment (Sold to ID)"
 
         REV_COLS = [
             "New Equip R36 Revenue",
@@ -591,6 +592,7 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket",
         ]
 
+        # Helpers
         def strip_suffixes(s: str) -> str:
             return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                           "", s or "", flags=re.IGNORECASE)
@@ -606,15 +608,16 @@ def ai_map_analysis():
             m = re.search(r"\d{5}", (z or ""))
             return m.group(0) if m else ""
         def money_to_float(v) -> float:
-            if v is None:
+            s = str(v or "").strip().replace("$","").replace(",","")
+            if not s:
                 return 0.0
-            s = str(v).strip().replace("$","").replace(",","")
             try:
-                return float(s) if s else 0.0
+                return float(s)
             except Exception:
                 m = re.search(r"-?\d+(\.\d+)?", s)
                 return float(m.group(0)) if m else 0.0
 
+        # Precompute
         df["_sold_norm"] = df[SOLD].apply(norm_name)
         df["_ship_norm"] = df[SHIP].apply(norm_name)
         df["_zip5"]      = df[ZIP].apply(zip5)
@@ -622,23 +625,24 @@ def ai_map_analysis():
                                     .str.replace(r"\s+", " ", regex=True).str.strip()
         df["_state"]     = df[CST].apply(state_from_cst)
 
-        cust_norm = norm_name(customer_raw)
-        zip_norm  = zip5(zip_hint)
-        city_norm = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
+        cust_norm  = norm_name(customer_raw)
+        zip_norm   = zip5(zip_hint)
+        city_norm  = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
         state_abbr = state_hint
 
+        # Matching
         m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
         m_norm  = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
 
         def refine(mask):
-            m = mask.copy()
+            out = mask.copy()
             if zip_norm:
-                m = m & (df["_zip5"] == zip_norm)
+                out = out & (df["_zip5"] == zip_norm)
             if city_norm:
-                m = m & (df["_city_norm"] == city_norm)
+                out = out & (df["_city_norm"] == city_norm)
             if state_abbr:
-                m = m & (df["_state"] == state_abbr)
-            return m
+                out = out & (df["_state"] == state_abbr)
+            return out
 
         masks = [refine(m_exact), refine(m_norm), m_exact, m_norm]
         hit = None
@@ -655,28 +659,35 @@ def ai_map_analysis():
                 g = guess[0]
                 hit = df[(df["_sold_norm"] == g) | (df["_ship_norm"] == g)]
 
-        if hit is None or hit.empty():
+        # ✅ use .empty (property), never call it
+        if hit is None or hit.empty:
             print("❌ No match found for:", customer_raw)
             return jsonify({"error": f"No data found for {customer_raw}"}), 200
 
-        if (hit[SOLD_ID] != "").any():
-            chosen_group_id = hit[SOLD_ID].iloc[0]
-            group_df = df[df[SOLD_ID] == chosen_group_id]
+        # Aggregate by Sold to ID when possible
+        has_any_sold_id = (hit[SOLD_ID].astype(str).str.strip() != "").any()
+        if has_any_sold_id:
+            chosen_group_id = hit[SOLD_ID].astype(str).str.strip().iloc[0]
+            group_df = df[df[SOLD_ID].astype(str).str.strip() == chosen_group_id]
         else:
             base_norm = norm_name(hit[SOLD].iloc[0])
             group_df = df[df[SOLD].apply(norm_name) == base_norm]
 
+        # Totals
         totals = {}
         for col in REV_COLS:
             totals[col] = group_df[col].map(money_to_float).sum() if col in group_df.columns else 0.0
 
+        # Segment (full code like "C3")
         seg_val = ""
-        if SEG in group_df.columns and not group_df[SEG].empty:
-            seg_val = str(group_df[SEG].mode().iat[0]).strip()
+        if SEG in group_df.columns:
+            mode_series = group_df[SEG].astype(str).str.strip().replace("", pd.NA).dropna().mode()
+            if not mode_series.empty:
+                seg_val = str(mode_series.iat[0])
 
-        display_name = customer_raw or (hit[SOLD].iloc[0] or hit[SHIP].iloc[0])
+        display_name = customer_raw or (hit[SOLD].iloc[0] if SOLD in hit.columns else "")
 
-        # build a short metrics preface + top drivers
+        # Metrics block (explicit numbers)
         lines = [f"Customer: {display_name}"]
         if seg_val:
             lines.append(f"Segment: {seg_val}")
@@ -685,14 +696,13 @@ def ai_map_analysis():
             lines.append(f"- {k}: ${totals[k]:,.2f}")
         metrics_block = "\n".join(lines)
 
-        # Make the model include numbers in its narrative
         prompt = f"""{metrics_block}
 
 Write a concise analysis that USES the dollar figures above in your sentences.
 Requirements:
 - Reference at least the three largest figures by name and amount.
 - 2–4 bullet points on what's driving results (with numbers inline).
-- 1–3 bullets for next actions (upsell forklifts, service, rentals, parts), also referencing numbers where relevant.
+- 1–3 bullets for next actions (upsell forklifts, service, rentals, parts), referencing numbers where relevant.
 Keep it crisp and sales-focused.
 """
 
@@ -711,19 +721,21 @@ Keep it crisp and sales-focused.
             print("❌ OpenAI error:", e)
             analysis = None
 
+        # don’t call bool(); avoid any chance of shadowing
+        aggregated_flag = True if has_any_sold_id else False
+
         return jsonify({
             "result": analysis or metrics_block,
             "metrics": totals,
             "segment": seg_val,
             "matched_rows": int(len(hit)),
-            "aggregated": bool((hit[SOLD_ID] != "").any()),
+            "aggregated": aggregated_flag,
         })
 
     except Exception as e:
         print("❌ Error during AI map analysis:", e)
         return jsonify({"error": str(e)}), 500
-
-
+    
 # --- Segment lookup for map popups (from customer_report.csv) --------------
 @app.route("/api/segments")
 @login_required
