@@ -341,68 +341,197 @@ def api_modes():
 
 # Map routes
 # ─── Map page (no-cache, cache-bust token) ───────────────────────────────
+# ─── Map routes ───────────────────────────────────────────────────────────
 @app.route("/map")
 @login_required
 def map_page():
-    """
-    Serve map.html and force no-cache so front-end changes show up immediately.
-    Also passes a simple cache-bust token you can use in the template if needed.
-    """
-    import time
-    asset_version = os.getenv("ASSET_VERSION") or str(int(time.time()))
-    html = render_template("map.html", asset_version=asset_version)
-
-    resp = make_response(html)
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
+    return render_template("map.html")
 
 
 @app.route("/api/locations")
 @login_required
 def api_locations():
-    from data_sources import get_locations_with_geo
-    items = get_locations_with_geo()
+    """
+    Build map points from customer_location.csv (your exact headers) and
+    attach Sales Rep from customer_report.csv for territory coloring.
+
+    customer_location.csv headers (exact):
+      - Account Name
+      - City
+      - Address
+      - County State        (e.g., "Vigo IN")
+      - Zip Code
+      - Min of Latitude
+      - Min of Longitude
+    """
+    import csv, json, re
+    import pandas as pd
+    from flask import Response
+
+    # -------- helpers --------
+    def strip_suffixes(s: str) -> str:
+        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+                      "", s or "", flags=re.IGNORECASE)
+
+    def norm_name(s: str) -> str:
+        s = strip_suffixes(s or "")
+        s = s.lower()
+        s = re.sub(r"[^a-z0-9]+", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    def norm_city(s: str) -> str:
+        s = (s or "").lower()
+        s = re.sub(r"[^a-z0-9]+", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    def state_from_county_state(v: str) -> str:
+        parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
+        return parts[-1].upper() if len(parts) >= 2 else ""
+
+    def county_from_county_state(v: str) -> str:
+        parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
+        return " ".join(parts[:-1]) if len(parts) >= 2 else ""
+
+    def zip5(z: str) -> str:
+        m = re.search(r"\d{5}", str(z or ""))
+        return m.group(0) if m else ""
+
+    def to_float(x):
+        try:
+            v = float(str(x).strip())
+            if v != v:  # NaN
+                return None
+            return v
+        except Exception:
+            return None
+
+    # -------- build rep index from customer_report.csv --------
+    rep_idx_exact = {}
+    rep_idx_norm = {}
+    rep_idx_norm_zip = {}
+    rep_idx_norm_city_state = {}
+
+    try:
+        rep_df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        REP_CANDS = ["Sales Rep Name", "Rep Name", "Sales Rep", "Territory"]
+        REP_COL = next((c for c in REP_CANDS if c in rep_df.columns), None)
+
+        if REP_COL:
+            SOLD_COL = "Sold to Name"
+            SHIP_COL = "Ship to Name"
+            CITY_COL = "City"
+            ZIP_COL  = "Zip Code"
+            CST_COL  = "County State"
+
+            rep_df["_sold_norm"] = rep_df.get(SOLD_COL, "").apply(norm_name)
+            rep_df["_ship_norm"] = rep_df.get(SHIP_COL, "").apply(norm_name)
+            rep_df["_zip5"]      = rep_df.get(ZIP_COL, "").apply(zip5)
+            rep_df["_city_norm"] = rep_df.get(CITY_COL, "").str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True)\
+                                                     .str.replace(r"\s+", " ", regex=True).str.strip()
+            rep_df["_state"]     = rep_df.get(CST_COL, "").apply(state_from_county_state)
+
+            for _, r in rep_df.iterrows():
+                rep = (r.get(REP_COL, "") or "").strip()
+                if not rep:
+                    continue
+
+                # exact
+                for col in (SOLD_COL, SHIP_COL):
+                    nm = (r.get(col, "") or "").strip()
+                    if nm:
+                        rep_idx_exact.setdefault(nm, rep)
+
+                # normalized + disambiguators
+                for nval in (r.get("_sold_norm", ""), r.get("_ship_norm", "")):
+                    nval = (nval or "").strip()
+                    if not nval:
+                        continue
+                    rep_idx_norm.setdefault(nval, rep)
+                    z = r.get("_zip5", "")
+                    if z:
+                        rep_idx_norm_zip.setdefault(f"{nval}|{z}", rep)
+                    cn = r.get("_city_norm", "")
+                    st = r.get("_state", "")
+                    if cn and st:
+                        rep_idx_norm_city_state.setdefault(f"{nval}|{cn}|{st}", rep)
+    except Exception as e:
+        print("⚠️ customer_report.csv not available for rep coloring:", e)
+        # rep lookups will just return None → "Unassigned"
+
+    def lookup_rep(name: str, city: str, state: str, zipc: str) -> str:
+        if not name:
+            return None
+        # exact
+        if name in rep_idx_exact:
+            return rep_idx_exact[name]
+        n = norm_name(name)
+        if not n:
+            return None
+        z5 = zip5(zipc)
+        if z5 and f"{n}|{z5}" in rep_idx_norm_zip:
+            return rep_idx_norm_zip[f"{n}|{z5}"]
+        cn = norm_city(city)
+        st = (state or "").upper()
+        key_cs = f"{n}|{cn}|{st}" if cn and st else None
+        if key_cs and key_cs in rep_idx_norm_city_state:
+            return rep_idx_norm_city_state[key_cs]
+        if n in rep_idx_norm:
+            return rep_idx_norm[n]
+        return None
+
+    # -------- read customer_location.csv and emit points --------
+    items = []
+    try:
+        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                name    = (row.get("Account Name", "") or "").strip()
+                city    = (row.get("City", "") or "").strip()
+                address = (row.get("Address", "") or "").strip()
+                cs_raw  = (row.get("County State", "") or "").strip()
+                county  = county_from_county_state(cs_raw)
+                state   = state_from_county_state(cs_raw)
+                zipc    = zip5(row.get("Zip Code", ""))
+
+                lat = to_float(row.get("Min of Latitude", ""))
+                lon = to_float(row.get("Min of Longitude", ""))
+
+                # require valid coordinates
+                if lat is None or lon is None:
+                    continue
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                    continue
+
+                rep = lookup_rep(name, city, state, zipc) or "Unassigned"
+
+                items.append({
+                    "label": name or "Unknown",
+                    "address": address,
+                    "city": city,
+                    "state": state,
+                    "county": county,
+                    "zip": zipc,
+                    "sales_rep": rep,
+                    "lat": lat,
+                    "lon": lon,
+                    # compatibility field some client code reads:
+                    "County State": cs_raw
+                })
+    except FileNotFoundError:
+        return Response(json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
+    except Exception as e:
+        print("❌ /api/locations error:", e)
+        return Response(json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
+
     return Response(json.dumps(items, allow_nan=False), mimetype="application/json")
 
-# Debug endpoint to inspect server-side aggregates
-@app.route("/api/inquiry_preview")
-@login_required
-def inquiry_preview():
-    from data_sources import (
-        build_inquiry_brief, find_inquiry_rows_flexible,
-        _aggregate_billing, _aggregate_report_r12,
-        get_report_headers, get_billing_headers, _pick_name
-    )
-    q = (request.args.get("q") or "").strip()
-    if not q:
-        return jsonify({"error": "pass ?q=Customer Name"}), 400
-
-    rows = find_inquiry_rows_flexible(customer_name=q)
-    rep_rows = rows["report"]
-    bil_rows = rows["billing"]
-    if not rep_rows and not bil_rows:
-        return jsonify({"error": "not found"}), 404
-
-    brief = build_inquiry_brief(q) or {}
-    return jsonify({
-        "name": brief.get("inferred_name"),
-        "counts": {"report": len(rep_rows), "billing": len(bil_rows)},
-        "report_headers": get_report_headers(),
-        "billing_headers": get_billing_headers(),
-        "matched_names": list({ _pick_name(r) for r in (rep_rows + bil_rows) })[:5],
-        "billing_agg": _aggregate_billing(bil_rows),
-        "report_agg": _aggregate_report_r12(rep_rows),
-        "recent_invoices": brief.get("recent_invoices", []),
-        "context_block": brief.get("context_block", "")
-    })
 
 @app.route('/service-worker.js')
 def service_worker():
     return app.send_static_file('service-worker.js')
 
-# ─── AI Map Analysis Endpoint ─────────────────────────────────────────────
+
+# ─── AI Map Analysis Endpoint (customer_report.csv) ───────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     """
@@ -414,7 +543,10 @@ def ai_map_analysis():
     """
     import re
     import pandas as pd
+    from flask import jsonify, request
     from difflib import get_close_matches
+    from openai import OpenAI
+    import os
 
     try:
         payload = request.get_json(force=True) or {}
@@ -483,7 +615,6 @@ def ai_map_analysis():
             try:
                 return float(s)
             except Exception:
-                # handle things like "$0 " or stray chars
                 m = re.search(r"-?\d+(\.\d+)?", s)
                 return float(m.group(0)) if m else 0.0
 
@@ -500,13 +631,9 @@ def ai_map_analysis():
         state_abbr = state_hint
 
         # ---- build candidate masks in decreasing strictness ----
-        # 1) exact case-insensitive on sold/ship
         m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
+        m_norm  = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
 
-        # 2) normalized name match
-        m_norm = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
-
-        # refine by zip/city/state if provided
         def refine(mask):
             m = mask.copy()
             if zip_norm:
@@ -517,14 +644,7 @@ def ai_map_analysis():
                 m = m & (df["_state"] == state_abbr)
             return m
 
-        # Try strict → less strict
-        masks = [
-            refine(m_exact),
-            refine(m_norm),
-            m_exact,
-            m_norm
-        ]
-
+        masks = [refine(m_exact), refine(m_norm), m_exact, m_norm]
         hit = None
         for mk in masks:
             cand = df[mk]
@@ -532,7 +652,6 @@ def ai_map_analysis():
                 hit = cand
                 break
 
-        # 3) last-resort fuzzy on normalized names
         if hit is None:
             all_norms = list(set(df["_sold_norm"].tolist() + df["_ship_norm"].tolist()))
             guess = get_close_matches(cust_norm, all_norms, n=1, cutoff=0.92)
@@ -550,33 +669,25 @@ def ai_map_analysis():
             chosen_group_id = hit[SOLD_ID].iloc[0]
             group_df = df[df[SOLD_ID] == chosen_group_id]
         else:
-            # Fallback: aggregate all rows whose sold-to name normalizes to the same value
-            base_norm = hit[SOLD].iloc[0]
-            base_norm = norm_name(base_norm)
+            base_norm = norm_name(hit[SOLD].iloc[0])
             group_df = df[df[SOLD].apply(norm_name) == base_norm]
 
-        # Build numeric totals
         totals = {}
         for col in REV_COLS:
             if col in group_df.columns:
-                totals[col] = money_to_float(group_df[col].map(money_to_float).sum())
+                totals[col] = group_df[col].map(money_to_float).sum()
             else:
                 totals[col] = 0.0
 
-        # Prefer a readable company display name
-        display_name = customer_raw
-        if not display_name and not hit.empty:
-            display_name = hit[SOLD].iloc[0] or hit[SHIP].iloc[0]
+        display_name = customer_raw or (hit[SOLD].iloc[0] or hit[SHIP].iloc[0])
 
-        # Format the metrics block
         lines = [f"Customer: {display_name}",
                  "Here are the latest financial metrics for this customer:",
                  ""]
         for k in REV_COLS:
-            lines.append(f"{k}: ${totals[k]:,.2f}")
+          lines.append(f"{k}: ${totals[k]:,.2f}")
         metrics_block = "\n".join(lines)
 
-        # Build the specific AI prompt you requested
         prompt = f"""{metrics_block}
 
 Based on these revenue metrics, give a short and clear insight:
@@ -586,7 +697,6 @@ Based on these revenue metrics, give a short and clear insight:
 Keep it brief and analytic.
 """
 
-        # Call OpenAI
         try:
             oai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             resp = oai.chat.completions.create(
@@ -602,9 +712,8 @@ Keep it brief and analytic.
             print("❌ OpenAI error:", e)
             analysis = None
 
-        # Return result (and include the metrics we used so you can eyeball in UI/logs if needed)
         return jsonify({
-            "result": analysis or metrics_block,   # fall back to metrics block if AI call fails
+            "result": analysis or metrics_block,
             "metrics": totals,
             "matched_rows": int(len(hit)),
             "aggregated": bool(chosen_group_id),
@@ -615,7 +724,8 @@ Keep it brief and analytic.
         print("❌ Error during AI map analysis:", e)
         return jsonify({"error": str(e)}), 500
 
-# --- Segment lookup for map popups (from customer_report.csv) -----------------
+
+# --- Segment lookup for map popups (from customer_report.csv) --------------
 @app.route("/api/segments")
 @login_required
 def api_segments():
@@ -628,8 +738,6 @@ def api_segments():
       - by_norm:             norm(name)                        → segment
       - by_norm_zip:         norm(name)|zip5                   → segment
       - by_norm_city_state:  norm(name)|norm(city)|state_abbr  → segment
-
-    Where norm() lowercases, removes punctuation and company suffixes (Inc/LLC/etc).
     """
     import pandas as pd, re
     from flask import jsonify
@@ -637,7 +745,6 @@ def api_segments():
     SEG_COL   = "R12 Segment (Sold to ID)"
     SOLD_COL  = "Sold to Name"
     SHIP_COL  = "Ship to Name"
-    ADDR_COL  = "Address"
     CITY_COL  = "City"
     ZIP_COL   = "Zip Code"
     CST_COL   = "County State"  # e.g., "Marion IN" → state = "IN"
@@ -649,7 +756,6 @@ def api_segments():
         return jsonify({"by_exact": {}, "by_norm": {}, "by_norm_zip": {}, "by_norm_city_state": {}}), 200
 
     def strip_suffixes(s: str) -> str:
-        # remove common company suffixes
         return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                       "", s, flags=re.IGNORECASE)
 
@@ -666,7 +772,6 @@ def api_segments():
         return re.sub(r"\s+", " ", s).strip()
 
     def state_from_county_state(v: str) -> str:
-        # "Marion IN" → "IN"
         parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return parts[-1] if len(parts) >= 2 else ""
 
@@ -693,10 +798,8 @@ def api_segments():
             if not name:
                 continue
 
-            # exact
             by_exact.setdefault(name, seg)
 
-            # normalized
             n = norm_name(name)
             if n:
                 by_norm.setdefault(n, seg)
@@ -713,6 +816,7 @@ def api_segments():
         "by_norm_zip": by_norm_zip,
         "by_norm_city_state": by_norm_city_state
     })
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))

@@ -168,7 +168,6 @@
     function normCompanyName(s) {
       if (!s) return '';
       s = s.toLowerCase();
-      // remove company suffixes
       s = s.replace(/\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b/gi, '');
       s = s.replace(/[^a-z0-9]+/g, ' ');
       s = s.replace(/\s+/g, ' ').trim();
@@ -187,32 +186,27 @@
       const state = (p.state || '').toUpperCase();
       const z5    = zip5(p.zip);
 
-      // 1) exact name
       if (SEG_INDEX.by_exact[name]) return SEG_INDEX.by_exact[name];
 
       const n = normCompanyName(name);
       if (!n) return '';
 
-      // 2) norm + zip
       if (z5 && SEG_INDEX.by_norm_zip[`${n}|${z5}`]) return SEG_INDEX.by_norm_zip[`${n}|${z5}`];
 
-      // 3) norm + city + state
       const nc = normCity(city);
       if (nc && state && SEG_INDEX.by_norm_city_state[`${n}|${nc}|${state}`])
         return SEG_INDEX.by_norm_city_state[`${n}|${nc}|${state}`];
 
-      // 4) bare normalized
       if (SEG_INDEX.by_norm[n]) return SEG_INDEX.by_norm[n];
 
-      // 5) fallback (whatever came from locations API)
       return p.segment || '';
     }
 
-    // --- helpers to clean/derive fields client-side ---
+    // --- helpers to clean/derive fields client-side (format lines exactly like you asked) ---
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
 
-      // County/State can be like "Marion IN"
+      // County/State like "Greene IN"
       let state = p.state || p.State || '';
       let county = p.county || p.County || '';
       const countyStateRaw = p['County State'] || p.county_state || '';
@@ -228,18 +222,17 @@
       const city = p.City || p.city || '';
       const zip = String(p['Zip Code'] || p.zip || '').trim();
 
-      const full_address = p.full_address || [
+      // Format: "8037 W STATE RD 54, SWITZ CITY, IN, 47465, USA"
+      const full_address = [
         address,
         [city, state].filter(Boolean).join(', '),
-        zip
-      ].filter(Boolean).join(' ').trim();
+        zip,
+        'USA'
+      ].filter(Boolean).join(', ');
 
       const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
 
-      // DO NOT trust p.segment; we’ll fetch from /api/segments
-      const segment = ''; // placeholder; we’ll compute at popup time
-
-      // Coords sanity
+      // coords sanity
       let lat = p.lat, lon = p.lon;
       lat = lat == null ? null : parseFloat(lat);
       lon = lon == null ? null : parseFloat(lon);
@@ -247,7 +240,7 @@
         lat = null; lon = null;
       }
 
-      return { label, full_address, address, city, state, county, zip, sales_rep, segment, lat, lon };
+      return { label, full_address, address, city, state, county, zip, sales_rep, segment: '', lat, lon };
     }
 
     function withinRepFilter(pt) {
@@ -258,7 +251,6 @@
     function withinSegFilter(pt) {
       const want = segFilter.value;
       if (want === '__ALL__') return true;
-      // segment like "D3" → first letter
       const seg = lookupSegmentForPoint(pt) || '';
       const letter = seg ? seg[0] : '';
       return letter === want;
@@ -278,18 +270,20 @@
     }
 
     // GLOBAL so inline onclick can call it
-    window.askAIAboutCustomer = async function(name, city, zip, address) {
+    window.askAIAboutCustomer = async function(name, city, zip, address, state) {
       const container = document.getElementById('aiContainer');
       const content = document.getElementById('aiContent');
+      const heading = document.querySelector('#aiContainer h3');
 
       container.style.display = 'block';
+      if (heading) heading.textContent = `AI Insights — ${name}`;
       content.innerHTML = `<p><em>Loading AI analysis for <b>${name}</b>...</em></p>`;
 
       try {
         const res = await fetch('/api/ai_map_analysis', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customer: name, city, zip, address })
+          body: JSON.stringify({ customer: name, city, zip, address, state })
         });
         const data = await res.json();
         const text = (data.response ?? data.result ?? '').toString().trim();
@@ -320,14 +314,22 @@
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const seg = lookupSegmentForPoint(p) || '-';
+          const segFull = lookupSegmentForPoint(p) || '-';
+          const segLetter = segFull ? segFull[0] : '-';
           const popupHtml = `
-            <b>${p.label}</b><br/>
-            ${p.full_address}<br/>
-            <i>${p.sales_rep || 'Unassigned'}</i><br/>
-            State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-            Segment: ${seg}<br/>
-            <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}')">Run AI Analysis</button>
+            <div style="font:14px/1.35 system-ui, sans-serif;">
+              <div style="font-weight:700;">${p.label}</div>
+              <div>${p.full_address}</div>
+              <div>${p.sales_rep || 'Unassigned'}</div>
+              <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
+              <div>Segment: ${segLetter}</div>
+              <div style="margin-top:6px;">
+                <button style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
+                        onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')">
+                  Run AI Analysis
+                </button>
+              </div>
+            </div>
           `;
           L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);
         });
