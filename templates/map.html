@@ -10,36 +10,18 @@
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 
   <style>
-    :root {
-      --brand: #cc0000;
-      --ink: #1f1f1f;
-      --bg: #f7f7f8;
-      --card: #ffffff;
-    }
-    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); }
-    .topbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 12px; background: var(--card); border-bottom: 1px solid #e6e6e8;
-      gap: 10px; flex-wrap: wrap;
-    }
-    .title { font-weight: 600; }
+    :root { --brand:#cc0000; --ink:#1f1f1f; --bg:#f7f7f8; --card:#ffffff; }
+    html,body { height:100%; margin:0; background:var(--bg); color:var(--ink); }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--card); border-bottom:1px solid #e6e6e8; gap:10px; flex-wrap:wrap; }
+    .title { font-weight:600; }
     .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .controls label { font-size: 13px; color:#333; display:flex; gap:6px; align-items:center; }
-    .controls select, .controls input[type="text"] {
-      padding: 6px 10px; border-radius: 8px; border:1px solid #d0d0d5; background:#fff; font-size:14px;
-    }
-    .controls a {
-      padding:6px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; text-decoration:none; color:var(--ink);
-    }
-    .controls a:hover { border-color: var(--brand); color: var(--brand); }
-
+    .controls label { font-size:13px; color:#333; display:flex; gap:6px; align-items:center; }
+    .controls select, .controls input[type="text"] { padding:6px 10px; border-radius:8px; border:1px solid #d0d0d5; background:#fff; font-size:14px; }
+    .controls a { padding:6px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; text-decoration:none; color:var(--ink); }
+    .controls a:hover { border-color:var(--brand); color:var(--brand); }
     #map { height: calc(100vh - 60px); width: 100vw; }
 
-    .legend {
-      background: white; padding: 8px 10px; border-radius: 6px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.2); font: 12px/1.1 system-ui, sans-serif;
-      max-height: 30vh; overflow: auto;
-    }
+    .legend { background:#fff; padding:8px 10px; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,0.2); font:12px/1.1 system-ui,sans-serif; max-height:30vh; overflow:auto; }
     .legend .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .legend .swatch { width:14px; height:14px; border-radius:50%; border:1px solid #0002; }
 
@@ -48,7 +30,7 @@
       position: fixed;
       top: 80px;
       right: 20px;
-      max-width: 400px;
+      max-width: 420px;
       max-height: 80vh;
       padding: 18px;
       background: #fff;
@@ -79,14 +61,10 @@
   <div class="topbar">
     <div class="title">Customer Map</div>
     <div class="controls">
-      <label>
-        Territory
-        <select id="repFilter">
-          <option value="__ALL__">All</option>
-        </select>
+      <label>Territory
+        <select id="repFilter"><option value="__ALL__">All</option></select>
       </label>
-      <label>
-        Segment
+      <label>Segment
         <select id="segFilter">
           <option value="__ALL__">All</option>
           <option value="A">A only</option>
@@ -95,25 +73,10 @@
           <option value="D">D only</option>
         </select>
       </label>
-      <label>
-        State
-        <select id="stateFilter">
-          <option value="__ALL__">All</option>
-        </select>
-      </label>
-      <label>
-        County
-        <select id="countyFilter" disabled>
-          <option value="__ALL__">All</option>
-        </select>
-      </label>
-      <label>
-        ZIP
-        <input id="zipFilter" type="text" placeholder="Exact ZIP" size="8" />
-      </label>
-      <label>
-        <input type="checkbox" id="heatToggle"> Heatmap Mode
-      </label>
+      <label>State <select id="stateFilter"><option value="__ALL__">All</option></select></label>
+      <label>County <select id="countyFilter" disabled><option value="__ALL__">All</option></select></label>
+      <label>ZIP <input id="zipFilter" type="text" placeholder="Exact ZIP" size="8" /></label>
+      <label><input type="checkbox" id="heatToggle"> Heatmap Mode</label>
       <a href="{{ url_for('home') }}" aria-label="Back to Chat">← Back to Chat</a>
     </div>
   </div>
@@ -128,31 +91,17 @@
   </div>
 
   <script>
-    // ---------- Map setup ----------
     const map = L.map('map', { scrollWheelZoom: true }).setView([39.8, -98.6], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; OpenStreetMap'
-    }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
 
-    // ---------- Color palette ----------
-    const palette = [
-      '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2',
-      '#7f7f7f','#bcbd22','#17becf','#393b79','#637939','#8c6d31','#843c39',
-      '#7b4173','#3182bd','#e6550d','#31a354','#756bb1','#969696'
-    ];
+    const palette = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf','#393b79','#637939','#8c6d31','#843c39','#7b4173','#3182bd','#e6550d','#31a354','#756bb1','#969696'];
     const repIndex = new Map();
-    const colorForRep = (rep) => {
-      if (!repIndex.has(rep)) repIndex.set(rep, repIndex.size % palette.length);
-      return palette[repIndex.get(rep)];
-    };
+    const colorForRep = (rep) => { if (!repIndex.has(rep)) repIndex.set(rep, repIndex.size % palette.length); return palette[repIndex.get(rep)]; };
 
-    // ---------- State ----------
     let allPoints = [];
-    let segmentsIndex = null; // will load from /api/segments
+    let segments = null; // fetched from /api/segments
     let layerGroup = L.featureGroup().addTo(map);
-    let legendControl;
-    let heatLayer = null;
+    let legendControl, heatLayer = null;
 
     const repFilter    = document.getElementById('repFilter');
     const segFilter    = document.getElementById('segFilter');
@@ -161,120 +110,93 @@
     const zipFilter    = document.getElementById('zipFilter');
     const heatToggle   = document.getElementById('heatToggle');
 
-    // ---------- Helpers ----------
     function markerStyle(rep) {
       const base = colorForRep(rep || 'Unassigned');
       return { radius: 7, weight: 1, color: '#333', fillColor: base, fillOpacity: 0.9 };
     }
 
-    function zip5(z) {
-      const m = String(z || "").match(/\d{5}/);
-      return m ? m[0] : "";
-    }
-    function stateFromCountyState(v) {
-      const parts = String(v || "").trim().split(/\s+/);
-      return parts.length >= 2 ? parts[parts.length - 1].toUpperCase() : "";
-    }
-    function stripSuffixes(s) {
-      return String(s || "").replace(/\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b/ig, "");
-    }
-    function normName(s) {
-      return stripSuffixes(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    // --- helpers ---
+    function moneyToNumber(v){ if(v==null) return 0; const s=String(v).replace(/\$/g,'').replace(/,/g,'').trim(); const n=parseFloat(s); return Number.isFinite(n)?n:0; }
+    function zip5(z){ const m=String(z||'').match(/\d{5}/); return m?m[0]:''; }
+    function normText(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim(); }
+    function normName(name){
+      // remove company suffixes then normalize
+      const s = String(name||'').replace(/\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b/gi,'');
+      return normText(s);
     }
 
-    // Build a clean object from raw point row (from /api/locations)
     function deriveFields(p) {
       const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
-
-      const address = p.Address || p.address || "";
-      const city    = p.City || p.city || "";
-      let state     = p.state || p.State || "";
-      const zip     = zip5(p['Zip Code'] || p.zip || "");
-      let county    = p.county || p.County || "";
-
-      if (!state && p['County State']) {
-        const sAbbr = stateFromCountyState(p['County State']);
-        if (sAbbr) state = sAbbr;
+      let state = p.state || p.State || '';
+      let county = p.county || p.County || '';
+      const countyStateRaw = p['County State'] || p.county_state || '';
+      if ((!county || !state) && countyStateRaw) {
+        const parts = String(countyStateRaw).trim().split(/\s+/);
+        if (parts.length >= 2) {
+          state = state || parts[parts.length - 1];
+          county = county || parts.slice(0, -1).join(' ');
+        }
       }
-      if (!county && p['County State']) {
-        const parts = String(p['County State']).trim().split(/\s+/);
-        if (parts.length >= 2) county = parts.slice(0, -1).join(' ');
-      }
-
-      const full_address = p.full_address ||
-        [address, [city, state].filter(Boolean).join(', '), zip].filter(Boolean).join(' ').trim();
-
+      const address = p.Address || p.address || '';
+      const city    = p.City || p.city || '';
+      const zip     = String(p['Zip Code'] || p.zip || '').trim();
+      const full_address = p.full_address || [
+        address, [city, state].filter(Boolean).join(', '), zip
+      ].filter(Boolean).join(' ').trim();
       const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
 
-      // coordinates sanity check
+      // Resolve segment using /api/segments maps (Sold-to-based)
+      const seg = resolveSegment({ name: label, city, state, zip });
+
+      // Aftermarket R12 for heat only (not shown in popup)
+      let total_r12 = p['Revenue Rolling 12 Months - Aftermarket'];
+      total_r12 = moneyToNumber(total_r12);
+
+      // coords
       let lat = p.lat, lon = p.lon;
       lat = lat == null ? null : parseFloat(lat);
       lon = lon == null ? null : parseFloat(lon);
-      if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
-        lat = null; lon = null;
-      }
+      if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) { lat = null; lon = null; }
 
-      // This 'segment' will be replaced by /api/segments match if available
-      const segment = p.segment || p['R12 Segment (Ship to ID)'] || '';
-
-      return { label, address, city, state, zip, county, full_address, sales_rep, lat, lon, segment };
+      return { label, full_address, address, city, state, county, zip, sales_rep, segment: seg, total_r12, lat, lon };
     }
 
-    // Resolve segment using /api/segments lookups
-    function resolveSegmentForPoint(pt) {
-      if (!segmentsIndex) return pt.segment || '-';
+    function resolveSegment({name, city, state, zip}) {
+      if (!segments) return '-';
+      const n  = normName(name);
+      const z5 = zip5(zip);
+      const cn = normText(city);
+      const st = String(state||'').toUpperCase();
 
-      const name = pt.label || '';
-      const n = normName(name);
-      const z = zip5(pt.zip);
-      const st = (pt.state || '').toUpperCase();
-      const cityNorm = (pt.city || '').toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-
-      const ex    = segmentsIndex.by_exact || {};
-      const byNorm= segmentsIndex.by_norm || {};
-      const byZIP = segmentsIndex.by_norm_zip || {};
-      const byCS  = segmentsIndex.by_norm_city_state || {};
-
-      if (ex[name]) return ex[name];
-
-      const stripped = stripSuffixes(name).trim();
-      if (ex[stripped]) return ex[stripped];
-
-      if (z && byZIP[`${n}|${z}`]) return byZIP[`${n}|${z}`];
-      if (cityNorm && st && byCS[`${n}|${cityNorm}|${st}`]) return byCS[`${n}|${cityNorm}|${st}`];
-      if (byNorm[n]) return byNorm[n];
-
-      return pt.segment || '-';
+      // Try strongest → weakest
+      return segments.by_exact[name] ||
+             (z5 && segments.by_norm_zip[`${n}|${z5}`]) ||
+             ((cn && st) && segments.by_norm_city_state[`${n}|${cn}|${st}`]) ||
+             segments.by_norm[n] ||
+             '-';
     }
 
     function withinRepFilter(pt) {
       const want = repFilter.value;
       return want === '__ALL__' || (pt.sales_rep || 'Unassigned') === want;
     }
-
     function withinSegFilter(pt) {
       const want = segFilter.value;
       if (want === '__ALL__') return true;
-      const segLetter = (pt._resolvedSegment && /^[ABCD]/.test(pt._resolvedSegment))
-        ? pt._resolvedSegment[0]
-        : (pt.segment && /^[ABCD]/.test(pt.segment) ? pt.segment[0] : 'C');
+      const segLetter = (pt.segment && /^[ABCD]/.test(pt.segment)) ? pt.segment[0] : 'C';
       return segLetter === want;
     }
-
     function withinStateCountyZip(pt) {
       const st = stateFilter.value;
       if (st !== '__ALL__' && (pt.state || '') !== st) return false;
-
       const cy = countyFilter.value;
       if (!countyFilter.disabled && cy !== '__ALL__' && (pt.county || '') !== cy) return false;
-
       const z = zipFilter.value.trim();
       if (z && (pt.zip || '') !== z) return false;
-
       return true;
     }
 
-    // ---------- AI Sidebar ----------
+    // GLOBAL so inline onclick can call it
     window.askAIAboutCustomer = async function(name, city, state, zip) {
       const container = document.getElementById('aiContainer');
       const content = document.getElementById('aiContent');
@@ -288,57 +210,42 @@
           body: JSON.stringify({ customer: name, city, state, zip })
         });
         const data = await res.json();
-
-        const metrics = (data.metrics || '').toString().trim();
-        const aiText  = (data.result  || data.response || '').toString().trim();
-
-        if (metrics || aiText) {
-          content.innerHTML =
-            (metrics ? `<pre>${metrics}</pre><hr>` : '') +
-            (aiText ? `<pre>${aiText}</pre>` : '');
-        } else {
-          content.innerHTML = `<p><strong>Note:</strong> Server returned an empty response.</p>`;
-        }
+        const text = (data.result ?? data.response ?? '').toString().trim();
+        content.innerHTML = text ? `<pre>${text}</pre>` : `<p><strong>Note:</strong> Server returned an empty response.</p>`;
       } catch (err) {
         content.innerHTML = `<p><strong>Network Error:</strong> ${err.message}</p>`;
       }
     };
 
-    // ---------- Render ----------
     function render() {
+      if (!allPoints.length) return;
+
       layerGroup.clearLayers();
       if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
 
-      const derived = (allPoints || []).map(deriveFields)
-        .filter(p => p.lat != null && p.lon != null)
-        .map(p => ({ ...p, _resolvedSegment: resolveSegmentForPoint(p) }));
-
-      const toShow = derived.filter(p =>
-        withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p)
-      );
+      const derived = (allPoints || []).map(deriveFields).filter(p => p.lat != null && p.lon != null);
+      const toShow = derived.filter(p => withinRepFilter(p) && withinSegFilter(p) && withinStateCountyZip(p));
 
       if (heatToggle.checked) {
-        const heatPoints = toShow.map(p => [p.lat, p.lon, 1]);
+        const heatPoints = toShow.filter(p => p.total_r12 > 0).map(p => [p.lat, p.lon, p.total_r12 || 0]);
         heatLayer = L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
       } else {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
+          // POPUP — no revenue here; segment comes from /api/segments (Sold-to-based)
           const popupHtml = `
             <b>${p.label}</b><br/>
-            ${p.full_address || '-'}<br/>
+            ${p.full_address}<br/>
             <i>${p.sales_rep || 'Unassigned'}</i><br/>
             State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}<br/>
-            Segment: ${p._resolvedSegment || '-'}<br/>
-            <button onclick="askAIAboutCustomer('${(p.label||'').replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}')">Run AI Analysis</button>
+            Segment: ${p.segment || '-'}<br/>
+            <button onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}')">Run AI Analysis</button>
           `;
           L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);
         });
         group.addTo(layerGroup);
-
-        if (toShow.length) {
-          map.fitBounds(group.getBounds().pad(0.2));
-        }
+        if (toShow.length) map.fitBounds(group.getBounds().pad(0.2));
         updateLegend(derived);
       }
     }
@@ -366,16 +273,12 @@
       const reps = Array.from(new Set(points.map(p => (p.sales_rep || p['Sales Rep Name'] || 'Unassigned')))).sort();
       repFilter.innerHTML = `<option value="__ALL__">All</option>` + reps.map(r => `<option>${r}</option>`).join('');
     }
-
     function populateStateFilter(points) {
-      const states = Array.from(new Set(points.map(p =>
-        (p.state || p.State || stateFromCountyState(p['County State'] || ''))
-      ).filter(Boolean))).sort();
+      const states = Array.from(new Set(points.map(p => (p.state || p.State || (String(p['County State']||'').trim().split(/\s+/).pop()) )).filter(Boolean))).sort();
       stateFilter.innerHTML = `<option value="__ALL__">All</option>` + states.map(s => `<option value="${s}">${s}</option>`).join('');
       countyFilter.innerHTML = `<option value="__ALL__">All</option>`;
       countyFilter.disabled = true;
     }
-
     function populateCountyFilter(points, stateCode) {
       const counties = Array.from(new Set(points.map(p => {
         let county = p.county || p.County || '';
@@ -383,46 +286,38 @@
           const parts = String(p['County State']).trim().split(/\s+/);
           if (parts.length >= 2) county = parts.slice(0, -1).join(' ');
         }
-        const pState = p.state || p.State || stateFromCountyState(p['County State'] || '');
+        const pState = p.state || p.State || (String(p['County State']||'').trim().split(/\s+/).pop());
         return (pState === stateCode) ? county : null;
       }).filter(Boolean))).sort();
       countyFilter.innerHTML = `<option value="__ALL__">All</option>` + counties.map(c => `<option value="${c}">${c}</option>`).join('');
       countyFilter.disabled = false;
     }
 
-    // ---------- Load data then render ----------
-    Promise.allSettled([
+    // Load both locations and segments, then render
+    Promise.all([
       fetch('{{ url_for("api_locations") }}').then(r => r.json()),
-      fetch('/api/segments').then(r => r.ok ? r.json() : null).catch(() => null)
+      fetch('{{ url_for("api_segments") }}').then(r => r.json())
     ])
-    .then(([locRes, segRes]) => {
-      allPoints = (locRes.status === 'fulfilled' ? (locRes.value || []) : []);
-      segmentsIndex = (segRes.status === 'fulfilled' ? segRes.value : null);
-
+    .then(([points, segs]) => {
+      allPoints = points || [];
+      segments  = segs || { by_exact:{}, by_norm:{}, by_norm_zip:{}, by_norm_city_state:{} };
       populateRepFilter(allPoints);
       populateStateFilter(allPoints);
       render();
     })
     .catch(err => {
       console.error(err);
-      alert('Could not load initial data:\n' + err.message);
+      alert('Could not load data:\n' + err.message);
     });
 
-    // ---------- Events ----------
+    // Events
     repFilter.addEventListener('change', render);
     segFilter.addEventListener('change', render);
-    zipFilter.addEventListener('input', () => {
-      clearTimeout(zipFilter._t);
-      zipFilter._t = setTimeout(render, 200);
-    });
+    zipFilter.addEventListener('input', () => { clearTimeout(zipFilter._t); zipFilter._t = setTimeout(render, 200); });
     stateFilter.addEventListener('change', () => {
       const st = stateFilter.value;
-      if (st === '__ALL__') {
-        countyFilter.innerHTML = `<option value="__ALL__">All</option>`;
-        countyFilter.disabled = true;
-      } else {
-        populateCountyFilter(allPoints, st);
-      }
+      if (st === '__ALL__') { countyFilter.innerHTML = `<option value="__ALL__">All</option>`; countyFilter.disabled = true; }
+      else { populateCountyFilter(allPoints, st); }
       render();
     });
     countyFilter.addEventListener('change', render);
@@ -430,3 +325,4 @@
   </script>
 </body>
 </html>
+
