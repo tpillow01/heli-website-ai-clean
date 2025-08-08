@@ -401,44 +401,98 @@ def service_worker():
 # ─── AI Map Analysis Endpoint ─────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
+    """
+    Look up the exact row for a customer in customer_report.csv.
+    If multiple rows share the same Sold to Name, further narrow by city/zip/address.
+    Falls back to the highest 'Revenue Rolling 12 Months - Aftermarket' if still ambiguous.
+    """
     try:
-        name = request.json.get('customer', '').strip()
-        print(f"🔍 Looking up customer: {name}")
+        payload = request.get_json(force=True) or {}
+        customer = (payload.get('customer') or '').strip()
+        city     = (payload.get('city') or '').strip()
+        zip_code = (payload.get('zip') or '').strip()
+        address  = (payload.get('address') or '').strip()
 
-        df = pd.read_csv('customer_report.csv')
+        if not customer:
+            return jsonify({"error": "Customer name required"}), 400
 
-        # Try fuzzy matching on "Sold to Name"
-        match = df[df['Sold to Name'].str.lower().str.strip() == name.lower()]
+        import pandas as pd
+        # Read as strings to avoid dtype surprises; we’ll coerce as needed
+        df = pd.read_csv("customer_report.csv", dtype=str, keep_default_na=False)
 
-        if match.empty:
-            print("❌ No match found for customer.")
-            return jsonify({'response': 'No matching customer found.'})
+        # Normalize helper
+        def norm(s):
+            return str(s).strip().casefold()
 
-        row = match.iloc[0]
+        # Filter by Sold to Name first
+        mask = df.get('Sold to Name', '').astype(str).map(norm) == norm(customer)
+        subset = df[mask].copy()
 
-        # Extract revenue fields and convert to float safely
-        def safe_float(val):
+        # Narrow by city if given
+        if city and not subset.empty:
+            m2 = subset.get('City', '').astype(str).map(norm) == norm(city)
+            sub2 = subset[m2]
+            if not sub2.empty:
+                subset = sub2
+
+        # Narrow by ZIP if given
+        if zip_code and not subset.empty:
+            z = str(zip_code).strip()
+            m2 = subset.get('Zip Code', '').astype(str).str.strip() == z
+            sub2 = subset[m2]
+            if not sub2.empty:
+                subset = sub2
+
+        # Narrow by address (contains) if given
+        if address and not subset.empty:
+            adr = norm(address)
+            m2 = subset.get('Address', '').astype(str).map(norm).str.contains(adr, na=False)
+            sub2 = subset[m2]
+            if not sub2.empty:
+                subset = sub2
+
+        if subset.empty:
+            return jsonify({"error": f"No data found for {customer}"}), 404
+
+        # If still multiple, pick the row with the largest R12 Aftermarket
+        def money_to_float(x):
+            s = str(x).replace("$", "").replace(",", "").strip()
             try:
-                return float(str(val).replace('$', '').replace(',', '').strip())
+                return float(s)
             except:
                 return 0.0
 
+        if len(subset) > 1:
+            subset = subset.copy()
+            subset["__r12__"] = subset.get(
+                "Revenue Rolling 12 Months - Aftermarket", ""
+            ).map(money_to_float)
+            subset = subset.loc[[subset["__r12__"].idxmax()]]
+
+        r = subset.iloc[0]
+
         fields = {
-            'New Equip R36 Revenue': safe_float(row['New Equip R36 Revenue']),
-            'Used Equip R36 Revenue': safe_float(row['Used Equip R36 Revenue']),
-            'Parts Revenue R12': safe_float(row['Parts Revenue R12']),
-            'Service Revenue R12 (Includes GM)': safe_float(row['Service Revenue R12 (Includes GM)']),
-            'Parts & Service Revenue R12': safe_float(row['Parts & Service Revenue R12']),
-            'Rental Revenue R12': safe_float(row['Rental Revenue R12']),
-            'Revenue Rolling 12 Months - Aftermarket': safe_float(row['Revenue Rolling 12 Months - Aftermarket']),
-            'Revenue Rolling 13 - 24 Months - Aftermarket': safe_float(row['Revenue Rolling 13 - 24 Months - Aftermarket']),
+            "New Equip R36 Revenue": r.get("New Equip R36 Revenue", 0),
+            "Used Equip R36 Revenue": r.get("Used Equip R36 Revenue", 0),
+            "Parts Revenue R12": r.get("Parts Revenue R12", 0),
+            "Service Revenue R12 (Includes GM)": r.get("Service Revenue R12 (Includes GM)", 0),
+            "Parts & Service Revenue R12": r.get("Parts & Service Revenue R12", 0),
+            "Rental Revenue R12": r.get("Rental Revenue R12", 0),
+            "Revenue Rolling 12 Months - Aftermarket": r.get("Revenue Rolling 12 Months - Aftermarket", 0),
+            "Revenue Rolling 13 - 24 Months - Aftermarket": r.get("Revenue Rolling 13 - 24 Months - Aftermarket", 0),
         }
 
-        prompt = f"""
-Customer: {name}
+        # Build prompt with normalized currency
+        def fmt_money(x):
+            v = money_to_float(x)
+            return f"${v:,.2f}"
+
+        metrics_block = "\n".join([f"{k}: {fmt_money(v)}" for k, v in fields.items()])
+
+        prompt = f"""Customer: {customer}
 Here are the latest financial metrics for this customer:
 
-""" + "\n".join([f"{k}: ${v:,.2f}" for k, v in fields.items()]) + """
+{metrics_block}
 
 Based on these revenue metrics, give a short and clear insight:
 - What kind of customer is this?
@@ -447,22 +501,25 @@ Based on these revenue metrics, give a short and clear insight:
 Keep it brief and analytic.
 """
 
+        print("🔍 Selected row for:", customer, "| City:", city, "| ZIP:", zip_code, "| Address:", address)
         print("📤 Sending to OpenAI:\n", prompt)
 
-        completion = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5
+            messages=[
+                {"role": "system", "content": "You're a forklift sales strategist."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
         )
+        analysis = response.choices[0].message.content.strip()
+        print("✅ Response:\n", analysis)
 
-        ai_response = completion.choices[0].message.content.strip()
-        print("✅ Response:\n", ai_response)
-
-        return jsonify({'response': ai_response})
+        return jsonify({"response": analysis})
 
     except Exception as e:
-        print(f"❌ Error during AI map analysis: {e}")
-        return jsonify({'response': f"Error: {e}"}), 500
+        print("❌ Error during AI map analysis:", e)
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
