@@ -1,10 +1,8 @@
 /* =========================================================
-   Tynan Equipment AI — Right-Side Mockup (Light Workshop)
-   EXACT visual: text header, tabs (Chat/Models/Map),
-   Mode card, cream chat bubbles, crisp forklift animation.
+   Tynan Equipment AI — Exact Light Mockup w/ Mode + Map on top
    ========================================================= */
 
-/* ---------- Design tokens ---------- */
+/* ---------- Tokens ---------- */
 :root{
   --page:#f6f2ea; --shell:#fffaf3; --panel:#fffdf8; --panel-2:#faf3e6;
   --ink:#1c1d22; --muted:#6b6e77; --line:#e8e0d3;
@@ -12,20 +10,19 @@
 
   --bubble-ai:#fff6e9; --bubble-user:#fdeee9; --input:#fffaf2;
 
-  --r-xl:24px; --r-lg:20px; --r:16px; --r-sm:12px;
+  --r-xl:26px; --r-lg:20px; --r:16px; --r-sm:12px;
 
   --shadow-lg:0 22px 50px rgba(119,84,20,.12);
   --shadow-md:0 14px 30px rgba(119,84,20,.10);
   --shadow-sm:0 6px 16px rgba(119,84,20,.10);
 }
 
-/* ---------- Base / reset ---------- */
+/* ---------- Base ---------- */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   color:var(--ink);
-  /* faint workshop grid */
   background:
     linear-gradient(0deg, transparent 24px, var(--line) 25px, transparent 26px),
     linear-gradient(90deg, transparent 24px, var(--line) 25px, transparent 26px),
@@ -45,123 +42,99 @@ body{
   display:flex; flex-direction:column; position:relative; overflow:hidden;
 }
 
-/* ---------- TOP BAR (TEXT HEADER like mockup) ---------- */
-.topbar, .logo-bar{  /* support either class name */
+/* ---------- Header (text) ---------- */
+.topbar{
   display:flex; align-items:center; justify-content:space-between;
-  padding:14px 18px;
-  background:var(--shell);
-  border-bottom:1px solid var(--line);
+  padding:14px 18px; border-bottom:1px solid var(--line); background:var(--shell);
 }
-.logo-wrapper{display:none} /* hide any old img logos */
-
-.brand{
-  font-size:24px; font-weight:800; letter-spacing:.2px;
-}
-.brand .strong{color:var(--accent); font-weight:900; margin-right:4px}
-.topbar-right{
-  display:flex; align-items:center; gap:10px;
-}
+.brand{font-size:26px; font-weight:900; letter-spacing:.2px}
+.brand .accent{color:var(--accent)}
+.topbar-right{display:flex; align-items:center; gap:12px}
 .chip{
-  font-weight:700; font-size:.9rem; color:var(--ink);
+  font-weight:800; font-size:.92rem; color:var(--ink);
   background:var(--panel-2); border:1px solid var(--line);
-  border-radius:999px; padding:6px 10px;
+  border-radius:999px; padding:8px 12px; box-shadow:var(--shadow-sm);
 }
 
-/* ---------- TAB ROW (Chat / Models / Map) ---------- */
-.nav-tabs{
-  display:flex; align-items:center; gap:24px;
-  padding:10px 18px 0;
-  background:var(--shell);
+/* ---------- Tabs row (with Map + Mode at top) ---------- */
+.navbar{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:16px; padding:10px 18px; background:var(--shell);
+  box-shadow:0 6px 18px rgba(119,84,20,.08);
 }
-.nav-tabs .menu-btn{
-  width:38px;height:30px;border-radius:10px;border:1px solid var(--line);
-  background:var(--panel-2); position:relative;
+.menu-btn{
+  width:42px;height:32px;border-radius:12px;border:1px solid var(--line);
+  background:var(--panel-2); position:relative; flex-shrink:0;
 }
-.nav-tabs .menu-btn::before,
-.nav-tabs .menu-btn::after{
-  content:""; position:absolute; left:9px; right:9px; height:2px; background:#9c8e7a;
+.menu-btn::before,.menu-btn::after{
+  content:""; position:absolute; left:10px; right:10px; height:2px; background:#9c8e7a;
 }
-.nav-tabs .menu-btn::before{top:9px}
-.nav-tabs .menu-btn::after{bottom:9px}
+.menu-btn::before{top:9px} .menu-btn::after{bottom:9px}
 
-.tabs{
-  display:flex; gap:16px; align-items:center;
-}
+.tabs{display:flex; align-items:center; gap:26px}
 .tab{
-  color:var(--ink); text-decoration:none; font-weight:700;
-  padding:8px 12px; border-radius:999px; position:relative;
+  color:var(--ink); text-decoration:none; font-weight:800;
+  padding:6px 10px; border-radius:999px; position:relative;
 }
 .tab.active::after{
-  content:""; position:absolute; left:12px; right:12px; bottom:-6px;
+  content:""; position:absolute; left:10px; right:10px; bottom:-9px;
   height:3px; background:var(--accent); border-radius:3px;
 }
 
-/* ---------- MODE CARD (exact pill look) ---------- */
-.mode-card, .toolbar, .top-controls{
-  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-  margin:14px 18px 0; padding:12px 14px;
-  background:var(--panel);
-  border:1px solid var(--line); border-radius:var(--r-lg);
-  box-shadow:var(--shadow-sm);
+/* Mode on the right side of the same row */
+.nav-actions{
+  margin-left:auto; display:flex; align-items:center; gap:12px; flex-wrap:nowrap;
 }
-.mode-label{color:var(--ink); font-weight:700}
-.mode-select, .toolbar select{
+.mode-wrap{
+  display:flex; align-items:center; gap:10px;
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:16px; padding:8px 10px; box-shadow:var(--shadow-sm);
+}
+.mode-label{font-weight:800}
+.mode-select{
   background:var(--panel-2); color:var(--ink);
-  border:1px solid var(--line); border-radius:12px;
-  padding:10px 12px; outline:none; appearance:none;
-  transition:border-color .2s, box-shadow .2s;
+  border:1px solid var(--line); border-radius:12px; padding:8px 12px;
+  outline:none; appearance:none; transition:border-color .2s, box-shadow .2s;
 }
-.mode-select:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.18) }
+.mode-select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.18)}
 
-/* ---------- Forklift animation (CRISP, ON TOP) ---------- */
-.forklift-animation{
-  position:absolute; top:44%; left:0; width:100%;
-  display:none; /* your JS toggles this on/off */
-  transform:translateY(-50%); pointer-events:none; z-index:9;
-}
-.forklift-unit{position:absolute; left:0; transition:left 2s ease-in-out}
-.forklift-img{
-  width:240px; height:auto; opacity:1; /* crisp (no fade) */
-  filter:drop-shadow(0 10px 22px rgba(0,0,0,.22));
-}
-
-/* ---------- Chat stage with faint forklift sketch ---------- */
+/* ---------- Stage (faint forklift sketch) ---------- */
 .stage{
-  position:relative; flex:1; margin:0 18px; border-radius:var(--r-lg);
-  overflow:hidden;
+  position:relative; flex:1; margin:0 18px; border-radius:var(--r-lg); overflow:hidden;
 }
 .stage::after{
-  /* faint forklift sketch watermark (optional) */
   content:""; position:absolute; inset:0;
-  background:url("/static/forklift_heli.png") center 40%/33% no-repeat;
+  background:url("/static/forklift_heli.png") center 38%/36% no-repeat;
   opacity:.06; filter:grayscale(100%); pointer-events:none;
 }
 
-/* ---------- Chat bubbles & area ---------- */
+/* ---------- Forklift animation (crisp, on top) ---------- */
+.forklift-animation{
+  position:absolute; top:44%; left:0; width:100%;
+  display:none; transform:translateY(-50%); pointer-events:none; z-index:9;
+}
+.forklift-unit{position:absolute; left:0; transition:left 2s ease-in-out}
+.forklift-img{width:240px; height:auto; opacity:1; filter:drop-shadow(0 10px 22px rgba(0,0,0,.22))}
+
+/* ---------- Chat area & bubbles ---------- */
 .response-area{
-  position:relative; z-index:1; /* above watermark */
-  height:100%; padding:18px 4px 0; overflow-y:auto;
-  display:flex; flex-direction:column; gap:14px;
+  position:relative; z-index:1; height:100%;
+  padding:18px 4px 0; overflow-y:auto; display:flex; flex-direction:column; gap:14px;
   background:linear-gradient(180deg, transparent, var(--panel) 92%);
 }
 .response-bubble{
-  max-width:78%;
-  padding:14px 16px;
-  border-radius:18px;
-  line-height:1.6; white-space:pre-wrap; font-size:15px;
-  border:1px solid var(--line);
-  box-shadow:var(--shadow-sm);
+  max-width:78%; padding:16px 18px; border-radius:18px;
+  line-height:1.6; white-space:pre-wrap; font-size:16px;
+  border:1px solid var(--line); box-shadow:var(--shadow-sm);
   background:var(--bubble-ai);
 }
-.response-bubble.user{ align-self:flex-end; background:var(--bubble-user) }
-.section-label{
-  color:#7b4f1b; font-weight:800; display:block; margin-bottom:6px; letter-spacing:.25px;
-}
+.response-bubble.user{align-self:flex-end; background:var(--bubble-user)}
+.section-label{color:#7b4f1b; font-weight:800; display:block; margin-bottom:6px}
 
-/* ---------- Input row (rounded, shadow, Send pill) ---------- */
+/* ---------- Input row ---------- */
 .input-form{
-  display:flex; align-items:center; gap:10px;
-  margin:10px 18px 18px; padding:14px;
+  display:flex; align-items:center; gap:12px;
+  margin:12px 18px 18px; padding:16px;
   background:var(--panel); border:1px solid var(--line);
   border-radius:var(--r-lg); box-shadow:var(--shadow-md);
 }
@@ -174,7 +147,7 @@ body{
 }
 .input-form textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.16)}
 .input-form button{
-  padding:12px 22px; font-size:15px; font-weight:800; letter-spacing:.2px;
+  padding:12px 24px; font-size:16px; font-weight:900; letter-spacing:.2px;
   color:#fff; background:linear-gradient(180deg,#e85a52,var(--accent));
   border:0; border-radius:999px; cursor:pointer;
   box-shadow:0 10px 28px rgba(201,42,36,.28);
@@ -189,26 +162,22 @@ body{
   border-top:1px solid var(--line); background:var(--panel);
 }
 
-/* ---------- AI Sidebar / popup (kept light) ---------- */
-.ai-sidebar{
-  position:fixed; top:0; right:-420px; width:420px; height:100%;
-  background:var(--shell); color:var(--ink);
-  border-left:1px solid var(--line); box-shadow:-12px 0 30px rgba(119,84,20,.12);
-  overflow-y:auto; z-index:999; transition:right .28s ease-in-out; padding:22px;
-}
-.ai-sidebar.visible{right:0}
-.ai-sidebar-content{display:flex; flex-direction:column; gap:14px}
-.close-ai-btn{background:var(--accent); color:#fff; font-size:22px; border:none; align-self:flex-end; cursor:pointer; padding:6px 12px; border-radius:12px; box-shadow:var(--shadow-sm)}
-
 /* ---------- Responsive ---------- */
-@media (max-width:767px){
-  body{padding:12px}
-  .chat-container{height:92vh; border-radius:20px}
-  .brand{font-size:20px}
-  .tabs{gap:12px}
+@media (max-width:900px){
+  .brand{font-size:22px}
+  .tabs{gap:18px}
+  .nav-actions{gap:10px}
+}
+@media (max-width:720px){
+  .navbar{flex-wrap:wrap; gap:10px}
+  .nav-actions{width:100%; justify-content:flex-end}
   .stage{margin:0 12px}
-  .input-form{margin:10px 12px 14px}
-  .ai-sidebar{width:92vw}
+  .input-form{margin:12px 12px 16px}
+}
+@media (max-width:520px){
+  .brand{font-size:20px}
+  .response-bubble{font-size:15px; max-width:88%}
+  .forklift-img{width:200px}
 }
 
 /* ---------- Reduced motion ---------- */
