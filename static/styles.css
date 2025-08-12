@@ -1,113 +1,99 @@
 /* =========================================================
-   Tynan Equipment AI — "Workshop Cream" Light Theme
-   Drop-in replacement for styles.css (keeps all class names)
+   Tynan Equipment AI — Workshop Cream (Text Header version)
+   - Header shows name text (logos hidden)
+   - Mode selector + Map button kept
+   - Forklift animation crisp (no opacity)
    ========================================================= */
 
-/* ---------- Design tokens ---------- */
+/* ---------- Tokens ---------- */
 :root{
-  --page:#f6f2ea;          /* page background */
-  --shell:#fffaf3;         /* app shell panel */
-  --panel:#fffdf8;         /* inner cards */
-  --panel-2:#faf3e6;       /* subtle blocks / toolbar */
-  --ink:#1c1d22;           /* primary text */
-  --muted:#6b6e77;         /* secondary text */
-  --line:#e8e0d3;          /* borders / grid lines */
-  --accent:#c92a24;        /* brand red */
-  --accent-2:#e8564f;      /* hover red */
+  --page:#f6f2ea; --shell:#fffaf3; --panel:#fffdf8; --panel-2:#faf3e6;
+  --ink:#1c1d22; --muted:#6b6e77; --line:#e8e0d3;
+  --accent:#c92a24; --accent-2:#e8564f;
 
-  --bubble-ai:#fff6e9;     /* assistant bubble */
-  --bubble-user:#fdeee9;   /* user bubble */
-  --input:#fffaf2;
+  --bubble-ai:#fff6e9; --bubble-user:#fdeee9; --input:#fffaf2;
 
-  --radius:18px;
-  --radius-sm:14px;
-  --shadow-lg: 0 22px 50px rgba(119, 84, 20, .12);
-  --shadow-md: 0 14px 30px rgba(119, 84, 20, .10);
-  --shadow-sm: 0 6px 16px rgba(119, 84, 20, .10);
+  --radius-xl:24px; --radius:18px; --radius-sm:12px;
+  --shadow-lg:0 22px 50px rgba(119,84,20,.12);
+  --shadow-md:0 14px 30px rgba(119,84,20,.10);
+  --shadow-sm:0 6px 16px rgba(119,84,20,.10);
 }
 
-/* ---------- Reset & base ---------- */
+/* ---------- Base ---------- */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  color:var(--ink);
+  font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:var(--ink);
+  /* light grid background */
   background:
-    /* light workshop grid */
     linear-gradient(0deg, transparent 24px, var(--line) 25px, transparent 26px),
     linear-gradient(90deg, transparent 24px, var(--line) 25px, transparent 26px),
     var(--page);
-  background-size: 26px 26px, 26px 26px, auto;
-  display:flex;align-items:center;justify-content:center;
-  padding:16px;
+  background-size:26px 26px,26px 26px,auto;
+  display:flex; align-items:center; justify-content:center; padding:16px;
 }
 
-/* ---------- App container ---------- */
+/* ---------- App shell ---------- */
 .chat-container{
-  width:100%;
-  max-width:1100px;
-  height:90vh;
-  background:var(--shell);
-  border:1px solid var(--line);
-  border-radius:24px;
-  box-shadow:var(--shadow-lg);
-  display:flex;flex-direction:column;position:relative;overflow:hidden;
+  width:100%; max-width:1100px; height:90vh;
+  background:var(--shell); border:1px solid var(--line);
+  border-radius:var(--radius-xl); box-shadow:var(--shadow-lg);
+  display:flex; flex-direction:column; position:relative; overflow:hidden;
 }
 
-/* Optional forklift watermark using your existing image.
-   Add class="chat-container watermark" to enable. */
-.chat-container.watermark::after{
-  content:"";
-  position:absolute; inset:96px 48px 140px 48px;
-  background:url("/static/forklift_heli.png") center/50% no-repeat;
-  opacity:.05; pointer-events:none; filter:grayscale(100%);
-}
+/* Optional watermark disabled by default (keep it out for clarity) */
+.chat-container.watermark::after{display:none}
 
-/* ---------- Header (top bar) ---------- */
+/* ---------- Header (TEXT ONLY) ---------- */
 .logo-bar{
-  display:flex; align-items:center; justify-content:space-between;
-  padding:14px 18px;
-  background:var(--shell);
-  border-bottom:1px solid var(--line);
+  display:flex; align-items:center; justify-content:flex-start; gap:14px;
+  padding:14px 18px; background:var(--shell); border-bottom:1px solid var(--line);
 }
-.logo-img{height:56px; object-fit:contain}
+.logo-wrapper{display:none}              /* hide image logos entirely */
 .header-title{
-  flex:1; text-align:center; font-size:26px; font-weight:800; letter-spacing:.2px;
-  color:var(--ink);
+  font-size:26px; font-weight:800; letter-spacing:.2px; color:var(--ink);
 }
+.header-title .accent{color:var(--accent)} /* optional span styling */
 
-/* ---------- Top controls / toolbar ---------- */
-.toolbar, .top-controls{
+/* ---------- Optional tabs (safe if unused) ---------- */
+.nav-tabs{display:flex; align-items:center; gap:18px; padding:12px 18px 0}
+.nav-tabs a{color:var(--muted); text-decoration:none; font-weight:700; padding:8px 12px; border-radius:999px}
+.nav-tabs a.active{color:var(--ink); box-shadow:inset 0 -3px 0 0 var(--accent)}
+
+/* ---------- Top controls: Mode + Map ---------- */
+.toolbar,.top-controls{
   display:flex; align-items:center; gap:12px; flex-wrap:wrap;
   margin:14px 18px 0; padding:12px 14px;
-  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
-  box-shadow:var(--shadow-sm);
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:var(--shadow-sm);
 }
 .mode-label{color:var(--muted); font-size:.95rem}
-.toolbar select, .mode-select{
-  background:var(--panel-2); color:var(--ink);
-  border:1px solid var(--line); border-radius:12px; padding:10px 12px; outline:none;
+.toolbar select,.mode-select{
+  background:var(--panel-2); color:var(--ink); border:1px solid var(--line);
+  border-radius:12px; padding:10px 12px; outline:none; appearance:none;
   transition:border-color .2s, box-shadow .2s;
 }
-.toolbar select:focus, .mode-select:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 3px rgba(201,42,36,.18);
+.toolbar select:focus,.mode-select:focus{
+  border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.18);
 }
 .map-btn{
   display:inline-flex; align-items:center; justify-content:center;
-  padding:10px 16px; border-radius:999px; font-weight:700;
+  padding:10px 18px; border-radius:999px; font-weight:800;
   border:1px solid var(--line); background:var(--panel-2); color:var(--ink);
   text-decoration:none; transition:transform .06s ease, border-color .2s;
 }
 .map-btn:hover{border-color:var(--accent); transform:translateY(-1px)}
 
-/* ---------- Forklift animation (behavior unchanged) ---------- */
+/* ---------- Forklift animation (CRISP) ---------- */
 .forklift-animation{
-  position:absolute; top:44%; left:0; width:100%; display:none;
-  transform:translateY(-50%); pointer-events:none;
+  position:absolute; top:44%; left:0; width:100%; display:none; /* JS toggles */
+  transform:translateY(-50%); pointer-events:none; z-index:9;
 }
 .forklift-unit{position:absolute; left:0; transition:left 2s ease-in-out}
-.forklift-img{width:200px; height:auto; opacity:.4}
+.forklift-img{
+  width:220px; height:auto; opacity:1;                 /* no fade */
+  filter:drop-shadow(0 8px 18px rgba(0,0,0,.18));       /* crisp edge */
+}
 
 /* ---------- Chat area ---------- */
 .response-area{
@@ -117,50 +103,32 @@ body{
 
 /* ---------- Bubbles ---------- */
 .response-bubble{
-  max-width:78%;
-  padding:14px 16px;
-  border-radius:18px;
+  max-width:78%; padding:14px 16px; border-radius:18px;
   line-height:1.6; white-space:pre-wrap; font-size:15px;
-  border:1px solid var(--line);
-  box-shadow:var(--shadow-sm);
+  border:1px solid var(--line); box-shadow:var(--shadow-sm);
 }
-.response-bubble.ai{
-  align-self:flex-start;
-  background:var(--bubble-ai);
-}
-.response-bubble.user{
-  align-self:flex-end;
-  background:var(--bubble-user);
-}
-.section-label{
-  color:#7b4f1b;           /* warm label in light theme */
-  font-weight:800; display:block; margin-bottom:6px; letter-spacing:.25px;
-}
+.response-bubble.ai{align-self:flex-start; background:var(--bubble-ai)}
+.response-bubble.user{align-self:flex-end; background:var(--bubble-user)}
+.section-label{color:#7b4f1b; font-weight:800; display:block; margin-bottom:6px; letter-spacing:.25px}
 
 /* ---------- Input bar ---------- */
 .input-form{
   display:flex; align-items:center; gap:10px;
-  padding:16px 18px 18px;
-  border-top:1px solid var(--line);
-  background:var(--panel);
+  padding:16px 18px 18px; border-top:1px solid var(--line); background:var(--panel);
 }
 .input-form textarea{
-  flex:1; min-height:76px; max-height:220px;
-  padding:12px 14px; font-size:15px; border-radius:16px;
-  background:var(--input); color:var(--ink);
+  flex:1; min-height:76px; max-height:220px; padding:12px 14px; font-size:15px;
+  border-radius:16px; background:var(--input); color:var(--ink);
   border:1px solid var(--line); outline:none; resize:vertical;
   transition:border-color .2s, box-shadow .2s;
 }
-.input-form textarea:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 3px rgba(201,42,36,.16);
-}
+.input-form textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.16)}
 .input-form button{
   padding:12px 22px; font-size:15px; font-weight:800; letter-spacing:.2px;
-  color:#fff; background:linear-gradient(180deg, #e85a52, var(--accent));
+  color:#fff; background:linear-gradient(180deg,#e85a52,var(--accent));
   border:0; border-radius:999px; cursor:pointer;
   box-shadow:0 10px 28px rgba(201,42,36,.28);
-  transition:filter .2s, transform .06s ease;
+  transition:filter .2s, transform .06s;
 }
 .input-form button:hover{filter:brightness(1.05)}
 .input-form button:active{transform:translateY(1px)}
@@ -171,28 +139,19 @@ body{
   border-top:1px solid var(--line); background:var(--panel);
 }
 
-/* ---------- Auth pages (light) ---------- */
+/* ---------- Auth (unchanged layout, light style) ---------- */
 .auth-screen{min-height:100vh; display:grid; place-items:center; padding:28px; background:var(--page)}
-.auth-wrap{width:min(540px, 92vw)}
+.auth-wrap{width:min(540px,92vw)}
 .auth-brand{display:flex; flex-direction:column; align-items:center; gap:10px; margin-bottom:8px}
-.auth-logo{width:136px; height:auto; filter:drop-shadow(0 6px 16px rgba(119,84,20,.18))}
-.auth-card{
-  background:var(--shell); border:1px solid var(--line); border-radius:22px;
-  padding:22px; box-shadow:var(--shadow-lg);
-}
+.auth-logo{display:none} /* text-only header look */
+.auth-card{background:var(--shell); border:1px solid var(--line); border-radius:22px; padding:22px; box-shadow:var(--shadow-lg)}
 .auth-title{margin:0 0 6px; text-align:center; font-size:1.4rem}
 .auth-subtitle{margin:0 0 16px; text-align:center; color:var(--muted)}
-.auth-error{
-  background:#ffe9e8; border:1px solid #ffb7b3; color:#8a1410;
-  border-radius:12px; padding:10px 12px; margin-bottom:12px;
-}
+.auth-error{background:#ffe9e8; border:1px solid #ffb7b3; color:#8a1410; border-radius:12px; padding:10px 12px; margin-bottom:12px}
 .auth-field{display:flex; flex-direction:column; margin:12px 0}
 .auth-field label{color:var(--muted); font-size:.95rem; margin-bottom:6px}
 .auth-input-wrap{position:relative; display:flex; align-items:center}
-.auth-input{
-  width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--line);
-  background:#fff; color:var(--ink); outline:none; transition:border-color .2s, box-shadow .2s;
-}
+.auth-input{width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--line); background:#fff; color:var(--ink); outline:none; transition:border-color .2s, box-shadow .2s}
 .auth-input:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.16)}
 .toggle-eye{position:absolute; right:10px; background:transparent; border:0; color:#666; cursor:pointer}
 .auth-actions{margin-top:14px}
@@ -203,28 +162,19 @@ body{
 /* ---------- AI Sidebar / Popup ---------- */
 .ai-sidebar{
   position:fixed; top:0; right:-420px; width:420px; height:100%;
-  background:var(--shell); color:var(--ink);
-  border-left:1px solid var(--line); box-shadow:-12px 0 30px rgba(119,84,20,.12);
+  background:var(--shell); color:var(--ink); border-left:1px solid var(--line);
+  box-shadow:-12px 0 30px rgba(119,84,20,.12);
   overflow-y:auto; z-index:999; transition:right .28s ease-in-out; padding:22px;
 }
 .ai-sidebar.visible{right:0}
 .ai-sidebar-content{display:flex; flex-direction:column; gap:14px}
-.close-ai-btn{
-  background:var(--accent); color:#fff; font-size:22px; border:none;
-  align-self:flex-end; cursor:pointer; padding:6px 12px; border-radius:12px;
-  box-shadow:var(--shadow-sm);
-}
-
-.ai-popup{
-  position:fixed; top:20px; right:20px; width:340px; max-height:80vh;
-  background:var(--shell); border:1px solid var(--line); border-radius:16px;
-  box-shadow:var(--shadow-lg); z-index:9999; padding:16px; overflow-y:auto; color:var(--ink);
-}
+.close-ai-btn{background:var(--accent); color:#fff; font-size:22px; border:none; align-self:flex-end; cursor:pointer; padding:6px 12px; border-radius:12px; box-shadow:var(--shadow-sm)}
+.ai-popup{position:fixed; top:20px; right:20px; width:340px; max-height:80vh; background:var(--shell); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow-lg); z-index:9999; padding:16px; overflow-y:auto; color:var(--ink)}
 .ai-popup .ai-header{display:flex; justify-content:space-between; align-items:center; font-weight:800; margin-bottom:10px}
 .ai-popup button{background:var(--accent); color:#fff; border:none; border-radius:10px; padding:6px 10px; cursor:pointer}
 .ai-popup pre{white-space:pre-wrap; font-size:13px; color:var(--ink)}
 
-/* ---------- Utility buttons ---------- */
+/* ---------- Buttons utility ---------- */
 .btn{padding:10px 16px; border-radius:12px; font-weight:800; cursor:pointer; border:1px solid transparent}
 .btn.primary{background:var(--accent); color:#fff}
 .btn.primary:hover{filter:brightness(1.05)}
@@ -232,10 +182,9 @@ body{
 .btn.outline:hover{border-color:var(--accent)}
 
 /* ---------- Responsive ---------- */
-@media (max-width: 767px){
+@media (max-width:767px){
   body{padding:12px}
   .chat-container{height:92vh; border-radius:20px}
-  .logo-img{height:48px}
   .header-title{font-size:22px}
   .toolbar,.top-controls{margin:12px 14px 0; padding:10px 12px}
   .response-area{padding:14px 14px 0; gap:12px}
@@ -245,7 +194,7 @@ body{
   .ai-sidebar{width:92vw}
 }
 
-/* ---------- Motion preference ---------- */
-@media (prefers-reduced-motion: reduce){
-  *{animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important; scroll-behavior:auto !important}
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; scroll-behavior:auto!important}
 }
