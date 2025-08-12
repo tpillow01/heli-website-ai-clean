@@ -5,38 +5,34 @@
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
-
-  <!-- PWA -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-  <meta name="theme-color" content="#f6f2ea">
+  <meta name="theme-color" content="#efe4d0">
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
-          .then(reg => console.log('✅ SW:', reg.scope))
-          .catch(err => console.error('❌ SW failed:', err));
+          .then(r => console.log('✅ SW:', r.scope))
+          .catch(e => console.error('❌ SW failed:', e));
       });
     }
   </script>
 </head>
 <body>
   <div class="chat-container">
-    <!-- Top bar (text header) -->
+    <!-- Text header -->
     <div class="topbar">
       <div class="brand"><span class="accent">Tynan</span> Equipment AI</div>
       <div class="topbar-right">
-        <span class="chip">C l e l</span>
-        <span class="chip">HELI</span>
+        <span class="heli-badge">HELI</span>
       </div>
     </div>
 
-    <!-- Tabs row with Map + Mode on the right -->
+    <!-- Tabs row: Chat + Map (no Models) + Mode on right -->
     <div class="navbar">
       <button class="menu-btn" aria-label="Menu"></button>
 
       <nav class="tabs">
         <a href="#" class="tab active">Chat</a>
-        <a href="#" class="tab">Models</a>
         <a href="{{ url_for('map_page') }}" class="tab">Map</a>
       </nav>
 
@@ -48,7 +44,7 @@
       </div>
     </div>
 
-    <!-- Stage (watermark handled by CSS) + Animation -->
+    <!-- Stage + animation -->
     <div class="stage">
       <div class="forklift-animation" id="forklift-animation">
         <div class="forklift-unit">
@@ -56,7 +52,6 @@
         </div>
       </div>
 
-      <!-- Chat responses -->
       <div id="response-area" class="response-area"></div>
     </div>
 
@@ -81,78 +76,67 @@
       try {
         const res = await fetch('/api/modes');
         const modes = await res.json();
-        const sel = document.getElementById('modeSelect');
-        sel.innerHTML = modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
-      } catch (e) {
-        console.error('Failed to load modes', e);
-      }
+        document.getElementById('modeSelect').innerHTML =
+          modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      } catch (e) { console.error('Failed to load modes', e); }
     }
     document.addEventListener('DOMContentLoaded', loadModes);
 
-    function formatLabels(text) {
+    function formatLabels(text){
       return text.replace(
         /(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
         '<span class="section-label">$1</span>'
       );
     }
-
-    function renderBubble(text, sender = 'ai') {
-      if (sender === 'ai') stopAnimation();
-      const bubble = document.createElement('div');
-      bubble.className = `response-bubble ${sender}`;
-      bubble.innerHTML = formatLabels(text).split('\n').map(line => `<div>${line}</div>`).join('');
-      responseArea.appendChild(bubble);
-      bubble.scrollIntoView({ behavior: 'smooth' });
+    function renderBubble(text, sender='ai'){
+      if(sender==='ai') stopAnimation();
+      const el=document.createElement('div');
+      el.className=`response-bubble ${sender}`;
+      el.innerHTML = formatLabels(text).split('\n').map(l=>`<div>${l}</div>`).join('');
+      responseArea.appendChild(el);
+      el.scrollIntoView({behavior:'smooth'});
     }
 
-    function startAnimationLoop() {
-      forkliftAnim.style.display = 'block';
-      forkliftUnit.style.left = '0';
-      isForward = true;
-      animationInterval = setInterval(animateForklift, 2000);
+    function startAnimationLoop(){
+      forkliftAnim.style.display='block';
+      forkliftUnit.style.left='0'; isForward=true;
+      animationInterval=setInterval(animateForklift,2000);
     }
-    function animateForklift() {
-      const moveDistance = `calc(100% - ${forkliftUnit.offsetWidth}px)`;
-      forkliftUnit.style.left = isForward ? moveDistance : '0';
+    function animateForklift(){
+      const dist=`calc(100% - ${forkliftUnit.offsetWidth}px)`;
+      forkliftUnit.style.left = isForward ? dist : '0';
       isForward = !isForward;
     }
-    function stopAnimation() {
+    function stopAnimation(){
       clearInterval(animationInterval);
-      forkliftAnim.style.display = 'none';
+      forkliftAnim.style.display='none';
     }
 
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', async (e)=>{
       e.preventDefault();
-      const q = input.value.trim();
-      if (!q) return;
+      const q=input.value.trim(); if(!q) return;
+      const mode=document.getElementById('modeSelect')?.value || 'recommendation';
 
-      const mode = (document.getElementById('modeSelect')?.value) || 'recommendation';
+      renderBubble(q,'user');
+      input.value=''; startAnimationLoop();
 
-      renderBubble(q, 'user');
-      input.value = '';
-      startAnimationLoop();
-
-      try {
+      try{
         const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q, mode })
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ question:q, mode })
         });
-        if (res.ok) {
+        if(res.ok){
           const { response } = await res.json();
-          renderBubble(response || '✓', 'ai');
-        } else {
-          renderBubble('❌ Error contacting server.', 'ai');
+          renderBubble(response || '✓','ai');
+        }else{
+          renderBubble('❌ Error contacting server.','ai');
         }
-      } catch (err) {
-        renderBubble(`❌ Error: ${err.message}`, 'ai');
-      }
+      }catch(err){ renderBubble(`❌ Error: ${err.message}`,'ai'); }
     });
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        form.dispatchEvent(new Event('submit'));
+    input.addEventListener('keydown', e=>{
+      if(e.key==='Enter' && !e.shiftKey){
+        e.preventDefault(); form.dispatchEvent(new Event('submit'));
       }
     });
   </script>

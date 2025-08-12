@@ -1,28 +1,42 @@
 /* =========================================================
-   Tynan Equipment AI — Exact Light Mockup w/ Mode + Map on top
+   Tynan Equipment AI — Light Tan Theme (Image-Match)
+   - Text header (Tynan Equipment AI)
+   - HELI badge on right
+   - Tabs: Chat + Map (no Models)
+   - Mode card
+   - Crisp forklift animation
    ========================================================= */
 
-/* ---------- Tokens ---------- */
+/* ---------- Tokens (warmer tan + deep red) ---------- */
 :root{
-  --page:#f6f2ea; --shell:#fffaf3; --panel:#fffdf8; --panel-2:#faf3e6;
-  --ink:#1c1d22; --muted:#6b6e77; --line:#e8e0d3;
-  --accent:#c92a24; --accent-2:#e8564f;
+  --page:#efe4d0;     /* background grid */
+  --shell:#f8efe0;    /* app shell */
+  --panel:#fff8ec;    /* cards */
+  --panel-2:#f2e4cf;  /* subtle alt */
+  --ink:#1f1915;      /* primary text */
+  --muted:#6d645a;    /* secondary */
+  --line:#e5d6c2;     /* borders */
 
-  --bubble-ai:#fff6e9; --bubble-user:#fdeee9; --input:#fffaf2;
+  --accent:#8a0d12;   /* deep brand red (titles, accents) */
+  --accent-2:#c64a42; /* red for hovers, send grad start */
+
+  --bubble-ai:#fff5e8;   /* assistant bubble */
+  --bubble-user:#fbece6; /* user bubble */
+  --input:#fff7ee;       /* input bg */
 
   --r-xl:26px; --r-lg:20px; --r:16px; --r-sm:12px;
 
-  --shadow-lg:0 22px 50px rgba(119,84,20,.12);
-  --shadow-md:0 14px 30px rgba(119,84,20,.10);
-  --shadow-sm:0 6px 16px rgba(119,84,20,.10);
+  --shadow-lg:0 22px 50px rgba(139, 97, 35, .13);
+  --shadow-md:0 14px 30px rgba(139, 97, 35, .11);
+  --shadow-sm:0 6px 16px rgba(139, 97, 35, .10);
 }
 
 /* ---------- Base ---------- */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  color:var(--ink);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:var(--ink);
+  /* light workshop grid */
   background:
     linear-gradient(0deg, transparent 24px, var(--line) 25px, transparent 26px),
     linear-gradient(90deg, transparent 24px, var(--line) 25px, transparent 26px),
@@ -32,7 +46,7 @@ body{
   padding:16px;
 }
 
-/* ---------- App shell ---------- */
+/* ---------- Shell ---------- */
 .chat-container{
   width:100%; max-width:1100px; height:90vh;
   background:var(--shell);
@@ -42,26 +56,32 @@ body{
   display:flex; flex-direction:column; position:relative; overflow:hidden;
 }
 
-/* ---------- Header (text) ---------- */
+/* ---------- Top bar (text header + HELI badge) ---------- */
 .topbar{
   display:flex; align-items:center; justify-content:space-between;
   padding:14px 18px; border-bottom:1px solid var(--line); background:var(--shell);
 }
 .brand{font-size:26px; font-weight:900; letter-spacing:.2px}
 .brand .accent{color:var(--accent)}
-.topbar-right{display:flex; align-items:center; gap:12px}
-.chip{
-  font-weight:800; font-size:.92rem; color:var(--ink);
-  background:var(--panel-2); border:1px solid var(--line);
-  border-radius:999px; padding:8px 12px; box-shadow:var(--shadow-sm);
+.topbar-right{display:flex; align-items:center; gap:10px}
+
+/* HELI badge (rounded capsule with subtle inset) */
+.heli-badge{
+  display:inline-block; padding:8px 16px;
+  border:1px solid var(--line); background:var(--panel-2);
+  border-radius:999px; font-weight:900; letter-spacing:.5px; color:var(--accent);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.65),
+              inset 0 -2px 6px rgba(0,0,0,.04);
 }
 
-/* ---------- Tabs row (with Map + Mode at top) ---------- */
+/* ---------- Tabs row (Chat + Map) ---------- */
 .navbar{
   display:flex; align-items:center; justify-content:space-between;
   gap:16px; padding:10px 18px; background:var(--shell);
-  box-shadow:0 6px 18px rgba(119,84,20,.08);
+  box-shadow:0 6px 18px rgba(139,97,35,.08);
 }
+
+/* small menu square on left (visual only) */
 .menu-btn{
   width:42px;height:32px;border-radius:12px;border:1px solid var(--line);
   background:var(--panel-2); position:relative; flex-shrink:0;
@@ -81,10 +101,8 @@ body{
   height:3px; background:var(--accent); border-radius:3px;
 }
 
-/* Mode on the right side of the same row */
-.nav-actions{
-  margin-left:auto; display:flex; align-items:center; gap:12px; flex-wrap:nowrap;
-}
+/* Mode on the right of the same row */
+.nav-actions{margin-left:auto; display:flex; align-items:center; gap:12px}
 .mode-wrap{
   display:flex; align-items:center; gap:10px;
   background:var(--panel); border:1px solid var(--line);
@@ -96,7 +114,7 @@ body{
   border:1px solid var(--line); border-radius:12px; padding:8px 12px;
   outline:none; appearance:none; transition:border-color .2s, box-shadow .2s;
 }
-.mode-select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.18)}
+.mode-select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(138,13,18,.18)}
 
 /* ---------- Stage (faint forklift sketch) ---------- */
 .stage{
@@ -145,12 +163,12 @@ body{
   border:1px solid var(--line); outline:none; resize:vertical;
   transition:border-color .2s, box-shadow .2s;
 }
-.input-form textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(201,42,36,.16)}
+.input-form textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(138,13,18,.16)}
 .input-form button{
   padding:12px 24px; font-size:16px; font-weight:900; letter-spacing:.2px;
-  color:#fff; background:linear-gradient(180deg,#e85a52,var(--accent));
+  color:#fff; background:linear-gradient(180deg, var(--accent-2), var(--accent));
   border:0; border-radius:999px; cursor:pointer;
-  box-shadow:0 10px 28px rgba(201,42,36,.28);
+  box-shadow:0 10px 28px rgba(138,13,18,.28);
   transition:filter .2s, transform .06s;
 }
 .input-form button:hover{filter:brightness(1.05)}
@@ -166,7 +184,6 @@ body{
 @media (max-width:900px){
   .brand{font-size:22px}
   .tabs{gap:18px}
-  .nav-actions{gap:10px}
 }
 @media (max-width:720px){
   .navbar{flex-wrap:wrap; gap:10px}
