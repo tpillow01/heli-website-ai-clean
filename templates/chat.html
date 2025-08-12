@@ -6,101 +6,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 
-  <!-- PWA Manifest and Service Worker -->
+  <!-- PWA -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-  <meta name="theme-color" content="#cc0000">
+  <meta name="theme-color" content="#f6f2ea">
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
-          .then(reg => console.log('✅ Service Worker registered:', reg.scope))
-          .catch(err => console.error('❌ SW registration failed:', err));
+          .then(reg => console.log('✅ SW:', reg.scope))
+          .catch(err => console.error('❌ SW failed:', err));
       });
     }
   </script>
-
-  <style>
-    .toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; flex-wrap: wrap;
-      margin: 8px 0 12px;
-      padding: 8px 12px;
-      background: #0b0b0b;
-      border: 1px solid #222;
-      border-radius: 10px;
-      box-shadow: 0 0 0 1px #000 inset;
-    }
-    .toolbar-left {
-      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    }
-    .toolbar-right {
-      margin-left: auto; display: flex; align-items: center;
-    }
-    .toolbar label {
-      color: #ccc; font-size: .9rem; display: flex; flex-direction: column;
-    }
-    .toolbar select {
-      background: #111; color: #eee; border: 1px solid #333; border-radius: 8px; padding: 6px 8px;
-      outline: none;
-    }
-    .toolbar select:focus {
-      border-color: #cc0000;
-      box-shadow: 0 0 0 2px rgba(204,0,0,.25);
-    }
-    .map-btn {
-      display: inline-flex; align-items: center; justify-content: center;
-      padding: 8px 14px; border-radius: 8px;
-      border: 1px solid #333; background: #111; color: #cc0000;
-      text-decoration: none; font-weight: 600; font-size: 14px;
-    }
-    .map-btn:hover {
-      border-color: #cc0000; background: #1a1a1a;
-    }
-  </style>
 </head>
 <body>
   <div class="chat-container">
-    <!-- Header -->
-    <div class="logo-bar">
-      <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='tynan_logo.png') }}" alt="Tynan Logo" class="logo-img" />
-      </div>
-      <div class="header-title">Tynan Equipment AI</div>
-      <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="Heli Logo" class="logo-img" />
+    <!-- Top bar (text header) -->
+    <div class="topbar">
+      <div class="brand"><span class="accent">Tynan</span> Equipment AI</div>
+      <div class="topbar-right">
+        <span class="chip">C l e l</span>
+        <span class="chip">HELI</span>
       </div>
     </div>
 
-    <!-- Mode toolbar + Map button -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <label>
-          Mode
-          <select id="modeSelect"></select>
-        </label>
-      </div>
-      <div class="toolbar-right">
-        <a class="map-btn" href="{{ url_for('map_page') }}" title="Open Customer Heat Map">Map</a>
+    <!-- Tabs row with Map + Mode on the right -->
+    <div class="navbar">
+      <button class="menu-btn" aria-label="Menu"></button>
+
+      <nav class="tabs">
+        <a href="#" class="tab active">Chat</a>
+        <a href="#" class="tab">Models</a>
+        <a href="{{ url_for('map_page') }}" class="tab">Map</a>
+      </nav>
+
+      <div class="nav-actions">
+        <div class="mode-wrap">
+          <span class="mode-label">Mode</span>
+          <select id="modeSelect" class="mode-select"></select>
+        </div>
       </div>
     </div>
 
-    <!-- Forklift Animation -->
-    <div class="forklift-animation" id="forklift-animation">
-      <div class="forklift-unit">
-        <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
+    <!-- Stage (watermark handled by CSS) + Animation -->
+    <div class="stage">
+      <div class="forklift-animation" id="forklift-animation">
+        <div class="forklift-unit">
+          <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
+        </div>
       </div>
-    </div>
 
-    <!-- Responses -->
-    <div id="response-area" class="response-area"></div>
+      <!-- Chat responses -->
+      <div id="response-area" class="response-area"></div>
+    </div>
 
     <!-- Input -->
     <form id="chat-form" class="input-form">
-      <textarea id="userInput" rows="3" placeholder="Describe the customer's needs..." required autofocus></textarea>
+      <textarea id="userInput" rows="3" placeholder="Enter a message..." required autofocus></textarea>
       <button type="submit">Send</button>
     </form>
 
-    <!-- Footer -->
     <div class="footer">Powered by Tynan Equipment AI</div>
   </div>
 
@@ -122,7 +87,6 @@
         console.error('Failed to load modes', e);
       }
     }
-
     document.addEventListener('DOMContentLoaded', loadModes);
 
     function formatLabels(text) {
@@ -147,13 +111,11 @@
       isForward = true;
       animationInterval = setInterval(animateForklift, 2000);
     }
-
     function animateForklift() {
       const moveDistance = `calc(100% - ${forkliftUnit.offsetWidth}px)`;
       forkliftUnit.style.left = isForward ? moveDistance : '0';
       isForward = !isForward;
     }
-
     function stopAnimation() {
       clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
