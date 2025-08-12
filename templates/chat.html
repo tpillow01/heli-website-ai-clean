@@ -5,6 +5,11 @@
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+
+  <!-- Font for HELI text look -->
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@800;900&display=swap" rel="stylesheet">
+
+  <!-- PWA -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#efe4d0">
   <script>
@@ -19,13 +24,11 @@
 </head>
 <body>
   <div class="chat-container">
-    <!-- Text header + HELI logo capsule (uses PNG for exact brand look) -->
+    <!-- Top bar: brand text + HELI text (no image) -->
     <div class="topbar">
       <div class="brand"><span class="accent">Tynan</span> Equipment AI</div>
       <div class="topbar-right">
-        <span class="heli-pill">
-          <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="HELI">
-        </span>
+        <span class="heli-text">HELI</span>
       </div>
     </div>
 
@@ -57,7 +60,7 @@
       <div id="response-area" class="response-area"></div>
     </div>
 
-    <!-- Input (arrow send inside the field) -->
+    <!-- Input: arrow Send inside textarea -->
     <form id="chat-form" class="input-form">
       <textarea id="userInput" rows="3" placeholder="Enter a message..." required autofocus></textarea>
       <button type="submit" class="send-btn" aria-label="Send message">➤</button>

@@ -1,5 +1,5 @@
 /* =========================================================
-   Tynan Equipment AI — Tan Theme + HELI Logo + Arrow Send
+   Tynan Equipment AI — Tan Theme + HELI text + Arrow Send
    ========================================================= */
 
 /* ---------- Tokens ---------- */
@@ -12,12 +12,13 @@
   --muted:#6d645a;    /* secondary */
   --line:#e5d6c2;     /* borders */
 
-  --accent:#8a0d12;   /* deep brand red */
-  --accent-2:#c64a42; /* for gradients/hover */
+  --brand-red:#8a0d12;    /* deep brand red for titles */
+  --heli-red:#c4161c;     /* HELI red */
+  --accent-2:#c64a42;     /* for gradients/hover */
 
-  --bubble-ai:#fff5e8;   /* assistant bubble */
-  --bubble-user:#fbece6; /* user bubble */
-  --input:#fff7ee;       /* input bg */
+  --bubble-ai:#fff5e8;    /* assistant bubble */
+  --bubble-user:#fbece6;  /* user bubble */
+  --input:#fff7ee;        /* input bg */
 
   --r-xl:26px; --r-lg:20px; --r:16px; --r-sm:12px;
 
@@ -30,7 +31,8 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:var(--ink);
+  font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:var(--ink);
+  /* light workshop grid */
   background:
     linear-gradient(0deg, transparent 24px, var(--line) 25px, transparent 26px),
     linear-gradient(90deg, transparent 24px, var(--line) 25px, transparent 26px),
@@ -50,26 +52,24 @@ body{
   display:flex; flex-direction:column; position:relative; overflow:hidden;
 }
 
-/* ---------- Top bar (brand text + HELI logo capsule) ---------- */
+/* ---------- Top bar (brand text + HELI text) ---------- */
 .topbar{
   display:flex; align-items:center; justify-content:space-between;
   padding:14px 18px; border-bottom:1px solid var(--line); background:var(--shell);
 }
 .brand{font-size:26px; font-weight:900; letter-spacing:.2px}
-.brand .accent{color:var(--accent)}
+.brand .accent{color:var(--brand-red)}
 .topbar-right{display:flex; align-items:center; gap:10px}
 
-/* HELI capsule with your PNG so the font/style match exactly */
-.heli-pill{
-  display:inline-flex; align-items:center; justify-content:center;
-  padding:8px 14px;
-  border:1px solid var(--line); background:var(--panel-2);
-  border-radius:999px;
-  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.65),
-              inset 0 -2px 6px rgba(0,0,0,.04);
-}
-.heli-pill img{
-  height:22px; width:auto; display:block;
+/* HELI as text (no image) — close to logo look */
+.heli-text{
+  font-family:"Exo 2", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight:900;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--heli-red);
+  font-size:20px;
+  line-height:1;
 }
 
 /* ---------- Tabs row (Chat + Map) ---------- */
@@ -94,7 +94,7 @@ body{
 }
 .tab.active::after{
   content:""; position:absolute; left:10px; right:10px; bottom:-9px;
-  height:3px; background:var(--accent); border-radius:3px;
+  height:3px; background:var(--brand-red); border-radius:3px;
 }
 
 /* Mode on the right */
@@ -110,7 +110,7 @@ body{
   border:1px solid var(--line); border-radius:12px; padding:8px 12px;
   outline:none; appearance:none; transition:border-color .2s, box-shadow .2s;
 }
-.mode-select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(138,13,18,.18)}
+.mode-select:focus{border-color:var(--brand-red); box-shadow:0 0 0 3px rgba(138,13,18,.18)}
 
 /* ---------- Stage (faint forklift sketch) ---------- */
 .stage{
@@ -145,7 +145,7 @@ body{
 .response-bubble.user{align-self:flex-end; background:var(--bubble-user)}
 .section-label{color:#7b4f1b; font-weight:800; display:block; margin-bottom:6px}
 
-/* ---------- Input row with arrow button INSIDE the textbox ---------- */
+/* ---------- Input row with arrow button INSIDE the textarea ---------- */
 .input-form{
   position:relative;
   display:flex; align-items:center;
@@ -161,14 +161,14 @@ body{
   border:1px solid var(--line); outline:none; resize:vertical;
   transition:border-color .2s, box-shadow .2s;
 }
-.input-form textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(138,13,18,.16)}
-/* small circular arrow button, positioned inside the field */
+.input-form textarea:focus{border-color:var(--brand-red); box-shadow:0 0 0 3px rgba(138,13,18,.16)}
+/* small circular arrow button */
 .send-btn{
   position:absolute; right:30px; top:50%; transform:translateY(-50%);
   width:42px; height:42px; border-radius:50%;
   border:0; cursor:pointer; font-size:18px; line-height:1;
   display:flex; align-items:center; justify-content:center;
-  color:#fff; background:linear-gradient(180deg, var(--accent-2), var(--accent));
+  color:#fff; background:linear-gradient(180deg, var(--accent-2), var(--brand-red));
   box-shadow:0 8px 22px rgba(138,13,18,.28);
   transition:filter .2s, transform .06s;
 }
