@@ -1,461 +1,246 @@
-/* Reset & Base */
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* ================================
+   Tynan Equipment AI — Polished UI
+   Drop-in replacement for styles.css
+   ================================ */
+
+/* ---------- Tokens ---------- */
+:root{
+  --bg-0:#0c0e11;          /* page background */
+  --bg-1:#111419;          /* app shell */
+  --bg-2:#151922;          /* panels / cards */
+  --bg-3:#1a1f2a;          /* input / chips */
+  --bubble-ai:#1c222e;
+  --bubble-user:#232a36;
+
+  --text:#e8eaed;
+  --text-dim:#b8bec7;
+  --muted:#aeb2b9;
+  --border:#262b35;
+  --border-2:#303745;
+
+  --accent:#cc0000;        /* brand red */
+  --accent-2:#ff4c4c;      /* secondary red for labels */
+
+  --radius:14px;
+  --radius-sm:10px;
+  --shadow-lg:0 14px 40px rgba(0,0,0,.45);
+  --shadow-md:0 8px 24px rgba(0,0,0,.35);
+  --shadow-sm:0 4px 14px rgba(0,0,0,.28);
 }
-body {
-  background-color: #0f0f0f;
-  color: #e4e6eb;
+
+/* ---------- Reset & Base ---------- */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(204,0,0,.08), transparent 60%),
+    radial-gradient(1000px 700px at 110% 20%, rgba(255,76,76,.06), transparent 60%),
+    var(--bg-0);
+  color:var(--text);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  min-height: 100vh;
-  padding: 12px;
+  display:flex;align-items:center;justify-content:center;
+  padding:16px;
 }
 
-/* Main Chat Container */
-.chat-container {
-  background-color: #202123;
-  width: 100%;
-  max-width: 600px;      /* narrower on phones, expands via media query */
-  height: 90vh;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-}
-
-/* Header */
-.logo-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  border-bottom: 1px solid #3e3f41;
-}
-.logo-wrapper {
-  flex-shrink: 0;
-}
-.logo-img {
-  height: 50px;          /* scaled down on phones */
-  object-fit: contain;
-}
-.header-title {
-  flex: 1;
-  text-align: center;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-/* Forklift Animation */
-/* Hidden by default; JS will show() and hide() it */
-.forklift-animation {
-  position: absolute;
-  top: 40%;
-  left: 0;
-  width: 100%;
-  height: auto;
-  display: none;          /* hide until JS starts it */
-  transform: translateY(-50%);
-  overflow: visible;
-  pointer-events: none;
-}
-.forklift-unit {
-  position: absolute;
-  left: 0;
-  transition: left 2s ease-in-out;
-}
-.forklift-img {
-  width: 160px;           /* smaller on phones */
-  height: auto;
-}
-
-/* Response Area */
-.response-area {
-  flex: 4;
-  padding: 16px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background-color: #1b1b1f;
-}
-
-/* Message Bubbles */
-.response-bubble {
-  max-width: 85%;
-  padding: 12px;
-  border-radius: 8px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  font-size: 14px;
-}
-.response-bubble.ai {
-  align-self: flex-start;
-  background-color: #2e2f33;
-}
-.response-bubble.user {
-  align-self: flex-end;
-  background-color: #3b3c40;
-}
-.section-label {
-  color: #ff4c4c;
-  font-weight: 600;
-  display: block;
-  margin-bottom: 4px;
-}
-
-/* Input Bar */
-.input-form {
-  display: flex;
-  align-items: center;
-  padding: 12px;
-  border-top: 1px solid #3e3f41;
-  background-color: #202123;
-}
-.input-form textarea {
-  flex: 1;
-  min-height: 80px;       /* a bit taller for touch */
-  padding: 8px;
-  font-size: 14px;
-  border: none;
-  border-radius: 6px;
-  background-color: #2e2f33;
-  color: #e4e6eb;
-  resize: vertical;
-  outline: none;
-}
-.input-form button {
-  margin-left: 8px;
-  padding: 8px 16px;
-  font-size: 14px;
-  background-color: #ff4c4c;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-.input-form button:hover {
-  background-color: #e04343;
-}
-
-/* Footer */
-.footer {
-  text-align: center;
-  padding: 8px;
-  font-size: 12px;
-  color: #888;
-  border-top: 1px solid #3e3f41;
-  background-color: #202123;
-}
-
-/* Desktop & larger tablets */
-@media (min-width: 768px) {
-  body {
-    padding: 20px;
-    align-items: center;
-    justify-content: center;
-  }
-  .chat-container {
-    max-width: 1000px;
-  }
-  .logo-img {
-    height: 80px;
-  }
-  .header-title {
-    font-size: 28px;
-  }
-  .forklift-img {
-    width: 200px;
-  }
-  .forklift-unit {
-    transition: left 2s ease-in-out;
-  }
-  .response-area {
-    padding: 24px;
-    gap: 16px;
-  }
-  .response-bubble {
-    font-size: 16px;
-    padding: 16px;
-  }
-  .input-form textarea {
-    min-height: 120px;
-    font-size: 16px;
-  }
-  .input-form button {
-    padding: 12px 24px;
-    font-size: 16px;
-  }
-  .footer {
-    padding: 12px;
-    font-size: 14px;
-  }
-}
-/* ── Auth layout: fully centered with logo above form ─────────────── */
-.auth-screen{
-  min-height: 100vh;
-  display: grid;
-  place-items: center;          /* centers horizontally + vertically */
-  padding: 24px;
-}
-
-.auth-wrap{
-  width: min(480px, 92vw);
-  margin: 0;                    /* center handled by grid above */
-}
-
-.auth-brand{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.auth-logo{
-  width: 120px;                 /* adjust to taste */
-  height: auto;
-}
-
-.auth-card{
-  background:#111;
-  border:1px solid #222;
-  border-radius:10px;
-  padding:18px;
-  box-shadow:0 6px 18px rgba(0,0,0,.35);
-}
-
-.auth-title{
-  margin:0 0 4px 0;
-  text-align:center;
-}
-.auth-subtitle{
-  margin:0 0 16px 0;
-  text-align:center;
-  color:#bbb;
-  font-size:.95rem;
-}
-
-.auth-error{
-  background:#2a0000;
-  border:1px solid #550000;
-  color:#ffb3b3;
-  border-radius:6px;
-  padding:8px 10px;
-  margin-bottom:12px;
-  font-size:.95rem;
-}
-
-.auth-field{
-  display:flex;
-  flex-direction:column;
-  margin:10px 0;
-}
-.auth-field label{
-  color:#aaa;
-  font-size:.9rem;
-  margin-bottom:6px;
-}
-.auth-input-wrap{
-  position:relative;
-  display:flex;
-  align-items:center;
-}
-.auth-input{
+/* ---------- Main Chat Container ---------- */
+.chat-container{
   width:100%;
-  padding:10px 12px;
-  border-radius:6px;
-  border:1px solid #333;
-  background:#000;
-  color:#fff;
-  outline:none;
-}
-.auth-input:focus{ border-color:#555; }
-
-.toggle-eye{
-  position:absolute;
-  right:8px;
-  background:transparent;
-  border:0;
-  color:#ddd;
-  cursor:pointer;
-  font-size:0.9rem;
+  max-width:1000px;
+  height:90vh;
+  background:linear-gradient(180deg, rgba(21,25,34,.92) 0%, rgba(17,20,25,.92) 100%);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);
+  display:flex;flex-direction:column;position:relative;overflow:hidden;
+  backdrop-filter:saturate(1.1) blur(6px);
 }
 
-.auth-actions{ margin-top:12px; }
-.auth-actions .btn{ width:100%; }
-
-.auth-footer{
-  color:#bbb;
-  text-align:center;
-  margin-top:12px;
-  font-size:.95rem;
+/* ---------- Header ---------- */
+.logo-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg, rgba(17,20,25,.85) 0%, rgba(17,20,25,.65) 100%);
 }
-.auth-footer a{ color:#fff; text-decoration:underline; }
-
-/* Mode toolbar */
-.toolbar{
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: 12px;              /* space from chat-container edges */
-  padding: 8px 12px;         /* inner padding */
-  background: #18191b;       /* matches site tones */
-  border: 1px solid #3e3f41; /* subtle frame like header/input bar */
-  border-radius: 8px;
+.logo-wrapper{flex-shrink:0}
+.logo-img{height:54px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
+.header-title{
+  flex:1;text-align:center;font-size:22px;font-weight:700;letter-spacing:.2px;
 }
 
-.toolbar label{
-  color: #ccc;
-  font-size: 0.9rem;
-  display: flex;
-  flex-direction: column;
+/* ---------- Optional top controls / toolbar ---------- */
+.toolbar,.top-controls{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  margin:12px 16px 0; padding:10px 12px;
+  background:rgba(24,26,31,.75);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-sm);
+}
+.toolbar label,
+.mode-label{color:var(--text-dim);font-size:.95rem}
+
+.toolbar select,
+.mode-select{
+  background:var(--bg-3);color:var(--text);
+  border:1px solid var(--border-2);border-radius:10px;
+  padding:8px 12px;outline:none;
+  transition:border-color .2s, box-shadow .2s;
+}
+.toolbar select:focus,
+.mode-select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(204,0,0,.25);
+}
+.map-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 14px;border-radius:10px;border:1px solid var(--border-2);
+  background:linear-gradient(180deg, #1c212b, #171b24);
+  font-weight:700;color:var(--accent);text-decoration:none;
+  transition:transform .06s ease, border-color .2s;
+}
+.map-btn:hover{border-color:var(--accent);transform:translateY(-1px)}
+
+/* ---------- Forklift Animation (unchanged behavior) ---------- */
+.forklift-animation{
+  position:absolute;top:42%;left:0;width:100%;height:auto;display:none;
+  transform:translateY(-50%);overflow:visible;pointer-events:none;
+}
+.forklift-unit{position:absolute;left:0;transition:left 2s ease-in-out}
+.forklift-img{width:200px;height:auto;opacity:.9;filter:drop-shadow(0 6px 14px rgba(0,0,0,.4))}
+
+/* ---------- Response Area ---------- */
+.response-area{
+  flex:1; padding:18px 18px 0; overflow-y:auto; display:flex; flex-direction:column; gap:14px;
+  background:
+    radial-gradient(500px 220px at 50% 10%, rgba(255,76,76,.05), transparent 60%),
+    transparent;
 }
 
-.toolbar select{
-  background: #2e2f33;
-  color: #e4e6eb;
-  border: 1px solid #3e3f41;
-  border-radius: 8px;
-  padding: 6px 10px;
-  outline: none;
+/* ---------- Message Bubbles ---------- */
+.response-bubble{
+  max-width:80%;
+  padding:14px 16px;border-radius:14px;line-height:1.6;white-space:pre-wrap;font-size:15px;
+  border:1px solid var(--border-2);
+  box-shadow:var(--shadow-sm);
+}
+.response-bubble.ai{
+  align-self:flex-start;background:linear-gradient(180deg, var(--bubble-ai), #171d28);
+}
+.response-bubble.user{
+  align-self:flex-end;background:linear-gradient(180deg, var(--bubble-user), #1b2230);
+}
+.section-label{
+  color:var(--accent-2);font-weight:700;display:block;margin-bottom:6px;letter-spacing:.2px;
 }
 
-.toolbar select:focus{
-  border-color: #ff4c4c;
-  box-shadow: 0 0 0 2px rgba(255, 76, 76, 0.25);
+/* ---------- Input Bar ---------- */
+.input-form{
+  display:flex;align-items:center;gap:10px;
+  padding:14px 16px 16px;border-top:1px solid var(--border);
+  background:linear-gradient(180deg, rgba(17,20,25,.88), rgba(17,20,25,.92));
+}
+.input-form textarea{
+  flex:1; min-height:80px; max-height:220px; padding:12px 14px;
+  font-size:15px; border:1px solid var(--border-2); border-radius:12px;
+  background:var(--bg-3); color:var(--text); resize:vertical; outline:none;
+  transition:border-color .2s, box-shadow .2s;
+}
+.input-form textarea:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(204,0,0,.22);
+}
+.input-form button{
+  padding:12px 20px; font-size:15px; font-weight:800; letter-spacing:.2px;
+  background:linear-gradient(180deg, #e63a3a, #c90000);
+  color:#fff; border:none; border-radius:12px; cursor:pointer;
+  box-shadow:0 8px 22px rgba(204,0,0,.35);
+  transition:transform .06s ease, filter .2s ease;
+}
+.input-form button:hover{filter:brightness(1.05)}
+.input-form button:active{transform:translateY(1px)}
+
+/* ---------- Footer ---------- */
+.footer{
+  text-align:center; padding:10px; font-size:12px; color:#97a0ab;
+  border-top:1px solid var(--border); background:rgba(17,20,25,.8);
 }
 
-/* Slightly scale for larger screens */
-@media (min-width: 768px){
-  .toolbar{ margin: 16px 16px 12px; padding: 10px 14px; }
-  .toolbar label{ font-size: 1rem; }
+/* ---------- Auth (centered) ---------- */
+.auth-screen{min-height:100vh;display:grid;place-items:center;padding:28px}
+.auth-wrap{width:min(520px,92vw)}
+.auth-brand{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:8px}
+.auth-logo{width:132px;height:auto;filter:drop-shadow(0 6px 16px rgba(0,0,0,.45))}
+.auth-card{
+  background:linear-gradient(180deg, rgba(20,23,29,.95), rgba(16,19,24,.95));
+  border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:var(--shadow-lg);
+}
+.auth-title{margin:0 0 4px;text-align:center;font-size:1.35rem}
+.auth-subtitle{margin:0 0 16px;text-align:center;color:var(--text-dim);font-size:.98rem}
+.auth-error{
+  background:#2a0000;border:1px solid #4d0000;color:#ffb3b3;border-radius:10px;
+  padding:10px 12px;margin-bottom:12px;font-size:.98rem;
+}
+.auth-field{display:flex;flex-direction:column;margin:12px 0}
+.auth-field label{color:var(--muted);font-size:.95rem;margin-bottom:6px}
+.auth-input-wrap{position:relative;display:flex;align-items:center}
+.auth-input{
+  width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border-2);
+  background:#0d1117;color:#fff;outline:none;transition:border-color .2s, box-shadow .2s;
+}
+.auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(204,0,0,.22)}
+.toggle-eye{position:absolute;right:10px;background:transparent;border:0;color:#ddd;cursor:pointer;font-size:.95rem}
+.auth-actions{margin-top:14px}
+.auth-actions .btn{width:100%}
+.auth-footer{color:var(--text-dim);text-align:center;margin-top:12px;font-size:.95rem}
+.auth-footer a{color:#fff;text-decoration:underline}
+
+/* ---------- AI Sidebar / Popups ---------- */
+.ai-sidebar{
+  position:fixed;top:0;right:-420px;width:420px;height:100%;
+  background:linear-gradient(180deg, rgba(20,24,30,.98), rgba(16,19,24,.98));
+  color:var(--text);box-shadow:-10px 0 30px rgba(0,0,0,.45);
+  overflow-y:auto;z-index:999;transition:right .28s ease-in-out;padding:22px;
+  border-left:1px solid var(--border);
+}
+.ai-sidebar.visible{right:0}
+.ai-sidebar-content{display:flex;flex-direction:column;gap:14px}
+.close-ai-btn{
+  background:var(--accent);color:#fff;font-size:22px;border:none;align-self:flex-end;
+  cursor:pointer;padding:6px 12px;border-radius:10px;box-shadow:var(--shadow-sm);
 }
 
-/* Top controls row */
-.top-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  margin: 8px 0 12px 0;
-  background: #fff;
-  border: 1px solid #e6e6e8;
-  border-radius: 10px;
+.ai-popup{
+  position:fixed;top:20px;right:20px;width:340px;max-height:80vh;
+  background:linear-gradient(180deg, #1b202a, #151a22);
+  border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-lg);
+  z-index:9999;padding:16px;overflow-y:auto;color:var(--text);
+}
+.ai-popup .ai-header{display:flex;justify-content:space-between;align-items:center;font-weight:700;margin-bottom:10px}
+.ai-popup button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer}
+.ai-popup pre{white-space:pre-wrap;font-size:13px;color:var(--text)}
+
+/* ---------- Utility Buttons ---------- */
+.btn{padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;border:1px solid transparent}
+.btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+.btn.primary:hover{filter:brightness(1.05)}
+.btn.outline{background:transparent;border-color:var(--border-2);color:var(--text)}
+.btn.outline:hover{border-color:var(--accent);color:#fff}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 767px){
+  body{padding:12px;align-items:flex-start}
+  .chat-container{max-width:600px;height:92vh}
+  .logo-img{height:44px}
+  .header-title{font-size:18px}
+  .toolbar,.top-controls{margin:10px 12px 0;padding:8px 10px}
+  .response-area{padding:14px 14px 0;gap:12px}
+  .response-bubble{font-size:14px;max-width:88%}
+  .input-form textarea{min-height:84px;font-size:14px}
+  .input-form button{padding:10px 16px;font-size:14px}
+  .ai-sidebar{width:92vw}
 }
 
-.top-controls .left {
-  display: flex; align-items: center; gap: 8px;
-}
-
-.mode-label {
-  font-size: 14px;
-  color: #333;
-}
-
-.mode-select {
-  appearance: none;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid #d0d0d5;
-  background: #fafafa;
-  font-size: 14px;
-}
-
-.map-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid #d0d0d5;
-  background: #fff;
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 14px;
-  color: #cc0000;           /* on-brand */
-}
-
-.map-btn:hover {
-  border-color: #cc0000;
-  background: #fff5f5;
-}
-
-/* AI Sidebar Popup */
-.ai-popup {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  width: 320px;
-  max-height: 80vh;
-  background: #fff;
-  border: 2px solid #cc0000;
-  border-radius: 8px;
-  box-shadow: 0 0 10px #0003;
-  z-index: 9999;
-  padding: 16px;
-  overflow-y: auto;
-}
-
-.ai-popup .ai-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: bold;
-  margin-bottom: 10px;
-}
-
-.ai-popup button {
-  background: #cc0000;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
-
-.ai-popup pre {
-  white-space: pre-wrap;
-  font-size: 13px;
-}
-
-.ai-sidebar {
-  position: fixed;
-  top: 0;
-  right: -400px;
-  width: 400px;
-  height: 100%;
-  background: #111;
-  color: #fff;
-  box-shadow: -2px 0 6px rgba(0,0,0,0.5);
-  overflow-y: auto;
-  z-index: 999;
-  transition: right 0.3s ease-in-out;
-  padding: 20px;
-}
-
-.ai-sidebar.visible {
-  right: 0;
-}
-
-.ai-sidebar-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.close-ai-btn {
-  background: #cc0000;
-  color: #fff;
-  font-size: 24px;
-  border: none;
-  align-self: flex-end;
-  cursor: pointer;
-  padding: 4px 12px;
-  border-radius: 4px;
+/* ---------- Motion Preference ---------- */
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important; scroll-behavior:auto !important}
 }
