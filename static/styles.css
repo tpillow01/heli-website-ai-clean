@@ -199,6 +199,28 @@ body{
   .forklift-img{width:200px}
 }
 
+/* === Brand + HELI: same color & size === */
+:root{
+  --brand-unified:#c4161c; /* pick your exact red */
+}
+
+/* desktop/default */
+.brand,
+.heli-text{
+  color:var(--brand-unified) !important;
+  font-size:26px !important;   /* match sizes */
+  font-weight:900;
+  line-height:1;
+}
+
+/* keep them matched on smaller screens too */
+@media (max-width: 900px){
+  .brand, .heli-text{ font-size:22px !important; }
+}
+@media (max-width: 520px){
+  .brand, .heli-text{ font-size:20px !important; }
+}
+
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; scroll-behavior:auto!important}
