@@ -1,46 +1,52 @@
 """
 Pure helper module: account lookup + model filtering + prompt context builder
+Grounds model picks strictly on models.json and parses user needs robustly.
 """
-
+from __future__ import annotations
 import json, re, difflib
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Tuple
 
 # ── load JSON once -------------------------------------------------------
 with open("accounts.json", "r", encoding="utf-8") as f:
     accounts_raw = json.load(f)
 
 with open("models.json", "r", encoding="utf-8") as f:
-    _raw = json.load(f)
-    # accept either a list or {"models":[...]}
-    models_raw: List[Dict[str, Any]] = _raw.get("models", _raw) if isinstance(_raw, dict) else _raw
+    models_raw: List[Dict[str, Any]] = json.load(f)
+
+# Common key aliases we’ll look for in models.json
+CAPACITY_KEYS = [
+    "Capacity_lbs", "capacity_lbs", "Capacity", "Rated Capacity", "Load Capacity",
+    "Capacity (lbs)", "capacity", "LoadCapacity", "capacityLbs", "RatedCapacity"
+]
+HEIGHT_KEYS = [
+    "Lift Height_in", "Max Lift Height (in)", "Lift Height", "Max Lift Height",
+    "Mast Height", "lift_height_in", "LiftHeight"
+]
+AISLE_KEYS = [
+    "Aisle_min_in", "Aisle Width_min_in", "Aisle Width (in)", "Min Aisle (in)"
+]
+POWER_KEYS = ["Power", "power", "Fuel", "fuel", "Drive"]
+TYPE_KEYS  = ["Type", "Category", "Segment", "Class"]
 
 # ── account helpers ------------------------------------------------------
-def get_account(text: str) -> Optional[Dict[str, Any]]:
-    """
-    Find a customer record by substring first, then fuzzy match.
-    """
+def get_account(text: str) -> Dict[str, Any] | None:
     low = text.lower()
-    for acct in accounts_raw:  # substring pass
-        name = str(acct.get("Account Name", "")).lower()
+    for acct in accounts_raw:                       # substring pass
+        name = str(acct.get("Account Name","")).lower()
         if name and name in low:
             return acct
-
-    names = [a.get("Account Name", "") for a in accounts_raw if a.get("Account Name")]
+    names = [a.get("Account Name","") for a in accounts_raw if a.get("Account Name")]
     close = difflib.get_close_matches(text, names, n=1, cutoff=0.7)
     if close:
         return next(a for a in accounts_raw if a.get("Account Name") == close[0])
     return None
 
 def customer_block(acct: Dict[str, Any]) -> str:
-    """
-    Pretty HTML-tagged customer profile for the LLM prompt.
-    """
     sic = acct.get("SIC Code", "N/A")
     try:
         sic = str(int(str(sic).split()[0]))
     except Exception:
         pass
-
     return (
         "<span class=\"section-label\">Customer Profile:</span>\n"
         f"- Company: {acct.get('Account Name')}\n"
@@ -50,279 +56,284 @@ def customer_block(acct: Dict[str, Any]) -> str:
         f"- Truck Types: {acct.get('Truck Types at Location', 'N/A')}\n\n"
     )
 
-# ── model helpers --------------------------------------------------------
-def _cap_val(value: Any) -> float:
-    """
-    Parse '5000 lbs', '3 ton', '2.5t', '3000', '2000 kg' → pounds (float).
-    """
-    s = str(value or "").lower().strip()
+# ── parsing helpers ------------------------------------------------------
+def _to_lbs(val: float, unit: str) -> float:
+    u = unit.lower()
+    if "kg" in u:
+        return float(val) * 2.20462
+    if "ton" in u and "metric" in u:
+        return float(val) * 2204.62
+    if "ton" in u:
+        return float(val) * 2000.0
+    return float(val)
 
-    # kg → lbs
-    kg_match = re.search(r"([\d,\.]+)\s*kg", s)
-    if kg_match:
-        kg = float(kg_match.group(1).replace(",", ""))
-        return kg * 2.20462
+def _to_inches(val: float, unit: str) -> float:
+    u = unit.lower()
+    if "ft" in u or "'" in u:
+        return float(val) * 12.0
+    return float(val)
 
-    # tons (t / ton / tons) → lbs (1 ton ≈ 2000 lb)
-    ton_match = re.search(r"([\d,\.]+)\s*(t|ton|tons)\b", s)
-    if ton_match:
-        t = float(ton_match.group(1).replace(",", ""))
-        return t * 2000.0
+def _num(s: Any) -> float | None:
+    if s is None:
+        return None
+    m = re.search(r"-?\d+(?:\.\d+)?", str(s))
+    return float(m.group(0)) if m else None
 
-    # lbs straight
-    lb_match = re.search(r"([\d,\.]+)\s*l(b|bs)\b", s)
-    if lb_match:
-        return float(lb_match.group(1).replace(",", ""))
-
-    # plain number fallback
-    m = re.search(r"[\d,\.]+", s)
-    if not m:
-        try:
-            return float(value) if value is not None else 0.0
-        except Exception:
-            return 0.0
-    return float(m.group(0).replace(",", ""))
-
-def _first(m: Dict[str, Any], *keys, default=None):
+def _num_from_keys(row: Dict[str,Any], keys: List[str]) -> float | None:
     for k in keys:
-        if k in m and m[k] not in (None, ""):
-            return m[k]
-    return default
+        if k in row and str(row[k]).strip() != "":
+            v = _num(row[k])
+            if v is not None:
+                return v
+    return None
 
-def _norm_power(v: Any) -> str:
-    s = str(v or "").lower()
-    if "electric" in s or "lith" in s: return "electric"
-    if "diesel" in s: return "diesel"
-    if "lpg" in s or "propane" in s or "gas" in s: return "lpg"
-    return s or "unknown"
+def _normalize_capacity_lbs(row: Dict[str,Any]) -> float | None:
+    # Try lbs directly
+    for k in CAPACITY_KEYS:
+        if k in row:
+            s = str(row[k])
+            # look for units
+            if re.search(r"\bkg\b", s, re.I):
+                v = _num(s)
+                return _to_lbs(v, "kg") if v is not None else None
+            if re.search(r"\btons?\b", s, re.I):
+                v = _num(s)
+                return _to_lbs(v, "ton") if v is not None else None
+            v = _num(s)
+            return v
+    return None
 
-def _has(m: Dict[str, Any], text: str) -> bool:
-    return text.lower() in json.dumps(m, ensure_ascii=False).lower()
+def _normalize_height_in(row: Dict[str,Any]) -> float | None:
+    for k in HEIGHT_KEYS:
+        if k in row:
+            s = str(row[k])
+            if re.search(r"\bft\b|'", s, re.I):
+                v = _num(s)
+                return _to_inches(v, "ft") if v is not None else None
+            v = _num(s)
+            return v
+    return None
 
-def _parse_question(q: str) -> Dict[str, Any]:
-    ql = (q or "").lower()
+def _normalize_aisle_in(row: Dict[str,Any]) -> float | None:
+    for k in AISLE_KEYS:
+        if k in row:
+            s = str(row[k])
+            if re.search(r"\bft\b|'", s, re.I):
+                v = _num(s)
+                return _to_inches(v, "ft") if v is not None else None
+            v = _num(s)
+            return v
+    return None
 
-    # capacity signals
-    cap = None
-    # "5000 lb(s)"
-    lb = re.search(r"(\d{3,6})\s*l(b|bs)\b", ql)
-    if lb:
-        cap = float(lb.group(1))
-    # "x.x ton / t"
-    tmatch = re.search(r"(\d+(\.\d+)?)\s*(t|ton|tons)\b", ql)
-    if tmatch:
-        cap = max(cap or 0.0, float(tmatch.group(1)) * 2000.0)
-    # "#### kg"
-    kg = re.search(r"(\d{3,6})\s*kg\b", ql)
-    if kg:
-        cap = max(cap or 0.0, float(kg.group(1)) * 2.20462)
+def _text_from_keys(row: Dict[str,Any], keys: List[str]) -> str:
+    for k in keys:
+        v = row.get(k)
+        if v:
+            return str(v)
+    return ""
 
-    # height signals
-    lift_in = None
-    # feet
-    ft = re.search(r"(\d{1,2})(\.\d+)?\s*(ft|foot|feet)\b", ql)
-    if ft:
-        lift_in = float(ft.group(1)) * 12.0
-    # inches
-    inch = re.search(r"(\d{2,3})\s*(in|inch|inches)\b", ql)
-    if inch:
-        lift_in = max(lift_in or 0.0, float(inch.group(1)))
+def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
+    t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model",""))).lower()
+    return any(word in t for word in ["reach", "vna", "order picker", "turret"]) or re.search(r"\b(cqd|rq|vna)\b", t)
 
-    # aisle width
+def _parse_requirements(q: str) -> Dict[str,Any]:
+    ql = q.lower()
+
+    # capacity: lbs / tons / kg
+    cap_lbs = None
+    # "5000 lb", "5,000 lbs"
+    m = re.findall(r"(\d[\d,\.]*)\s*(?:lb|lbs)\b", ql)
+    if m:
+        cap_lbs = _to_lbs(float(m[-1].replace(",","")), "lb")
+    # "3 ton", "3.5 tons"
+    if cap_lbs is None:
+        m = re.findall(r"(\d[\d,\.]*)\s*tons?\b", ql)
+        if m:
+            cap_lbs = _to_lbs(float(m[-1].replace(",","")), "ton")
+    # "2000 kg"
+    if cap_lbs is None:
+        m = re.findall(r"(\d[\d,\.]*)\s*kg\b", ql)
+        if m:
+            cap_lbs = _to_lbs(float(m[-1].replace(",","")), "kg")
+
+    # height: ft/in
+    height_in = None
+    m = re.findall(r"(\d[\d,\.]*)\s*(?:ft|feet|')\b", ql)
+    if m:
+        height_in = _to_inches(float(m[-1].replace(",","")), "ft")
+    if height_in is None:
+        m = re.findall(r"(\d[\d,\.]*)\s*(?:in|\"|inches)\b", ql)
+        if m and "aisle" not in ql[m[-1].start() if hasattr(m[-1],'start') else 0:]:
+            height_in = float(m[-1].replace(",",""))
+
+    # aisle: look for "aisle" nearby
     aisle_in = None
-    a_in = re.search(r"aisle[s]?\s*(of|to|around|about)?\s*(\d{2,3})\s*(in|inch|inches)\b", ql)
-    if a_in:
-        aisle_in = float(a_in.group(2))
+    m = re.search(r"(?:aisle|aisles)[^\d]{0,10}(\d[\d,\.]*)\s*(?:in|\"|inches|ft|')", ql)
+    if m:
+        raw = m.group(1)
+        unit = m.group(0)
+        if "ft" in unit or "'" in unit:
+            aisle_in = _to_inches(float(raw.replace(",","")), "ft")
+        else:
+            aisle_in = float(raw.replace(",",""))
 
-    # power preference
-    power = None
-    if "electric" in ql or "lithium" in ql or "battery" in ql: power = "electric"
-    elif "diesel" in ql: power = "diesel"
-    elif "propane" in ql or "lpg" in ql or "gas" in ql: power = "lpg"
+    power_pref = None
+    if "electric" in ql or "lithium" in ql:
+        power_pref = "electric"
+    elif "diesel" in ql:
+        power_pref = "diesel"
+    elif "lpg" in ql or "propane" in ql:
+        power_pref = "lpg"
 
-    # environment
-    indoor = True if "indoor" in ql or "warehouse" in ql else None
-    outdoor = True if "outdoor" in ql or "yard" in ql else None
-    rough   = True if "rough" in ql or "gravel" in ql or "construction" in ql else None
-    narrow  = True if "narrow" in ql or "reach" in ql or "very tight" in ql else None
+    indoor = "indoor" in ql or "warehouse" in ql
+    outdoor = "outdoor" in ql or "yard" in ql or "rough" in ql
+    narrow  = "narrow aisle" in ql or "very narrow" in ql or (aisle_in is not None and aisle_in <= 96)
 
-    return {
-        "capacity_min_lb": cap,
-        "lift_height_min_in": lift_in,
-        "aisle_max_in": aisle_in,
-        "power_pref": power,
-        "indoor": indoor,
-        "outdoor": outdoor,
-        "rough": rough,
-        "narrow": narrow,
-    }
+    tire_pref = "cushion" if "cushion" in ql else ("pneumatic" if "pneumatic" in ql else None)
 
-# --- NEW: expose selected models & a small block for grounding ----------
+    return dict(
+        cap_lbs=cap_lbs, height_in=height_in, aisle_in=aisle_in,
+        power_pref=power_pref, indoor=indoor, outdoor=outdoor,
+        narrow=narrow, tire_pref=tire_pref
+    )
+
+def _capacity_of(row: Dict[str,Any]) -> float | None:
+    return _normalize_capacity_lbs(row)
+
+def _height_of(row: Dict[str,Any]) -> float | None:
+    return _normalize_height_in(row)
+
+def _aisle_of(row: Dict[str,Any]) -> float | None:
+    return _normalize_aisle_in(row)
+
+def _power_of(row: Dict[str,Any]) -> str:
+    return _text_from_keys(row, POWER_KEYS).lower()
+
+def _tire_of(row: Dict[str,Any]) -> str:
+    return str(row.get("Tire Type","") or row.get("Tires","")).lower()
+
 def _safe_model_name(m: Dict[str, Any]) -> str:
-    # Reuse your existing mapping logic if you prefer; this is a safe fallback.
-    for k in ("Model", "model", "code", "name"):
+    for k in ("Model","model","code","name","Code"):
         if m.get(k):
             return str(m[k]).strip()
     return "N/A"
 
-def select_models_for_question(user_q: str, k: int = 5):
-    """Return (hits, allowed_names) for strict grounding."""
-    hits = filter_models(user_q, limit=k)
-    allowed = [_safe_model_name(m) for m in hits if _safe_model_name(m) != "N/A"]
-    return hits, allowed
-
-def allowed_models_block(allowed: list[str]) -> str:
-    if not allowed:
-        return "ALLOWED MODELS:\n(none – say 'No exact match from our lineup.')"
-    return "ALLOWED MODELS:\n" + "\n".join(f"- {x}" for x in allowed)
-
-def _model_capacity_lb(m: Dict[str, Any]) -> float:
-    return _cap_val(_first(m, "Capacity_lbs", "capacity_lbs", "capacity_lb", "Capacity", "Rated Capacity (lb)", "Rated Capacity", "Load Capacity", default=0))
-
-def _model_power(m: Dict[str, Any]) -> str:
-    return _norm_power(_first(m, "Power", "power", "Fuel", "Fuel Type", "Fuel_Type", default=""))
-
-def _model_tire(m: Dict[str, Any]) -> str:
-    return str(_first(m, "Tire Type", "Tire", "Tires", "tire_type", default="")).strip()
-
-def _model_attachments(m: Dict[str, Any]) -> str:
-    v = _first(m, "Attachments", "attachments", default="")
-    if isinstance(v, list):
-        return ", ".join(v)
-    return str(v or "")
-
-def _model_name(m: Dict[str, Any]) -> str:
-    return str(_first(m, "Model", "model", "code", "name", default="N/A")).strip()
-
+# ── model filtering & ranking -------------------------------------------
 def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """
-    Robust rule-set:
-      • parse capacity (lbs / tons / kg), lift height, aisle width, power hints
-      • soft match environment (indoor/outdoor, rough, narrow)
-      • never return an empty list — fallback to top by capacity
-    """
-    cand = list(models_raw)
-    if not cand:
-        return []
+    want = _parse_requirements(user_q)
+    cap_need = want["cap_lbs"]
+    aisle_need = want["aisle_in"]
+    power_pref = want["power_pref"]
+    narrow     = want["narrow"]
+    tire_pref  = want["tire_pref"]
+    height_need= want["height_in"]
 
-    parsed = _parse_question(user_q)
+    scored: List[Tuple[float, Dict[str,Any]]] = []
 
-    # hard-ish filters
-    if parsed["capacity_min_lb"]:
-        need = parsed["capacity_min_lb"]
-        cand = [m for m in cand if _model_capacity_lb(m) >= need]
+    for m in models_raw:
+        cap = _capacity_of(m) or 0.0
+        powr = _power_of(m)
+        tire = _tire_of(m)
+        ais  = _aisle_of(m)
+        hgt  = _height_of(m)
+        reach_like = _is_reach_or_vna(m)
 
-    # aisle constraint (narrow-aisle / reach)
-    if parsed["aisle_max_in"]:
-        # If model has explicit aisle_min_in key, honor it. Otherwise, prefer known narrow-aisle types.
-        filtered = []
-        for m in cand:
-            aisle_val = _first(m, "aisle_min_in", "Aisle_Min_In", "Aisle", default=None)
-            if aisle_val is not None:
-                try:
-                    if float(str(aisle_val)) <= parsed["aisle_max_in"]:
-                        filtered.append(m)
-                    continue
-                except Exception:
-                    pass
-            # heuristic: include reach/order picker/pallet stacker in narrow aisles
-            if parsed["aisle_max_in"] <= 96 and (
-                _has(m, "reach") or _has(m, "order picker") or _has(m, "very narrow") or _has(m, "vna")
-            ):
-                filtered.append(m)
-        cand = filtered or cand
+        # Hard filters
+        if cap_need and cap > 0 and cap < cap_need:
+            continue
+        if aisle_need and ais and ais > aisle_need:
+            continue
+        if narrow and not reach_like and aisle_need and not ais:
+            # if they need narrow and model isn't reach/VNA and lacks aisle spec → lightly penalize later
+            pass
 
-    # power preferences (soft if not present)
-    if parsed["power_pref"]:
-        p = parsed["power_pref"]
-        pref = [m for m in cand if _model_power(m) == p]
-        cand = pref or cand
-
-    # environment hints (soft scoring later)
-
-    # scoring
-    scored = []
-    for m in cand:
+        # Score
         s = 0.0
-        cap = _model_capacity_lb(m)
-        if parsed["capacity_min_lb"]:
-            margin = max(0.0, cap - parsed["capacity_min_lb"])
-            # prefer modest overkill vs massive overkill
-            s += 2.0 - (margin / 4000.0)
 
-        if parsed["power_pref"]:
-            s += 1.0 if _model_power(m) == parsed["power_pref"] else -0.5
+        # capacity closeness: modest overage OK, huge overkill penalized
+        if cap_need and cap:
+            over = (cap - cap_need) / cap_need
+            if over >= 0:
+                s += 2.0 - min(2.0, over)   # 0..2 → smaller overkill gets more points
+            else:
+                s -= 5.0                     # should've been filtered, but just in case
 
-        tires = _model_tire(m).lower()
-        if parsed["indoor"] is True:
-            if "cushion" in tires: s += 0.5
-            if "pneumatic" in tires: s -= 0.2
-        if parsed["outdoor"] is True:
-            if "pneumatic" in tires: s += 0.5
-        if parsed["rough"] is True:
-            if "rough" in tires or "pneumatic" in tires: s += 0.5
+        # power match
+        if power_pref:
+            s += 1.2 if power_pref in powr else -0.6
 
-        if parsed["narrow"] is True:
-            if _has(m, "reach") or "reach" in _model_name(m).lower(): s += 0.6
+        # tire preference
+        if tire_pref:
+            s += 0.6 if tire_pref in tire else -0.2
 
-        # small nudge for lift height (if present)
-        req_h = parsed["lift_height_min_in"]
-        if req_h:
-            h = _first(m, "Lift_Height_In", "lift_height_in", "Max Lift Height (in)", "Max Lift Height", default=None)
-            try:
-                if h and float(str(h)) >= req_h:
-                    s += 0.4
-            except Exception:
-                pass
+        # aisle/narrow
+        if aisle_need:
+            if ais:
+                # the smaller the required aisle, the better if model meets it
+                s += 0.8 if ais <= aisle_need else -1.0
+            else:
+                s += 0.6 if (narrow and reach_like) else 0.0
+        elif narrow:
+            s += 0.8 if reach_like else -0.2
+
+        # lift height: bonus if model meets it
+        if height_need and hgt:
+            s += 0.4 if hgt >= height_need else -0.3
+
+        # small tie-breakers
+        s += 0.05  # prevent exact ties from dropping
 
         scored.append((s, m))
 
     if not scored:
-        # fallback: show something deterministic
-        cand.sort(key=lambda m: (_model_capacity_lb(m), _model_name(m)))
-        return cand[:limit]
+        # fall back: just pick by capacity (descending) to avoid empty list
+        fallback = sorted(models_raw, key=lambda r: (_capacity_of(r) or 0.0), reverse=True)
+        return fallback[:limit]
 
-    scored.sort(key=lambda t: t[0], reverse=True)
-    return [m for _, m in scored[:limit]]
+    ranked = sorted(scored, key=lambda t: t[0], reverse=True)
+    return [m for _, m in ranked[:limit]]
 
 # ── build final prompt chunk --------------------------------------------
-def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> str:
-    """
-    Sections:
-      (optional) Customer Profile
-      Recommended Heli Models:
-         for each → Model, Power, Capacity, Tire Type, Attachments, Comparison
-      raw user question (so GPT sees the ask verbatim)
-    """
+def generate_forklift_context(user_q: str, acct: Dict[str, Any] | None) -> str:
     lines: list[str] = []
-
-    # 1) customer profile
     if acct:
         lines.append(customer_block(acct))
 
-    # 2) recommended models (ground the LLM on EXACT items)
     hits = filter_models(user_q)
     if hits:
         lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
         for m in hits:
             lines += [
                 "<span class=\"section-label\">Model:</span>",
-                f"- { _model_name(m) }",
+                f"- {_safe_model_name(m)}",
                 "<span class=\"section-label\">Power:</span>",
-                f"- { _model_power(m) }",
+                f"- {_text_from_keys(m, POWER_KEYS) or 'N/A'}",
                 "<span class=\"section-label\">Capacity:</span>",
-                f"- { int(_model_capacity_lb(m)) } lbs",
+                f"- {(_normalize_capacity_lbs(m) or 'N/A')}",
                 "<span class=\"section-label\">Tire Type:</span>",
-                f"- { _model_tire(m) or 'N/A' }",
+                f"- {_tire_of(m) or 'N/A'}",
                 "<span class=\"section-label\">Attachments:</span>",
-                f"- { _model_attachments(m) or 'N/A' }",
+                f"- {str(m.get('Attachments','N/A'))}",
                 "<span class=\"section-label\">Comparison:</span>",
                 "- Similar capacity models available from Toyota or CAT are typically higher cost.\n"
             ]
     else:
         lines.append("No matching models found in the provided data.\n")
 
-    # 3) raw question last
     lines.append(user_q)
-
     return "\n".join(lines)
+
+# --- NEW: expose selected list + ALLOWED block for strict grounding ------
+def select_models_for_question(user_q: str, k: int = 5):
+    hits = filter_models(user_q, limit=k)
+    allowed = []
+    for m in hits:
+        nm = _safe_model_name(m)
+        if nm != "N/A":
+            allowed.append(nm)
+    return hits, allowed
+
+def allowed_models_block(allowed: list[str]) -> str:
+    if not allowed:
+        return "ALLOWED MODELS:\n(none – say 'No exact match from our lineup.')"
+    return "ALLOWED MODELS:\n" + "\n".join(f"- {x}" for x in allowed)

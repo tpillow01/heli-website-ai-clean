@@ -1,10 +1,5 @@
 # app.py
-import os
-import re
-import json
-import pandas as pd
-import difflib
-import sqlite3
+import os, json, difflib, sqlite3, re
 from datetime import timedelta
 
 from flask import (
@@ -14,7 +9,7 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
-# internal helpers for forklift grounding
+# Our model-grounding helpers
 from ai_logic import (
     generate_forklift_context,
     select_models_for_question,
@@ -101,7 +96,7 @@ def find_account_by_name(text: str):
         return next(a for a in account_data if a.get("Account Name") == match[0])
     return None
 
-# ─── Web routes ──────────────────────────────────────────────────────────
+# ─── Routes: App pages ───────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def home():
@@ -117,7 +112,7 @@ def login():
             return render_template("login.html", error="Invalid email or password.", email=email), 401
         session.permanent = True
         session["user_id"] = user["id"]
-        session["email"] = user["email"]
+        session["email"]   = user["email"]
         return redirect(request.args.get("next") or url_for("home"))
     return render_template("login.html")
 
@@ -139,7 +134,7 @@ def signup():
             return render_template("signup.html", error=f"Could not create user: {e}", email=email), 500
         user = find_user_by_email(email)
         session["user_id"] = user["id"]
-        session["email"] = user["email"]
+        session["email"]   = user["email"]
         return redirect(url_for("home"))
     return render_template("signup.html")
 
@@ -148,12 +143,19 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ─── Helper: enforce ONLY allowed model codes in reply ───────────────────
+# ─── Prompt leak cleaner & model enforcement ─────────────────────────────
+def _strip_prompt_leak(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    # Remove any echoed “Guidelines:” or “ALLOWED MODELS” blocks
+    text = re.sub(r'(?is)\nGuidelines:\n.*$', '', text).strip()
+    text = re.sub(r'(?is)\nALLOWED MODELS:\n(?:- .*\n?)*', '\n', text).strip()
+    return text
+
 def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     """
-    Replace the 'Model:' section with the allowed list.
-    If there's no Model section, prepend one.
-    Also scrub any codes not in the allowed set.
+    Force the 'Model:' section to contain only the allowed model codes (from models.json).
+    If no allowed models, replace with a 'No exact match…' line.
     """
     if not isinstance(text, str):
         return text
@@ -165,35 +167,32 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
                 r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
                 f"\n{forced}\n",
                 text,
-                flags=re.MULTILINE
+                flags=re.MULTILINE,
             )
         else:
             text = forced + "\n" + text
-        return text
+        return _strip_prompt_leak(text)
 
-    # Build deterministic Model block
     forced = "Model:\n" + "\n".join(f"- {x}" for x in allowed) + "\n"
-
-    # Replace existing Model block or prepend if missing
     if "Model:" in text:
         text = re.sub(
             r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
             f"\n{forced}\n",
             text,
-            flags=re.MULTILINE
+            flags=re.MULTILINE,
         )
     else:
         text = forced + "\n" + text
 
-    # Scrub invented codes (ALLCAPS + digits/hyphen pattern)
+    # Scrub any other model-like tokens not in allowed
     tokens = set(re.findall(r'\b[A-Z]{2,}[A-Z0-9\-]{1,}\b', text))
     for tok in tokens:
         if tok not in allowed and tok not in {"N/A"}:
             text = re.sub(rf'\b{re.escape(tok)}\b', '', text)
     text = re.sub(r'[ ]{2,}', ' ', text)
-    return text
+    return _strip_prompt_leak(text)
 
-# ─── Chat API ────────────────────────────────────────────────────────────
+# ─── Chat API (Recommendation + Inquiry) ─────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
@@ -206,7 +205,7 @@ def chat():
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
-    # ───────── Inquiry mode ─────────
+    # ───────── Inquiry mode (full flow) ─────────
     if mode == "inquiry":
         from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
 
@@ -248,36 +247,28 @@ def chat():
             "role": "system",
             "content": (
                 "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
-                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
-                "\n"
-                "Write the answer with these exact section headers and spacing. Use short, one-sentence bullets with hyphens. No bold or markdown syntax.\n"
-                "\n"
+                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n\n"
+                "Write the answer with these exact section headers and spacing. Use short, one-sentence bullets with hyphens. No bold or markdown syntax.\n\n"
                 "Segmentation: <LETTER><NUMBER>\n"
                 "- Account Size: <LETTER>\n"
                 "- Relationship: <NUMBER>\n"
                 "- <LETTER> — meaning (e.g., D — small account size)\n"
-                "- <NUMBER> — meaning (e.g., 3 — limited breadth of offerings)\n"
-                "\n"
+                "- <NUMBER> — meaning (e.g., 3 — limited breadth of offerings)\n\n"
                 "Current Pattern\n"
                 "- Top spending months: Month YYYY ($#,###), Month YYYY ($#,###), Month YYYY ($#,###)\n"
                 "- Top offerings: e.g., Parts ($#,###), Service ($#,###)\n"
-                "- Frequency: Average of N days between invoices\n"
-                "\n"
+                "- Frequency: Average of N days between invoices\n\n"
                 "Visit Plan\n"
                 "- Lead with: <one offering> (Service, Parts, Rental or New Equipment) — choose the category with the highest billing total in the context block, and briefly why that gap or trend suggests this focus.\n"
-                "- Optional backup: <one secondary area> tied to the next-highest billing category.\n"
-                "\n"
+                "- Optional backup: <one secondary area> tied to the next-highest billing category.\n\n"
                 "Next Level (from <LETTER><NUM> → next better only)\n"
                 "- Relationship requirement: specify exactly how many new distinct offerings are needed to reach the next tier (do not skip tiers).\n"
                 "- Best candidates to add: list 1–3 offerings based on gaps and what they already buy.\n"
-                "- Size path (only if applicable): if moving up a size is the next improvement, state the R12 target (e.g., 'Grow to ≥ $10,000 to move D→C'). Never skip sizes.\n"
-                "\n"
+                "- Size path (only if applicable): if moving up a size is the next improvement, state the R12 target (e.g., 'Grow to ≥ $10,000 to move D→C'). Never skip sizes.\n\n"
                 "Next Actions\n"
-                "- Three concrete, do-today tasks that align with the Visit Plan and Next Level steps.\n"
-                "\n"
+                "- Three concrete, do-today tasks that align with the Visit Plan and Next Level steps.\n\n"
                 "Recent Invoices\n"
-                "- List up to 5 most recent invoices as: YYYY-MM-DD | Type | $Amount | Description (omit description if blank)\n"
-                "\n"
+                "- List up to 5 most recent invoices as: YYYY-MM-DD | Type | $Amount | Description (omit description if blank)\n\n"
                 "Rules:\n"
                 "- Use only numbers and facts present in the context blocks. No estimates beyond what is provided.\n"
                 "- Keep each bullet on one line. No bold, no asterisks, no extra prose.\n"
@@ -307,7 +298,7 @@ def chat():
         tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
-    # ───────── Recommendation mode (grounded to models.json) ─────────
+    # ───────── Recommendation mode with strict grounding ─────────
     acct = find_account_by_name(user_q)
     context_input = user_q
     if acct:
@@ -321,8 +312,10 @@ def chat():
         )
         context_input = profile_ctx + user_q
 
-    # Build prompt context + select allowed models for hard grounding
+    # Build the human-visible context (profile + our parsed model details)
     prompt_ctx = generate_forklift_context(context_input, acct)
+
+    # Choose allowed models from models.json for THIS question
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
 
@@ -330,73 +323,47 @@ def chat():
         "role": "system",
         "content": (
             "You are a friendly, expert Heli Forklift sales assistant.\n"
-            "When a user asks for a recommendation, always respond in the following structured sections, in order:\n\n"
+            "Output ONLY these sections in this order and nothing else:\n"
             "Customer Profile:\n"
-            "- Company: <Account Name>\n"
-            "- Industry: <Industry>\n"
-            "- SIC Code: <SIC Code>\n"
-            "- Fleet Size: <Total Company Fleet Size>\n"
-            "- Truck Types: <Truck Types at Location>\n\n"
             "Model:\n"
-            "- List one or more forklift model codes (e.g., CPD25, CQD16) that best fit the customer's needs.\n\n"
             "Power:\n"
-            "- Specify power options (electric, LPG, diesel) with brief pros/cons tailored to their environment.\n\n"
             "Capacity:\n"
-            "- Recommend capacity range with rationale (e.g., \"2.5–3.5 ton for medium-duty warehouse use\").\n\n"
             "Tire Type:\n"
-            "- Suggest cushion or pneumatic tires, based on indoor/outdoor use and floor conditions.\n\n"
             "Attachments:\n"
-            "- Propose any useful attachments (e.g., side shifters, fork positioners) tied to their operation.\n\n"
             "Comparison:\n"
-            "- If offering multiple models, include a brief bullet-list comparison of key specs.\n\n"
             "Sales Pitch Techniques:\n"
-            "- Two concise, persuasive talking points (e.g., cost-savings, uptime benefits).\n\n"
             "Common Objections:\n"
-            "- Two likely customer concerns plus how to overcome each.\n\n"
-            "Guidelines:\n"
-            "- Cite model codes exactly as they appear in models.json.\n"
-            "- Use hyphens for bullets; indent sub-points by two spaces.\n"
-            "- Keep each bullet to one clear sentence.\n"
-            "- Write in a confident, consultative tone; no unnecessary jargon.\n"
-            "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent or introduce other codes.\n"
-            "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming any model codes.\n"
+            "Rules:\n"
             "\n"
-            "Now, based on the user’s question and their Customer Profile, fill in each section with tailored, data-driven recommendations."
+            "Guidelines:\n"
+            "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent other codes.\n"
+            "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming model codes.\n"
+            "- Do NOT repeat these instructions or the ALLOWED MODELS block in your answer.\n"
         )
     }
 
     messages = [
         system_prompt,
-        {"role": "system", "content": allowed_block},  # hard grounding list
-        {"role": "user", "content": prompt_ctx}
+        {"role": "system", "content": allowed_block},  # strict grounding list
+        {"role": "user",   "content": prompt_ctx}
     ]
-
-    # Trim if needed
-    try:
-        import tiktoken
-        enc = tiktoken.encoding_for_model("gpt-4")
-        while sum(len(enc.encode(m["content"])) for m in messages) > 7000 and len(messages) > 2:
-            messages.pop(1)
-    except Exception:
-        pass
 
     try:
         resp = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
             max_tokens=600,
-            temperature=0.7
+            temperature=0.6
         )
         ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
-    # Enforce only allowed model codes in the final text
+    # Enforce allowed models & strip any prompt leakage
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-
     return jsonify({"response": ai_reply})
 
-# ─── Optional data endpoints ─────────────────────────────────────────────
+# ─── Modes list (optional UI helper) ─────────────────────────────────────
 @app.route("/api/modes")
 def api_modes():
     return jsonify([
@@ -417,37 +384,37 @@ def api_locations():
     Build map points from customer_location.csv (your exact headers) and
     attach Sales Rep from customer_report.csv for territory coloring.
     """
-    import csv, json as _json, re
+    import csv, json as _json, re as _re
     import pandas as _pd
     from difflib import get_close_matches
     from flask import Response as _Response
 
     # -------- helpers --------
     def strip_suffixes(s: str) -> str:
-        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                      "", s or "", flags=re.IGNORECASE)
+        return _re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+                      "", s or "", flags=_re.IGNORECASE)
 
     def norm_name(s: str) -> str:
         s = strip_suffixes(s or "")
         s = s.lower()
-        s = re.sub(r"[^a-z0-9]+", " ", s)
-        return re.sub(r"\s+", " ", s).strip()
+        s = _re.sub(r"[^a-z0-9]+", " ", s)
+        return _re.sub(r"\s+", " ", s).strip()
 
     def norm_city(s: str) -> str:
         s = (s or "").lower()
-        s = re.sub(r"[^a-z0-9]+", " ", s)
-        return re.sub(r"\s+", " ", s).strip()
+        s = _re.sub(r"[^a-z0-9]+", " ", s)
+        return _re.sub(r"\s+", " ", s).strip()
 
     def state_from_county_state(v: str) -> str:
-        parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
+        parts = _re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return parts[-1].upper() if len(parts) >= 2 else ""
 
     def county_from_county_state(v: str) -> str:
-        parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
+        parts = _re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return " ".join(parts[:-1]) if len(parts) >= 2 else ""
 
     def zip5(z: str) -> str:
-        m = re.search(r"\d{5}", str(z or ""))
+        m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
 
     def to_float(x):
@@ -538,6 +505,7 @@ def api_locations():
             return rep_idx_norm_city_state[key_cs]
         if n in rep_idx_norm:
             return rep_idx_norm[n]
+        # fuzzy fallback to reduce "Unassigned"
         if rep_norm_keys:
             guess = get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
             if guess:
@@ -561,6 +529,7 @@ def api_locations():
                 lat = to_float(row.get("Min of Latitude", ""))
                 lon = to_float(row.get("Min of Longitude", ""))
 
+                # require valid coordinates
                 if lat is None or lon is None:
                     continue
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
@@ -599,11 +568,8 @@ def ai_map_analysis():
     Build AI insight from customer_report.csv using the correct row(s).
     Returns a brief analysis that includes the actual dollar figures.
     """
-    import os, re
-    import pandas as pd
-    from flask import jsonify, request
+    import pandas as pd, re
     from difflib import get_close_matches
-    from openai import OpenAI
 
     try:
         payload = request.get_json(force=True) or {}
@@ -621,6 +587,7 @@ def ai_map_analysis():
             print("❌ ai_map_analysis read error:", e)
             return jsonify({"error": "Could not read customer_report.csv"}), 500
 
+        # Columns
         SOLD    = "Sold to Name"
         SHIP    = "Ship to Name"
         SOLD_ID = "Sold to ID"
@@ -640,6 +607,7 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket",
         ]
 
+        # Helpers
         def strip_suffixes(s: str) -> str:
             return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                           "", s or "", flags=re.IGNORECASE)
@@ -664,6 +632,7 @@ def ai_map_analysis():
                 m = re.search(r"-?\d+(\.\d+)?", s)
                 return float(m.group(0)) if m else 0.0
 
+        # Precompute
         df["_sold_norm"] = df[SOLD].apply(norm_name)
         df["_ship_norm"] = df[SHIP].apply(norm_name)
         df["_zip5"]      = df[ZIP].apply(zip5)
@@ -676,6 +645,7 @@ def ai_map_analysis():
         city_norm  = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
         state_abbr = state_hint
 
+        # Matching
         m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
         m_norm  = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
 
@@ -708,6 +678,7 @@ def ai_map_analysis():
             print("❌ No match found for:", customer_raw)
             return jsonify({"error": f"No data found for {customer_raw}"}), 200
 
+        # Aggregate by Sold to ID when possible
         has_any_sold_id = (hit[SOLD_ID].astype(str).str.strip() != "").any()
         if has_any_sold_id:
             chosen_group_id = hit[SOLD_ID].astype(str).str.strip().iloc[0]
@@ -716,10 +687,12 @@ def ai_map_analysis():
             base_norm = norm_name(hit[SOLD].iloc[0])
             group_df = df[df[SOLD].apply(norm_name) == base_norm]
 
+        # Totals
         totals = {}
         for col in REV_COLS:
             totals[col] = group_df[col].map(money_to_float).sum() if col in group_df.columns else 0.0
 
+        # Segment (full code like "C3")
         seg_val = ""
         if SEG in group_df.columns:
             mode_series = group_df[SEG].astype(str).str.strip().replace("", pd.NA).dropna().mode()
@@ -728,6 +701,7 @@ def ai_map_analysis():
 
         display_name = customer_raw or (hit[SOLD].iloc[0] if SOLD in hit.columns else "")
 
+        # Metrics block (explicit numbers)
         lines = [f"Customer: {display_name}"]
         if seg_val:
             lines.append(f"Segment: {seg_val}")
@@ -775,7 +749,7 @@ Keep it crisp and sales-focused.
         print("❌ Error during AI map analysis:", e)
         return jsonify({"error": str(e)}), 500
 
-# --- Segment lookup for map popups (from customer_report.csv) --------------
+# --- Segment lookup for map popups (from customer_report.csv) -------------
 @app.route("/api/segments")
 @login_required
 def api_segments():
@@ -853,6 +827,6 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
-# ─── Entrypoint ───────────────────────────────────────────────────────────
+# ─── Entrypoint ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
