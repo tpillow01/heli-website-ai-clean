@@ -1,19 +1,19 @@
-# app.py
+# app.py  — no "Rules:" section in AI responses
 import os, json, difflib, sqlite3, re
 from datetime import timedelta
+from functools import wraps
 
 from flask import (
     Flask, render_template, request, jsonify, redirect, url_for, session, Response
 )
-from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
-# Our model-grounding helpers
+# Grounding helpers from your ai_logic.py
 from ai_logic import (
     generate_forklift_context,
-    select_models_for_question,
-    allowed_models_block,
+    select_models_for_question,   # must exist in ai_logic.py
+    allowed_models_block          # must exist in ai_logic.py
 )
 
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
@@ -96,7 +96,7 @@ def find_account_by_name(text: str):
         return next(a for a in account_data if a.get("Account Name") == match[0])
     return None
 
-# ─── Routes: App pages ───────────────────────────────────────────────────
+# ─── Pages ───────────────────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def home():
@@ -147,15 +147,16 @@ def logout():
 def _strip_prompt_leak(text: str) -> str:
     if not isinstance(text, str):
         return text
-    # Remove any echoed “Guidelines:” or “ALLOWED MODELS” blocks
-    text = re.sub(r'(?is)\nGuidelines:\n.*$', '', text).strip()
+    # Remove echoed “Guidelines:”, “Rules:”, or “ALLOWED MODELS” blocks if the model leaks them
+    text = re.sub(r'(?is)\nGuidelines:\n(?:.*\n?)*?(?=\n[A-Z][^\n]*:|\Z)', '\n', text).strip()
+    text = re.sub(r'(?is)\nRules:\n(?:.*\n?)*?(?=\n[A-Z][^\n]*:|\Z)', '\n', text).strip()
     text = re.sub(r'(?is)\nALLOWED MODELS:\n(?:- .*\n?)*', '\n', text).strip()
     return text
 
 def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     """
-    Force the 'Model:' section to contain only the allowed model codes (from models.json).
-    If no allowed models, replace with a 'No exact match…' line.
+    Force the 'Model:' section to contain only the allowed model codes.
+    If none are allowed, show a single 'No exact match...' line.
     """
     if not isinstance(text, str):
         return text
@@ -173,7 +174,7 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
             text = forced + "\n" + text
         return _strip_prompt_leak(text)
 
-    forced = "Model:\n" + "\n".join(f"- {x}" for x in allowed) + "\n"
+    forced = "Model:\n" + "\n".join(f"- {m}" for m in allowed) + "\n"
     if "Model:" in text:
         text = re.sub(
             r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
@@ -184,7 +185,7 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     else:
         text = forced + "\n" + text
 
-    # Scrub any other model-like tokens not in allowed
+    # Remove any model-like tokens not in the allowed set
     tokens = set(re.findall(r'\b[A-Z]{2,}[A-Z0-9\-]{1,}\b', text))
     for tok in tokens:
         if tok not in allowed and tok not in {"N/A"}:
@@ -205,7 +206,7 @@ def chat():
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
-    # ───────── Inquiry mode (full flow) ─────────
+    # ───────── Inquiry mode ─────────
     if mode == "inquiry":
         from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
 
@@ -268,11 +269,7 @@ def chat():
                 "Next Actions\n"
                 "- Three concrete, do-today tasks that align with the Visit Plan and Next Level steps.\n\n"
                 "Recent Invoices\n"
-                "- List up to 5 most recent invoices as: YYYY-MM-DD | Type | $Amount | Description (omit description if blank)\n\n"
-                "Rules:\n"
-                "- Use only numbers and facts present in the context blocks. No estimates beyond what is provided.\n"
-                "- Keep each bullet on one line. No bold, no asterisks, no extra prose.\n"
-                "- Never propose jumping from D3 to C3 (or similar); only move to the next better tier.\n"
+                "- List up to 5 most recent invoices as: YYYY-MM-DD | Type | $Amount | Description (omit description if blank)\n"
             )
         }
 
@@ -296,6 +293,7 @@ def chat():
             ai_reply = f"❌ Internal error: {e}"
 
         tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
+        ai_reply = _strip_prompt_leak(ai_reply)
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
     # ───────── Recommendation mode with strict grounding ─────────
@@ -312,10 +310,9 @@ def chat():
         )
         context_input = profile_ctx + user_q
 
-    # Build the human-visible context (profile + our parsed model details)
     prompt_ctx = generate_forklift_context(context_input, acct)
 
-    # Choose allowed models from models.json for THIS question
+    # Select 3–5 best-fit models from models.json for THIS question
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
 
@@ -333,12 +330,11 @@ def chat():
             "Comparison:\n"
             "Sales Pitch Techniques:\n"
             "Common Objections:\n"
-            "Rules:\n"
             "\n"
-            "Guidelines:\n"
+            "Guidance (do not echo this):\n"
             "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent other codes.\n"
             "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming model codes.\n"
-            "- Do NOT repeat these instructions or the ALLOWED MODELS block in your answer.\n"
+            "- Do NOT repeat these instructions, the guidance, or the ALLOWED MODELS block in your answer.\n"
         )
     }
 
@@ -359,11 +355,11 @@ def chat():
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
-    # Enforce allowed models & strip any prompt leakage
+    # Enforce allowed models & remove any leaked instruction sections
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
     return jsonify({"response": ai_reply})
 
-# ─── Modes list (optional UI helper) ─────────────────────────────────────
+# ─── Modes list ──────────────────────────────────────────────────────────
 @app.route("/api/modes")
 def api_modes():
     return jsonify([
@@ -389,34 +385,28 @@ def api_locations():
     from difflib import get_close_matches
     from flask import Response as _Response
 
-    # -------- helpers --------
+    # helpers
     def strip_suffixes(s: str) -> str:
         return _re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                       "", s or "", flags=_re.IGNORECASE)
-
     def norm_name(s: str) -> str:
         s = strip_suffixes(s or "")
         s = s.lower()
         s = _re.sub(r"[^a-z0-9]+", " ", s)
         return _re.sub(r"\s+", " ", s).strip()
-
     def norm_city(s: str) -> str:
         s = (s or "").lower()
         s = _re.sub(r"[^a-z0-9]+", " ", s)
         return _re.sub(r"\s+", " ", s).strip()
-
     def state_from_county_state(v: str) -> str:
         parts = _re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return parts[-1].upper() if len(parts) >= 2 else ""
-
     def county_from_county_state(v: str) -> str:
         parts = _re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return " ".join(parts[:-1]) if len(parts) >= 2 else ""
-
     def zip5(z: str) -> str:
         m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
-
     def to_float(x):
         try:
             v = float(str(x).strip())
@@ -426,7 +416,7 @@ def api_locations():
         except Exception:
             return None
 
-    # -------- build rep index from customer_report.csv --------
+    # rep index
     rep_idx_exact = {}
     rep_idx_norm = {}
     rep_idx_norm_zip = {}
@@ -434,12 +424,7 @@ def api_locations():
 
     try:
         rep_df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
-
-        if "Sales Rep Name" in rep_df.columns:
-            REP_COL = "Sales Rep Name"
-        else:
-            REP_COL = None
-
+        REP_COL = "Sales Rep Name" if "Sales Rep Name" in rep_df.columns else None
         if REP_COL:
             SOLD_COL = "Sold to Name"
             SHIP_COL = "Ship to Name"
@@ -458,14 +443,10 @@ def api_locations():
                 rep = (r.get(REP_COL, "") or "").strip()
                 if not rep:
                     continue
-
-                # exact
                 for col in (SOLD_COL, SHIP_COL):
                     nm = (r.get(col, "") or "").strip()
                     if nm:
                         rep_idx_exact.setdefault(nm, rep)
-
-                # normalized + disambiguators
                 for nval in (r.get("_sold_norm", ""), r.get("_ship_norm", "")):
                     nval = (nval or "").strip()
                     if not nval:
@@ -489,7 +470,6 @@ def api_locations():
     def lookup_rep(name: str, city: str, state: str, zipc: str) -> str:
         if not name:
             return None
-        # exact
         if name in rep_idx_exact:
             return rep_idx_exact[name]
         n = norm_name(name)
@@ -505,14 +485,13 @@ def api_locations():
             return rep_idx_norm_city_state[key_cs]
         if n in rep_idx_norm:
             return rep_idx_norm[n]
-        # fuzzy fallback to reduce "Unassigned"
         if rep_norm_keys:
-            guess = get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
+            guess = difflib.get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
             if guess:
                 return rep_idx_norm.get(guess[0])
         return None
 
-    # -------- read customer_location.csv and emit points --------
+    # build points
     items = []
     try:
         with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
@@ -529,7 +508,6 @@ def api_locations():
                 lat = to_float(row.get("Min of Latitude", ""))
                 lon = to_float(row.get("Min of Longitude", ""))
 
-                # require valid coordinates
                 if lat is None or lon is None:
                     continue
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
@@ -561,13 +539,9 @@ def api_locations():
 def service_worker():
     return app.send_static_file('service-worker.js')
 
-# ─── AI Map Analysis Endpoint (customer_report.csv) ───────────────────────
+# ─── AI Map Analysis Endpoint ────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
-    """
-    Build AI insight from customer_report.csv using the correct row(s).
-    Returns a brief analysis that includes the actual dollar figures.
-    """
     import pandas as pd, re
     from difflib import get_close_matches
 
@@ -587,14 +561,10 @@ def ai_map_analysis():
             print("❌ ai_map_analysis read error:", e)
             return jsonify({"error": "Could not read customer_report.csv"}), 500
 
-        # Columns
-        SOLD    = "Sold to Name"
-        SHIP    = "Ship to Name"
-        SOLD_ID = "Sold to ID"
-        CITY    = "City"
-        ZIP     = "Zip Code"
-        CST     = "County State"
-        SEG     = "R12 Segment (Sold to ID)"
+        SOLD, SHIP = "Sold to Name", "Ship to Name"
+        SOLD_ID    = "Sold to ID"
+        CITY, ZIP  = "City", "Zip Code"
+        CST, SEG   = "County State", "R12 Segment (Sold to ID)"
 
         REV_COLS = [
             "New Equip R36 Revenue",
@@ -607,13 +577,10 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket",
         ]
 
-        # Helpers
         def strip_suffixes(s: str) -> str:
-            return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                          "", s or "", flags=re.IGNORECASE)
+            return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b", "", s or "", flags=re.IGNORECASE)
         def norm_name(s: str) -> str:
-            s = strip_suffixes(s)
-            s = s.lower()
+            s = strip_suffixes(s); s = s.lower()
             s = re.sub(r"[^a-z0-9]+", " ", s)
             return re.sub(r"\s+", " ", s).strip()
         def state_from_cst(v: str) -> str:
@@ -624,15 +591,12 @@ def ai_map_analysis():
             return m.group(0) if m else ""
         def money_to_float(v) -> float:
             s = str(v or "").strip().replace("$","").replace(",","")
-            if not s:
-                return 0.0
-            try:
-                return float(s)
+            if not s: return 0.0
+            try: return float(s)
             except Exception:
                 m = re.search(r"-?\d+(\.\d+)?", s)
                 return float(m.group(0)) if m else 0.0
 
-        # Precompute
         df["_sold_norm"] = df[SOLD].apply(norm_name)
         df["_ship_norm"] = df[SHIP].apply(norm_name)
         df["_zip5"]      = df[ZIP].apply(zip5)
@@ -645,18 +609,14 @@ def ai_map_analysis():
         city_norm  = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
         state_abbr = state_hint
 
-        # Matching
         m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
         m_norm  = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
 
         def refine(mask):
             out = mask.copy()
-            if zip_norm:
-                out = out & (df["_zip5"] == zip_norm)
-            if city_norm:
-                out = out & (df["_city_norm"] == city_norm)
-            if state_abbr:
-                out = out & (df["_state"] == state_abbr)
+            if zip_norm:   out = out & (df["_zip5"] == zip_norm)
+            if city_norm:  out = out & (df["_city_norm"] == city_norm)
+            if state_abbr: out = out & (df["_state"] == state_abbr)
             return out
 
         masks = [refine(m_exact), refine(m_norm), m_exact, m_norm]
@@ -678,7 +638,6 @@ def ai_map_analysis():
             print("❌ No match found for:", customer_raw)
             return jsonify({"error": f"No data found for {customer_raw}"}), 200
 
-        # Aggregate by Sold to ID when possible
         has_any_sold_id = (hit[SOLD_ID].astype(str).str.strip() != "").any()
         if has_any_sold_id:
             chosen_group_id = hit[SOLD_ID].astype(str).str.strip().iloc[0]
@@ -687,12 +646,10 @@ def ai_map_analysis():
             base_norm = norm_name(hit[SOLD].iloc[0])
             group_df = df[df[SOLD].apply(norm_name) == base_norm]
 
-        # Totals
         totals = {}
         for col in REV_COLS:
             totals[col] = group_df[col].map(money_to_float).sum() if col in group_df.columns else 0.0
 
-        # Segment (full code like "C3")
         seg_val = ""
         if SEG in group_df.columns:
             mode_series = group_df[SEG].astype(str).str.strip().replace("", pd.NA).dropna().mode()
@@ -701,7 +658,6 @@ def ai_map_analysis():
 
         display_name = customer_raw or (hit[SOLD].iloc[0] if SOLD in hit.columns else "")
 
-        # Metrics block (explicit numbers)
         lines = [f"Customer: {display_name}"]
         if seg_val:
             lines.append(f"Segment: {seg_val}")
@@ -749,7 +705,7 @@ Keep it crisp and sales-focused.
         print("❌ Error during AI map analysis:", e)
         return jsonify({"error": str(e)}), 500
 
-# --- Segment lookup for map popups (from customer_report.csv) -------------
+# --- Segment lookup for map popups ---------------------------------------
 @app.route("/api/segments")
 @login_required
 def api_segments():
@@ -770,11 +726,9 @@ def api_segments():
         return jsonify({"by_exact": {}, "by_norm": {}, "by_norm_zip": {}, "by_norm_city_state": {}}), 200
 
     def strip_suffixes(s: str) -> str:
-        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                      "", s, flags=re.IGNORECASE)
+        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b", "", s, flags=re.IGNORECASE)
     def norm_name(s: str) -> str:
-        s = strip_suffixes(s or "")
-        s = s.lower()
+        s = strip_suffixes(s or ""); s = s.lower()
         s = re.sub(r"[^a-z0-9]+", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
