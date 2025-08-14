@@ -270,7 +270,8 @@ def chat():
         )
         context_input = profile_ctx + user_q
 
-    prompt_ctx = generate_forklift_context(context_input, acct)
+    # ✅ CHANGE: filter models based on the user's question ONLY (not the long profile text)
+    prompt_ctx = generate_forklift_context(user_q, acct)
 
     system_prompt = {
         "role": "system",
@@ -339,7 +340,6 @@ def api_modes():
         {"id": "inquiry",        "label": "Customer Inquiry"}
     ])
 
-# ─── Map routes ───────────────────────────────────────────────────────────
 # ─── Map routes ───────────────────────────────────────────────────────────
 @app.route("/map")
 @login_required
