@@ -1,19 +1,25 @@
+# app.py
 import os
+import re
 import json
 import pandas as pd
 import difflib
 import sqlite3
 from datetime import timedelta
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response
+from flask import (
+    Flask, render_template, request, jsonify, redirect, url_for, session, Response
+)
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-# add at top with your other Flask imports
-from flask import make_response
 from openai import OpenAI
 
-from ai_logic import generate_forklift_context
-from data_sources import make_inquiry_targets  # used by /api/targets
+# internal helpers for forklift grounding
+from ai_logic import (
+    generate_forklift_context,
+    select_models_for_question,
+    allowed_models_block,
+)
 
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
 app = Flask(__name__)
@@ -142,6 +148,51 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+# ─── Helper: enforce ONLY allowed model codes in reply ───────────────────
+def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
+    """
+    Replace the 'Model:' section with the allowed list.
+    If there's no Model section, prepend one.
+    Also scrub any codes not in the allowed set.
+    """
+    if not isinstance(text, str):
+        return text
+
+    if not allowed:
+        forced = "Model:\n- No exact match from our lineup.\n"
+        if "Model:" in text:
+            text = re.sub(
+                r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
+                f"\n{forced}\n",
+                text,
+                flags=re.MULTILINE
+            )
+        else:
+            text = forced + "\n" + text
+        return text
+
+    # Build deterministic Model block
+    forced = "Model:\n" + "\n".join(f"- {x}" for x in allowed) + "\n"
+
+    # Replace existing Model block or prepend if missing
+    if "Model:" in text:
+        text = re.sub(
+            r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
+            f"\n{forced}\n",
+            text,
+            flags=re.MULTILINE
+        )
+    else:
+        text = forced + "\n" + text
+
+    # Scrub invented codes (ALLCAPS + digits/hyphen pattern)
+    tokens = set(re.findall(r'\b[A-Z]{2,}[A-Z0-9\-]{1,}\b', text))
+    for tok in tokens:
+        if tok not in allowed and tok not in {"N/A"}:
+            text = re.sub(rf'\b{re.escape(tok)}\b', '', text)
+    text = re.sub(r'[ ]{2,}', ' ', text)
+    return text
+
 # ─── Chat API ────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -194,45 +245,45 @@ def chat():
                 recent_block = "\n".join(lines)
 
         system_prompt = {
-             "role": "system",
-             "content": (
-                 "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
-                 f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
-                 "\n"
-                 "Write the answer with these exact section headers and spacing. Use short, one-sentence bullets with hyphens. No bold or markdown syntax.\n"
-                 "\n"
-                 "Segmentation: <LETTER><NUMBER>\n"
-                 "- Account Size: <LETTER>\n"
-                 "- Relationship: <NUMBER>\n"
-                 "- <LETTER> — meaning (e.g., D — small account size)\n"
-                 "- <NUMBER> — meaning (e.g., 3 — limited breadth of offerings)\n"
-                 "\n"
-                 "Current Pattern\n"
-                 "- Top spending months: Month YYYY ($#,###), Month YYYY ($#,###), Month YYYY ($#,###)\n"
-                 "- Top offerings: e.g., Parts ($#,###), Service ($#,###)\n"
-                 "- Frequency: Average of N days between invoices\n"
-                 "\n"
-                 "Visit Plan\n"
-                 "- Lead with: <one offering> (Service, Parts, Rental or New Equipment) — choose the category with the highest billing total in the context block, and briefly why that gap or trend suggests this focus.\n"
-                 "- Optional backup: <one secondary area> tied to the next-highest billing category.\n"
-                 "\n"
-                 "Next Level (from <LETTER><NUM> → next better only)\n"
-                 "- Relationship requirement: specify exactly how many new distinct offerings are needed to reach the next tier (do not skip tiers).\n"
-                 "- Best candidates to add: list 1–3 offerings based on gaps and what they already buy.\n"
-                 "- Size path (only if applicable): if moving up a size is the next improvement, state the R12 target (e.g., 'Grow to ≥ $10,000 to move D→C'). Never skip sizes.\n"
-                 "\n"
-                 "Next Actions\n"
-                 "- Three concrete, do-today tasks that align with the Visit Plan and Next Level steps.\n"
-                 "\n"
-                 "Recent Invoices\n"
-                 "- List up to 5 most recent invoices as: YYYY-MM-DD | Type | $Amount | Description (omit description if blank)\n"
-                 "\n"
-                 "Rules:\n"
-                 "- Use only numbers and facts present in the context blocks. No estimates beyond what is provided.\n"
-                 "- Keep each bullet on one line. No bold, no asterisks, no extra prose.\n"
-                 "- Never propose jumping from D3 to C3 (or similar); only move to the next better tier.\n"
-             )
-         }
+            "role": "system",
+            "content": (
+                "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
+                f"Customer name is: {brief['inferred_name']}. Do not rename it or refer to any other customer.\n"
+                "\n"
+                "Write the answer with these exact section headers and spacing. Use short, one-sentence bullets with hyphens. No bold or markdown syntax.\n"
+                "\n"
+                "Segmentation: <LETTER><NUMBER>\n"
+                "- Account Size: <LETTER>\n"
+                "- Relationship: <NUMBER>\n"
+                "- <LETTER> — meaning (e.g., D — small account size)\n"
+                "- <NUMBER> — meaning (e.g., 3 — limited breadth of offerings)\n"
+                "\n"
+                "Current Pattern\n"
+                "- Top spending months: Month YYYY ($#,###), Month YYYY ($#,###), Month YYYY ($#,###)\n"
+                "- Top offerings: e.g., Parts ($#,###), Service ($#,###)\n"
+                "- Frequency: Average of N days between invoices\n"
+                "\n"
+                "Visit Plan\n"
+                "- Lead with: <one offering> (Service, Parts, Rental or New Equipment) — choose the category with the highest billing total in the context block, and briefly why that gap or trend suggests this focus.\n"
+                "- Optional backup: <one secondary area> tied to the next-highest billing category.\n"
+                "\n"
+                "Next Level (from <LETTER><NUM> → next better only)\n"
+                "- Relationship requirement: specify exactly how many new distinct offerings are needed to reach the next tier (do not skip tiers).\n"
+                "- Best candidates to add: list 1–3 offerings based on gaps and what they already buy.\n"
+                "- Size path (only if applicable): if moving up a size is the next improvement, state the R12 target (e.g., 'Grow to ≥ $10,000 to move D→C'). Never skip sizes.\n"
+                "\n"
+                "Next Actions\n"
+                "- Three concrete, do-today tasks that align with the Visit Plan and Next Level steps.\n"
+                "\n"
+                "Recent Invoices\n"
+                "- List up to 5 most recent invoices as: YYYY-MM-DD | Type | $Amount | Description (omit description if blank)\n"
+                "\n"
+                "Rules:\n"
+                "- Use only numbers and facts present in the context blocks. No estimates beyond what is provided.\n"
+                "- Keep each bullet on one line. No bold, no asterisks, no extra prose.\n"
+                "- Never propose jumping from D3 to C3 (or similar); only move to the next better tier.\n"
+            )
+        }
 
         messages = [
             system_prompt,
@@ -256,7 +307,7 @@ def chat():
         tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
-    # ───────── Recommendation mode (existing flow) ─────────
+    # ───────── Recommendation mode (grounded to models.json) ─────────
     acct = find_account_by_name(user_q)
     context_input = user_q
     if acct:
@@ -270,8 +321,10 @@ def chat():
         )
         context_input = profile_ctx + user_q
 
-    # ✅ CHANGE: filter models based on the user's question ONLY (not the long profile text)
-    prompt_ctx = generate_forklift_context(user_q, acct)
+    # Build prompt context + select allowed models for hard grounding
+    prompt_ctx = generate_forklift_context(context_input, acct)
+    hits, allowed = select_models_for_question(user_q, k=5)
+    allowed_block = allowed_models_block(allowed)
 
     system_prompt = {
         "role": "system",
@@ -304,13 +357,21 @@ def chat():
             "- Cite model codes exactly as they appear in models.json.\n"
             "- Use hyphens for bullets; indent sub-points by two spaces.\n"
             "- Keep each bullet to one clear sentence.\n"
-            "- Write in a confident, consultative tone; no unnecessary jargon.\n\n"
+            "- Write in a confident, consultative tone; no unnecessary jargon.\n"
+            "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent or introduce other codes.\n"
+            "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming any model codes.\n"
+            "\n"
             "Now, based on the user’s question and their Customer Profile, fill in each section with tailored, data-driven recommendations."
         )
     }
 
-    messages = [system_prompt, {"role": "user", "content": prompt_ctx}]
+    messages = [
+        system_prompt,
+        {"role": "system", "content": allowed_block},  # hard grounding list
+        {"role": "user", "content": prompt_ctx}
+    ]
 
+    # Trim if needed
     try:
         import tiktoken
         enc = tiktoken.encoding_for_model("gpt-4")
@@ -330,6 +391,9 @@ def chat():
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
+    # Enforce only allowed model codes in the final text
+    ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
+
     return jsonify({"response": ai_reply})
 
 # ─── Optional data endpoints ─────────────────────────────────────────────
@@ -346,27 +410,17 @@ def api_modes():
 def map_page():
     return render_template("map.html")
 
-
 @app.route("/api/locations")
 @login_required
 def api_locations():
     """
     Build map points from customer_location.csv (your exact headers) and
     attach Sales Rep from customer_report.csv for territory coloring.
-
-    customer_location.csv headers (exact):
-      - Account Name
-      - City
-      - Address
-      - County State        (e.g., "Vigo IN")
-      - Zip Code
-      - Min of Latitude
-      - Min of Longitude
     """
-    import csv, json, re
-    import pandas as pd
+    import csv, json as _json, re
+    import pandas as _pd
     from difflib import get_close_matches
-    from flask import Response
+    from flask import Response as _Response
 
     # -------- helpers --------
     def strip_suffixes(s: str) -> str:
@@ -412,9 +466,8 @@ def api_locations():
     rep_idx_norm_city_state = {}
 
     try:
-        rep_df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        rep_df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
 
-        # Use ONLY the column you said
         if "Sales Rep Name" in rep_df.columns:
             REP_COL = "Sales Rep Name"
         else:
@@ -485,7 +538,6 @@ def api_locations():
             return rep_idx_norm_city_state[key_cs]
         if n in rep_idx_norm:
             return rep_idx_norm[n]
-        # fuzzy fallback to reduce "Unassigned"
         if rep_norm_keys:
             guess = get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
             if guess:
@@ -509,7 +561,6 @@ def api_locations():
                 lat = to_float(row.get("Min of Latitude", ""))
                 lon = to_float(row.get("Min of Longitude", ""))
 
-                # require valid coordinates
                 if lat is None or lon is None:
                     continue
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
@@ -530,18 +581,16 @@ def api_locations():
                     "County State": cs_raw
                 })
     except FileNotFoundError:
-        return Response(json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
+        return _Response(_json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
     except Exception as e:
         print("❌ /api/locations error:", e)
-        return Response(json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
+        return _Response(_json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
 
-    return Response(json.dumps(items, allow_nan=False), mimetype="application/json")
-
+    return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
 @app.route('/service-worker.js')
 def service_worker():
     return app.send_static_file('service-worker.js')
-
 
 # ─── AI Map Analysis Endpoint (customer_report.csv) ───────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
@@ -572,7 +621,6 @@ def ai_map_analysis():
             print("❌ ai_map_analysis read error:", e)
             return jsonify({"error": "Could not read customer_report.csv"}), 500
 
-        # Columns
         SOLD    = "Sold to Name"
         SHIP    = "Ship to Name"
         SOLD_ID = "Sold to ID"
@@ -592,7 +640,6 @@ def ai_map_analysis():
             "Revenue Rolling 13 - 24 Months - Aftermarket",
         ]
 
-        # Helpers
         def strip_suffixes(s: str) -> str:
             return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                           "", s or "", flags=re.IGNORECASE)
@@ -617,7 +664,6 @@ def ai_map_analysis():
                 m = re.search(r"-?\d+(\.\d+)?", s)
                 return float(m.group(0)) if m else 0.0
 
-        # Precompute
         df["_sold_norm"] = df[SOLD].apply(norm_name)
         df["_ship_norm"] = df[SHIP].apply(norm_name)
         df["_zip5"]      = df[ZIP].apply(zip5)
@@ -630,7 +676,6 @@ def ai_map_analysis():
         city_norm  = re.sub(r"[^a-z0-9]+", " ", city_hint.lower()).strip() if city_hint else ""
         state_abbr = state_hint
 
-        # Matching
         m_exact = (df[SOLD].str.lower() == customer_raw.lower()) | (df[SHIP].str.lower() == customer_raw.lower())
         m_norm  = (df["_sold_norm"] == cust_norm) | (df["_ship_norm"] == cust_norm)
 
@@ -659,12 +704,10 @@ def ai_map_analysis():
                 g = guess[0]
                 hit = df[(df["_sold_norm"] == g) | (df["_ship_norm"] == g)]
 
-        # ✅ use .empty (property), never call it
         if hit is None or hit.empty:
             print("❌ No match found for:", customer_raw)
             return jsonify({"error": f"No data found for {customer_raw}"}), 200
 
-        # Aggregate by Sold to ID when possible
         has_any_sold_id = (hit[SOLD_ID].astype(str).str.strip() != "").any()
         if has_any_sold_id:
             chosen_group_id = hit[SOLD_ID].astype(str).str.strip().iloc[0]
@@ -673,12 +716,10 @@ def ai_map_analysis():
             base_norm = norm_name(hit[SOLD].iloc[0])
             group_df = df[df[SOLD].apply(norm_name) == base_norm]
 
-        # Totals
         totals = {}
         for col in REV_COLS:
             totals[col] = group_df[col].map(money_to_float).sum() if col in group_df.columns else 0.0
 
-        # Segment (full code like "C3")
         seg_val = ""
         if SEG in group_df.columns:
             mode_series = group_df[SEG].astype(str).str.strip().replace("", pd.NA).dropna().mode()
@@ -687,7 +728,6 @@ def ai_map_analysis():
 
         display_name = customer_raw or (hit[SOLD].iloc[0] if SOLD in hit.columns else "")
 
-        # Metrics block (explicit numbers)
         lines = [f"Customer: {display_name}"]
         if seg_val:
             lines.append(f"Segment: {seg_val}")
@@ -721,7 +761,6 @@ Keep it crisp and sales-focused.
             print("❌ OpenAI error:", e)
             analysis = None
 
-        # don’t call bool(); avoid any chance of shadowing
         aggregated_flag = True if has_any_sold_id else False
 
         return jsonify({
@@ -735,7 +774,7 @@ Keep it crisp and sales-focused.
     except Exception as e:
         print("❌ Error during AI map analysis:", e)
         return jsonify({"error": str(e)}), 500
-    
+
 # --- Segment lookup for map popups (from customer_report.csv) --------------
 @app.route("/api/segments")
 @login_required
@@ -814,5 +853,6 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
+# ─── Entrypoint ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))

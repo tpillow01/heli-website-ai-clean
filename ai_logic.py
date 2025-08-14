@@ -157,6 +157,25 @@ def _parse_question(q: str) -> Dict[str, Any]:
         "narrow": narrow,
     }
 
+# --- NEW: expose selected models & a small block for grounding ----------
+def _safe_model_name(m: Dict[str, Any]) -> str:
+    # Reuse your existing mapping logic if you prefer; this is a safe fallback.
+    for k in ("Model", "model", "code", "name"):
+        if m.get(k):
+            return str(m[k]).strip()
+    return "N/A"
+
+def select_models_for_question(user_q: str, k: int = 5):
+    """Return (hits, allowed_names) for strict grounding."""
+    hits = filter_models(user_q, limit=k)
+    allowed = [_safe_model_name(m) for m in hits if _safe_model_name(m) != "N/A"]
+    return hits, allowed
+
+def allowed_models_block(allowed: list[str]) -> str:
+    if not allowed:
+        return "ALLOWED MODELS:\n(none – say 'No exact match from our lineup.')"
+    return "ALLOWED MODELS:\n" + "\n".join(f"- {x}" for x in allowed)
+
 def _model_capacity_lb(m: Dict[str, Any]) -> float:
     return _cap_val(_first(m, "Capacity_lbs", "capacity_lbs", "capacity_lb", "Capacity", "Rated Capacity (lb)", "Rated Capacity", "Load Capacity", default=0))
 
