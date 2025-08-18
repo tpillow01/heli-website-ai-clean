@@ -136,25 +136,96 @@ def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
     t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model",""))).lower()
     return any(word in t for word in ["reach", "vna", "order picker", "turret"]) or re.search(r"\b(cqd|rq|vna)\b", t)
 
+# --- NEW: robust capacity intent parser ----------------------------------
+def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
+    """
+    Returns (min_required_lb, max_allowed_lb). We use the min for filtering later.
+    Understands:
+      - “7000 pounds”, “7,000 lbs”, “7k lb”
+      - “load of 5,000 pounds”, “handle 5 ton”, “payload 3.5T/tonne”
+      - ranges “3k–5k”, “3000-5000 lbs”, “between 3,000 and 5,000”
+      - bounds “up to 6000”, “max 6000”, “at least 5000”, “minimum 5k”
+    """
+    if not text:
+        return (None, None)
+
+    t = text.lower().replace("–", "-").replace("—", "-")
+
+    UNIT_LB     = r'(?:lb|lbs|pound|pounds)'
+    UNIT_TONNE  = r'(?:tonne|tonnes|metric ton|metric tons|t\b)'
+    UNIT_TON    = r'(?:ton|tons)'
+    KNUM        = r'(\d+(?:\.\d+)?)\s*k\b'
+    NUM         = r'(\d[\d,\.]*)'
+    LOAD_WORDS  = r'(?:capacity|load|loads|payload|rating|lift|handle|carry)'
+
+    def _n(s: str) -> float:
+        return float(s.replace(",", ""))
+
+    # ranges “3k-5k”
+    m = re.search(rf'{KNUM}\s*-\s*{KNUM}', t)
+    if m:
+        lo = int(round(_n(m.group(1)) * 1000))
+        hi = int(round(_n(m.group(2)) * 1000))
+        return (min(lo, hi), max(lo, hi))
+
+    # ranges “3000-5000 (lbs optional)”
+    m = re.search(rf'{NUM}\s*-\s*{NUM}\s*(?:{UNIT_LB})?', t)
+    if m:
+        a = int(round(_n(m.group(1))))
+        b = int(round(_n(m.group(2))))
+        return (min(a, b), max(a, b))
+
+    # “between 3,000 and 5,000”
+    m = re.search(rf'between\s+{NUM}\s+and\s+{NUM}', t)
+    if m:
+        a = int(round(_n(m.group(1))))
+        b = int(round(_n(m.group(2))))
+        return (min(a, b), max(a, b))
+
+    # bounds
+    m = re.search(rf'(?:up to|max(?:imum)?)\s+{NUM}\s*(?:{UNIT_LB})?', t)
+    if m:
+        return (None, int(round(_n(m.group(1)))))
+
+    m = re.search(rf'(?:at least|minimum|min)\s+{NUM}\s*(?:{UNIT_LB})?', t)
+    if m:
+        return (int(round(_n(m.group(1)))), None)
+
+    # singles with units
+    m = re.search(rf'{KNUM}\s*(?:{UNIT_LB})?\b', t)  # “7k lb(s)”
+    if m:
+        return (int(round(_n(m.group(1)) * 1000)), None)
+
+    m = re.search(rf'{NUM}\s*{UNIT_LB}\b', t)        # “7000 pounds/lbs”
+    if m:
+        return (int(round(_n(m.group(1)))), None)
+
+    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)       # “3.5 tonne / metric ton / 3.5t”
+    if m:
+        return (int(round(_n(m.group(1)) * 2204.62)), None)
+
+    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)       # “5 ton(s)” (US)
+    if m:
+        return (int(round(_n(m.group(1)) * 2000)), None)
+
+    # “payload/load/capacity … 5000” (no units; treat as lb)
+    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}', t)
+    if m:
+        return (int(round(_n(m.group(1)))), None)
+
+    # bare 4–5 digit number → assume lb
+    m = re.search(r'\b(\d{4,5})\b', t)
+    if m:
+        return (int(m.group(1)), None)
+
+    return (None, None)
+
 def _parse_requirements(q: str) -> Dict[str,Any]:
     ql = q.lower()
 
-    # capacity: lbs / tons / kg
-    cap_lbs = None
-    # "5000 lb", "5,000 lbs"
-    m = re.findall(r"(\d[\d,\.]*)\s*(?:lb|lbs)\b", ql)
-    if m:
-        cap_lbs = _to_lbs(float(m[-1].replace(",","")), "lb")
-    # "3 ton", "3.5 tons"
-    if cap_lbs is None:
-        m = re.findall(r"(\d[\d,\.]*)\s*tons?\b", ql)
-        if m:
-            cap_lbs = _to_lbs(float(m[-1].replace(",","")), "ton")
-    # "2000 kg"
-    if cap_lbs is None:
-        m = re.findall(r"(\d[\d,\.]*)\s*kg\b", ql)
-        if m:
-            cap_lbs = _to_lbs(float(m[-1].replace(",","")), "kg")
+    # capacity from robust intent parser
+    cap_min, cap_max = _parse_capacity_lbs_intent(ql)
+    cap_lbs = cap_min  # we use minimum-required capacity for filtering logic downstream
 
     # height: ft/in
     height_in = None
@@ -163,8 +234,11 @@ def _parse_requirements(q: str) -> Dict[str,Any]:
         height_in = _to_inches(float(m[-1].replace(",","")), "ft")
     if height_in is None:
         m = re.findall(r"(\d[\d,\.]*)\s*(?:in|\"|inches)\b", ql)
-        if m and "aisle" not in ql[m[-1].start() if hasattr(m[-1],'start') else 0:]:
-            height_in = float(m[-1].replace(",",""))
+        if m:
+            try:
+                height_in = float(m[-1].replace(",",""))
+            except Exception:
+                height_in = None
 
     # aisle: look for "aisle" nearby
     aisle_in = None
