@@ -6,6 +6,11 @@ from functools import wraps
 from flask import (
     Flask, render_template, request, jsonify, redirect, url_for, session, Response
 )
+# add near the top with other imports
+from csv_locations import load_csv_locations, to_geojson
+# after you print accounts/models loaded:
+locations_index = load_csv_locations()
+print(f"✅ Loaded {len(locations_index)} locations from customer_location.csv")
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
@@ -155,41 +160,28 @@ def _strip_prompt_leak(text: str) -> str:
 
 def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     """
-    Force the 'Model:' section to contain only the allowed model codes.
-    If none are allowed, show a single 'No exact match...' line.
+    Rewrite only the 'Model:' section to the allowed list.
+    Do NOT scrub tokens outside that section (prevents removing LPG/IC/G2/G3, etc.).
     """
     if not isinstance(text, str):
         return text
 
+    # Build the forced Model: block
     if not allowed:
-        forced = "Model:\n- No exact match from our lineup.\n"
-        if "Model:" in text:
-            text = re.sub(
-                r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
-                f"\n{forced}\n",
-                text,
-                flags=re.MULTILINE,
-            )
-        else:
-            text = forced + "\n" + text
-        return _strip_prompt_leak(text)
-
-    forced = "Model:\n" + "\n".join(f"- {m}" for m in allowed) + "\n"
-    if "Model:" in text:
-        text = re.sub(
-            r'(?:^|\n)Model:\n(?:.*\n)*?(?=\n[A-Z][^\n]*:|\Z)',
-            f"\n{forced}\n",
-            text,
-            flags=re.MULTILINE,
-        )
+        forced_block = "Model:\n- No exact match from our lineup.\n"
     else:
-        text = forced + "\n" + text
+        forced_block = "Model:\n" + "\n".join(f"- {m}" for m in allowed) + "\n"
 
-    # Remove any model-like tokens not in the allowed set
-    tokens = set(re.findall(r'\b[A-Z]{2,}[A-Z0-9\-]{1,}\b', text))
-    for tok in tokens:
-        if tok not in allowed and tok not in {"N/A"}:
-            text = re.sub(rf'\b{re.escape(tok)}\b', '', text)
+    # Capture the Model: section (non-greedy) up to the next header (e.g., "Power:")
+    pattern = r'(?:^|\n)Model:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
+
+    if re.search(pattern, text, flags=re.MULTILINE):
+        text = re.sub(pattern, f"\n{forced_block}", text, flags=re.MULTILINE)
+    else:
+        # If no Model: section exists, prepend one
+        text = forced_block + ("\n" + text if text and not text.startswith("\n") else text)
+
+    # Light cleanup & remove any leaked guidance blocks
     text = re.sub(r'[ ]{2,}', ' ', text)
     return _strip_prompt_leak(text)
 
