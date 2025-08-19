@@ -1,75 +1,79 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sign up • Heli AI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <!-- re-use the same inline styles as login (keep in one place if you prefer a base template) -->
+  <style>
+    /* copy the same :root, body.auth, .auth-card, etc. from login.html */
+  </style>
 </head>
-<body>
-
-<div class="auth-screen">
-  <div class="auth-wrap">
-    <div class="auth-brand">
-      <img src="{{ url_for('static', filename='tynan_logo.png') }}" class="auth-logo" alt="Heli AI">
+<body class="auth">
+  <div class="auth-card" role="dialog" aria-labelledby="title">
+    <div class="auth-head">
+      <img src="{{ url_for('static', filename='heli_logo.png') }}" alt="">
+      <div class="auth-title" id="title">Create your account</div>
     </div>
 
-    <div class="auth-card">
-      <h2 class="auth-title">Create account</h2>
-      <div class="auth-subtitle">Join with your work email to access Heli AI</div>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
 
-      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
-
-      <form method="post" action="{{ url_for('signup') }}">
-        <div class="auth-field">
-          <label for="email">Email</label>
-          <div class="auth-input-wrap">
-            <input id="email" name="email" type="email"
-                   class="auth-input" value="{{ email or '' }}"
-                   required autocomplete="email" placeholder="you@company.com">
-          </div>
+    <form class="auth-body" action="{{ url_for('signup') }}" method="POST" novalidate>
+      <div class="field">
+        <label for="email">Email</label>
+        <div class="control">
+          <input id="email" name="email" type="email" inputmode="email" autocomplete="email"
+                 placeholder="you@company.com" value="{{ email|default('') }}" required />
         </div>
-
-        <div class="auth-field">
-          <label for="password">Password</label>
-          <div class="auth-input-wrap">
-            <input id="password" name="password" type="password"
-                   class="auth-input" required autocomplete="new-password"
-                   placeholder="Create a password">
-            <button type="button" class="toggle-eye" aria-label="Show password"
-                    onclick="togglePw('password', this)">Show</button>
-          </div>
-        </div>
-
-        <div class="auth-field">
-          <label for="confirm">Confirm Password</label>
-          <div class="auth-input-wrap">
-            <input id="confirm" name="confirm" type="password"
-                   class="auth-input" required autocomplete="new-password"
-                   placeholder="Repeat password">
-            <button type="button" class="toggle-eye" aria-label="Show password"
-                    onclick="togglePw('confirm', this)">Show</button>
-          </div>
-        </div>
-
-        <div class="auth-actions">
-          <button class="btn primary" type="submit">Sign up</button>
-        </div>
-      </form>
-
-      <div class="auth-footer">
-        Already have an account? <a href="{{ url_for('login') }}">Log in</a>
       </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="control">
+          <input id="password" name="password" type="password" autocomplete="new-password"
+                 placeholder="Create a strong password" required />
+          <span class="toggle" id="toggle-pass-1" aria-controls="password" aria-pressed="false">Show</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="confirm">Confirm password</label>
+        <div class="control">
+          <input id="confirm" name="confirm" type="password" autocomplete="new-password"
+                 placeholder="Re-enter your password" required />
+          <span class="toggle" id="toggle-pass-2" aria-controls="confirm" aria-pressed="false">Show</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" type="submit">Create account</button>
+      </div>
+    </form>
+
+    <div class="footer">
+      <span class="muted">Already have an account?</span>
+      <a class="link" href="{{ url_for('login') }}">Log in</a>
     </div>
   </div>
-</div>
 
-<script>
-  function togglePw(id, btn){
-    const inp = document.getElementById(id);
-    const show = inp.type === 'password';
-    inp.type = show ? 'text' : 'password';
-    btn.textContent = show ? 'Hide' : 'Show';
-  }
-</script>
+  <script>
+    const toggles = [
+      ['toggle-pass-1', 'password'],
+      ['toggle-pass-2', 'confirm']
+    ];
+    toggles.forEach(([btnId, inputId])=>{
+      const b = document.getElementById(btnId);
+      const i = document.getElementById(inputId);
+      b?.addEventListener('click', ()=>{
+        const show = i.type === 'password';
+        i.type = show ? 'text' : 'password';
+        b.textContent = show ? 'Hide' : 'Show';
+        b.setAttribute('aria-pressed', String(show));
+      });
+    });
+  </script>
 </body>
 </html>
