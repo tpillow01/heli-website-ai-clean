@@ -1,4 +1,4 @@
-"""
+""" 
 Pure helper module: account lookup + model filtering + prompt context builder
 Grounds model picks strictly on models.json and parses user needs robustly.
 """
@@ -136,13 +136,13 @@ def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
     t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model",""))).lower()
     return any(word in t for word in ["reach", "vna", "order picker", "turret"]) or re.search(r"\b(cqd|rq|vna)\b", t)
 
-# --- NEW: robust capacity intent parser ----------------------------------
+# --- robust capacity intent parser --------------------------------------
 def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     """
     Returns (min_required_lb, max_allowed_lb). We use the min for filtering later.
     Understands:
       - “7000 pounds”, “7,000 lbs”, “7k lb”
-      - “load of 5,000 pounds”, “handle 5 ton”, “payload 3.5T/tonne”
+      - “load of 5,000 pounds”, “handle 5 ton”, “payload 3.5T/tonne/mt”
       - ranges “3k–5k”, “3000-5000 lbs”, “between 3,000 and 5,000”
       - bounds “up to 6000”, “max 6000”, “at least 5000”, “minimum 5k”
     """
@@ -152,7 +152,7 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     t = text.lower().replace("–", "-").replace("—", "-")
 
     UNIT_LB     = r'(?:lb|lbs|pound|pounds)'
-    UNIT_TONNE  = r'(?:tonne|tonnes|metric ton|metric tons|t\b)'
+    UNIT_TONNE  = r'(?:tonne|tonnes|metric\s*ton(?:s)?|(?<!f)t\b)'  # bare 't' but not part of 'ft'
     UNIT_TON    = r'(?:ton|tons)'
     KNUM        = r'(\d+(?:\.\d+)?)\s*k\b'
     NUM         = r'(\d[\d,\.]*)'
@@ -200,7 +200,7 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     if m:
         return (int(round(_n(m.group(1)))), None)
 
-    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)       # “3.5 tonne / metric ton / 3.5t”
+    m = re.search(rf'{NUM}\s*{UNIT_TONNE}\b', t)     # “3.5 tonne / metric ton / 3.5t”
     if m:
         return (int(round(_n(m.group(1)) * 2204.62)), None)
 
@@ -208,7 +208,10 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     if m:
         return (int(round(_n(m.group(1)) * 2000)), None)
 
-    # “payload/load/capacity … 5000” (no units; treat as lb)
+    # “payload/load/capacity … 7k/5000” (units omitted)
+    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{KNUM}', t)
+    if m:
+        return (int(round(_n(m.group(1)) * 1000)), None)
     m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}', t)
     if m:
         return (int(round(_n(m.group(1)))), None)
@@ -227,11 +230,14 @@ def _parse_requirements(q: str) -> Dict[str,Any]:
     cap_min, cap_max = _parse_capacity_lbs_intent(ql)
     cap_lbs = cap_min  # we use minimum-required capacity for filtering logic downstream
 
-    # height: ft/in
+    # height: ft/in + synonyms (reach/clearance/mast)
     height_in = None
     m = re.findall(r"(\d[\d,\.]*)\s*(?:ft|feet|')\b", ql)
     if m:
-        height_in = _to_inches(float(m[-1].replace(",","")), "ft")
+        try:
+            height_in = _to_inches(float(m[-1].replace(",","")), "ft")
+        except Exception:
+            height_in = None
     if height_in is None:
         m = re.findall(r"(\d[\d,\.]*)\s*(?:in|\"|inches)\b", ql)
         if m:
@@ -239,31 +245,63 @@ def _parse_requirements(q: str) -> Dict[str,Any]:
                 height_in = float(m[-1].replace(",",""))
             except Exception:
                 height_in = None
+    if height_in is None:
+        m = re.search(r"(?:lift|raise|reach|height|clearance|mast)\D{0,12}(\d[\d,\.]*)\s*(ft|feet|'|in|\"|inches)", ql)
+        if m:
+            raw, unit = m.group(1), m.group(2)
+            try:
+                height_in = _to_inches(float(raw.replace(",","")), "ft") if unit in ("ft","feet","'") \
+                            else float(raw.replace(",",""))
+            except Exception:
+                height_in = None
 
-    # aisle: look for "aisle" nearby
+    # aisle: include right-angle aisle / stacking variants
     aisle_in = None
-    m = re.search(r"(?:aisle|aisles)[^\d]{0,10}(\d[\d,\.]*)\s*(?:in|\"|inches|ft|')", ql)
+    m = re.search(r"(?:aisle|aisles|aisle width)\D{0,12}(\d[\d,\.]*)\s*(?:in|\"|inches|ft|')", ql)
     if m:
         raw = m.group(1)
         unit = m.group(0)
-        if "ft" in unit or "'" in unit:
-            aisle_in = _to_inches(float(raw.replace(",","")), "ft")
-        else:
-            aisle_in = float(raw.replace(",",""))
+        try:
+            if "ft" in unit or "'" in unit:
+                aisle_in = _to_inches(float(raw.replace(",","")), "ft")
+            else:
+                aisle_in = float(raw.replace(",",""))
+        except Exception:
+            aisle_in = None
+    if aisle_in is None:
+        m = re.search(r"(?:right[-\s]?angle(?:\s+aisle|\s+stack(?:ing)?)?|ra\s*aisle|ras)\D{0,12}(\d[\d,\.]*)\s*(in|\"|inches|ft|')", ql)
+        if m:
+            raw, unit = m.group(1), m.group(2)
+            try:
+                aisle_in = _to_inches(float(raw.replace(",","")), "ft") if unit in ("ft","'") \
+                           else float(raw.replace(",",""))
+            except Exception:
+                aisle_in = None
 
+    # power preferences (li-ion / battery / EV; LP/LPG/propane; diesel)
     power_pref = None
-    if "electric" in ql or "lithium" in ql:
+    if re.search(r"\bli[\-\s]?ion\b|\bbattery\b|\bev\b", ql) or "lithium" in ql or "electric" in ql:
         power_pref = "electric"
+    elif re.search(r"\blp\b|\blp[-\s]?gas\b|\blpg\b|\bpropane\b", ql):
+        power_pref = "lpg"
     elif "diesel" in ql:
         power_pref = "diesel"
-    elif "lpg" in ql or "propane" in ql:
-        power_pref = "lpg"
 
-    indoor = "indoor" in ql or "warehouse" in ql
-    outdoor = "outdoor" in ql or "yard" in ql or "rough" in ql
+    # environment hints
+    indoor = bool(re.search(r"\bindoor\b|\bwarehouse\b|\binside\b", ql))
+    outdoor = bool(re.search(r"\boutdoor\b|\brough\b|\bgravel\b|\bconstruction\b|\bunpaved\b|\bdirt\b|\tyard\b", ql))
     narrow  = "narrow aisle" in ql or "very narrow" in ql or (aisle_in is not None and aisle_in <= 96)
 
-    tire_pref = "cushion" if "cushion" in ql else ("pneumatic" if "pneumatic" in ql else None)
+    # tires (+ synonyms)
+    tire_pref = None
+    if "cushion" in ql:
+        tire_pref = "cushion"
+    elif "pneumatic" in ql:
+        tire_pref = "pneumatic"
+    if "non-marking" in ql or "nonmarking" in ql:
+        tire_pref = tire_pref or "cushion"
+    if "solid pneumatic" in ql or "foam filled" in ql or "foam-filled" in ql:
+        tire_pref = tire_pref or "pneumatic"
 
     return dict(
         cap_lbs=cap_lbs, height_in=height_in, aisle_in=aisle_in,
@@ -397,7 +435,7 @@ def generate_forklift_context(user_q: str, acct: Dict[str, Any] | None) -> str:
     lines.append(user_q)
     return "\n".join(lines)
 
-# --- NEW: expose selected list + ALLOWED block for strict grounding ------
+# --- expose selected list + ALLOWED block for strict grounding -----------
 def select_models_for_question(user_q: str, k: int = 5):
     hits = filter_models(user_q, limit=k)
     allowed = []
