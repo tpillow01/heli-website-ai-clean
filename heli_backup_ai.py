@@ -1025,45 +1025,79 @@ def api_ai_fit():
         return jsonify({"error": "Model not found"}), 404
 
     model_spec = {
-        "Model": m["model"], "Series": m.get("series", "—"), "Power": m.get("power", "—"),
-        "Drive Type": m.get("drive_type", "—"), "Controller": m.get("controller", "—"),
-        "Capacity": m.get("capacity", "Not specified"), "Load Center": m.get("load_center", "Not specified"),
-        "Turning Radius": m.get("turning_radius", "Not specified"), "Overall Width": m.get("overall_width", "Not specified"),
-        "Overall Length": m.get("overall_length", "Not specified"), "Overall Height": m.get("overall_height", "Not specified"),
-        "Wheel Base": m.get("wheel_base", "Not specified"), "Max Lift Height": m.get("max_lift_height", "Not specified"),
-        "Indoors": m.get("indoors", "Not specified"), "Outdoors": m.get("outdoors", "Not specified"),
+        "Brand": "HELI",
+        "Model": m["model"],
+        "Series": m.get("series", "—"),
+        "Power": m.get("power", "—"),
+        "Drive Type": m.get("drive_type", "—"),
+        "Controller": m.get("controller", "—"),
+        "Capacity": m.get("capacity", "Not specified"),
+        "Load Center": m.get("load_center", "Not specified"),
+        "Turning Radius": m.get("turning_radius", "Not specified"),
+        "Overall Width": m.get("overall_width", "Not specified"),
+        "Overall Length": m.get("overall_length", "Not specified"),
+        "Overall Height": m.get("overall_height", "Not specified"),
+        "Wheel Base": m.get("wheel_base", "Not specified"),
+        "Max Lift Height": m.get("max_lift_height", "Not specified"),
+        "Indoors": m.get("indoors", "Not specified"),
+        "Outdoors": m.get("outdoors", "Not specified"),
         "Special Environments": m.get("special_env", "Not specified"),
         "Why Wins (precomputed hints)": "; ".join(m.get("why_wins", [])) or "Not specified",
     }
     spec_lines = "\n".join(f"- {k}: {v}" for k, v in model_spec.items())
 
     system = (
-        "You are a forklift sales engineer. Use only details in MODEL_SPEC. "
-        "If a detail is missing, say 'Not specified'. Be concise and practical for reps."
+        "You are a forklift sales engineer. You can use general forklift industry knowledge "
+        "(e.g., typical differences between electric Li-ion vs. IC, 3-wheel vs. 4-wheel, common aisle widths, "
+        "maintenance/charging realities, cold storage considerations) to guide sales conversations. "
+        "Use MODEL_SPEC as ground truth for this HELI model. "
+        "Do NOT invent exact specifications for competitors. Keep brand comparisons generic (e.g., "
+        "“vs many IC trucks”, “compared with typical 3-wheel electrics from other major OEMs”). "
+        "If a detail is missing in MODEL_SPEC, say “Not specified”. Be concise and practical for reps."
     )
+
     user = f"""MODEL_SPEC
 {spec_lines}
 
-Write a skimmable briefing with:
+Produce HTML with two <section> blocks, each wrapped with a root <div> that has data-block attribute:
 
-1) Overview – one sentence on ideal use (who/where).
-2) Why it wins – 4–6 bullets tied strictly to the spec.
-3) Best environments – bullets (indoor/outdoor/special) from spec.
-4) Fit checklist – 5 quick checks to confirm with the customer.
-5) Watchouts – 2–4 bullets only if relevant to spec.
+<div data-block="fit">…</div>
+<div data-block="edge">…</div>
 
-≈120–160 words. No fluff; do not invent specs.
+1) In data-block="fit", write a skimmable briefing (≈120–160 words) with:
+   • Overview – one sentence on ideal use (who/where).
+   • Why it wins – 4–6 bullets tied strictly to the spec and the precomputed hints.
+   • Best environments – bullets using the spec.
+   • Fit checklist – 5 quick checks to confirm with the customer.
+   • Watchouts – 2–4 bullets only if relevant (aisle width, ventilation, charging, flooring, etc).
+
+2) In data-block="edge", write a short “Competitive Edge vs Other Brands” (≈90–130 words) that:
+   • Uses general forklift knowledge.
+   • Explains how this HELI model could compare to similar trucks from other major OEMs WITHOUT asserting specific competitor specs.
+   • Frames claims responsibly (e.g., “typically”, “often”, “many fleets find”, “vs most IC trucks”).
+   • Anchors talking points on what we do know from MODEL_SPEC (power type, drive type, turning/width, capacity, controller if present).
+
+Use short paragraphs and bullets, avoid fluff, and DO NOT output anything outside the two root blocks.
 """
+
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=0.2,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            temperature=0.3,
         )
-        text = resp.choices[0].message.content.strip()
-        return jsonify({"html": f"<div class='ai-fit'>{text.replace(chr(10), '<br>')}</div>"})
+        html = resp.choices[0].message.content.strip()
+        # Safety: if model didn't wrap blocks, wrap simply
+        if 'data-block="fit"' not in html or 'data-block="edge"' not in html:
+            html = (
+                "<div data-block=\"fit\"><p>Briefing unavailable.</p></div>"
+                "<div data-block=\"edge\"><p>Competitive edge unavailable.</p></div>"
+            )
+        return jsonify({"html": html})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
