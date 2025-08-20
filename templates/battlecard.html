@@ -1,0 +1,101 @@
+{% set title = (model.model or model._display) %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ title }} – Battle Card</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='battlecards.css') }}">
+</head>
+<body class="bc-body">
+  <header class="bc-header">
+    <div class="brand-left"><div class="tynan">TYNAN EQUIPMENT AI</div></div>
+    <div class="brand-right">HELI</div>
+  </header>
+
+  <main class="bc-wrap">
+    <section class="bc-hero">
+      <div class="bc-hero-text">
+        <h1 class="bc-title">{{ (model.series or "Series") | upper }} – {{ title }}</h1>
+        <p class="bc-tagline">Fast • Tough • Efficient</p>
+      </div>
+      <div class="bc-hero-art" aria-hidden="true">
+        <div class="forklift-silhouette"></div>
+      </div>
+    </section>
+
+    <section class="bc-grid">
+      <article class="bc-panel">
+        <h2>Best Environments</h2>
+        <ul class="bullets">
+          <li>Indoors: {{ model.indoors }}</li>
+          <li>Outdoors: {{ model.outdoors }}</li>
+          <li>Special: {{ model.special_env }}</li>
+        </ul>
+      </article>
+
+      <article class="bc-panel">
+        <h2>Key Specs</h2>
+        <div class="specs">
+          <div><span>Power</span><b>{{ model.power }}</b></div>
+          <div><span>Drive Type</span><b>{{ model.drive_type }}</b></div>
+          <div><span>Controller</span><b>{{ model.controller }}</b></div>
+          <div><span>Capacity</span><b>{{ model.capacity }}</b></div>
+          <div><span>Load Center</span><b>{{ model.load_center }}</b></div>
+          <div><span>Turning Radius</span><b>{{ model.turning_radius }}</b></div>
+          <div><span>Overall Width</span><b>{{ model.overall_width }}</b></div>
+          <div><span>Overall Length</span><b>{{ model.overall_length }}</b></div>
+          <div><span>Overall Height</span><b>{{ model.overall_height }}</b></div>
+          <div><span>Wheel Base</span><b>{{ model.wheel_base }}</b></div>
+          <div><span>Max Lift Height</span><b>{{ model.max_lift_height }}</b></div>
+          <div><span>Battery Voltage</span><b>{{ model.battery_voltage }}</b></div>
+        </div>
+      </article>
+
+      <article class="bc-panel bc-wide">
+        <h2>Why It Wins</h2>
+        <ul class="bullets">
+          {% for p in model.why_wins %}
+          <li>{{ p }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+    </section>
+
+    <div class="bc-cta-row">
+      <button id="askAiBtn" class="btn-primary">ASK AI FOR FIT</button>
+    </div>
+
+    <dialog id="aiFitDialog" class="ai-dialog">
+      <div class="ai-dialog-inner">
+        <div class="ai-dialog-head">
+          <h3>AI Fit – {{ title }}</h3>
+          <button id="closeAi" class="btn-ghost">✕</button>
+        </div>
+        <div id="aiOutput" class="ai-output"><div class="spinner"></div></div>
+      </div>
+    </dialog>
+  </main>
+
+  <script>
+    const slug = "{{ model._slug }}";
+    const btn = document.getElementById('askAiBtn');
+    const dlg = document.getElementById('aiFitDialog');
+    const out = document.getElementById('aiOutput');
+    const closeBtn = document.getElementById('closeAi');
+
+    btn.addEventListener('click', async () => {
+      out.innerHTML = '<div class="spinner"></div>';
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      try {
+        const r = await fetch(`/api/ai_fit?model=${encodeURIComponent(slug)}`);
+        const j = await r.json();
+        out.innerHTML = j.html ? j.html : `<pre>${(j.error||'Unknown error')}</pre>`;
+      } catch (e) {
+        out.innerHTML = `<pre>${e}</pre>`;
+      }
+    });
+    closeBtn.addEventListener('click', () => dlg.close());
+  </script>
+</body>
+</html>

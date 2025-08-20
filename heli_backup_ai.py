@@ -773,6 +773,280 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
+# --- Battle Cards (models.json normalizer + routes + AI fit) ------------------
+import os, json, re, math
+from functools import lru_cache
+from flask import render_template, jsonify, request, abort
+
+# If you already created an OpenAI client earlier in this file, reuse it.
+try:
+    client  # noqa: F821
+except NameError:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ---------- helpers to normalize your spreadsheet-like JSON -------------------
+NA_VALUES = {"", "n/a", "na", "null", "none", "—", "-"}
+
+def _is_na(s):
+    if s is None:
+        return True
+    if isinstance(s, str) and s.strip().lower() in NA_VALUES:
+        return True
+    return False
+
+_num_re = re.compile(r"-?\d+(\.\d+)?")
+
+def _num_from_text(s):
+    """Extract first number from '1700 lbs', '58', '80 V', etc."""
+    if s is None:
+        return None
+    m = _num_re.search(str(s))
+    return float(m.group(0)) if m else None
+
+def _fmt_int(n):
+    """1,700 formatting, return None if not a number."""
+    if n is None or math.isnan(n):
+        return None
+    return f"{int(round(n)):,}"
+
+def _fmt_in(n):   # inches
+    v = _fmt_int(n)
+    return f"{v} in" if v is not None else None
+
+def _fmt_lb(n):   # pounds
+    v = _fmt_int(n)
+    return f"{v} lb" if v is not None else None
+
+def _fmt_v(n):    # volts
+    v = _fmt_int(n)
+    return f"{v} V" if v is not None else None
+
+def _slugify(s):
+    return re.sub(r"[^a-z0-9\-]+", "-", str(s).lower()).strip("-")
+
+def _norm_power(p):
+    if not p:
+        return None
+    t = p.strip().lower()
+    # normalize common variants
+    if "lith" in t:
+        return "Electric (Li-ion)"
+    if t in {"electric", "lead acid", "lead-acid", "la", "acid"}:
+        return "Electric (Lead-acid)"
+    if "lpg" in t:
+        return "LPG"
+    if "diesel" in t:
+        return "Diesel"
+    return p  # leave as-is if unknown
+
+# Map your exact column names → internal keys
+COLUMN_MAP = {
+    "Model Name": "model_name",
+    "Load Capacity (lbs)": "capacity_lbs_text",
+    "Min. Outside Turning Radius (in)": "turning_radius_in_text",
+    "Load Center (in)": "load_center_in_text",
+    "Battery Voltage": "battery_voltage_text",
+    "Controller": "controller",
+    "Power": "power_text",
+    "Wheel Base": "wheel_base_text",
+    "Overall Height (in)": "overall_height_in_text",
+    "Overall Length (in)": "overall_length_in_text",
+    "Overall Width (in)": "overall_width_in_text",
+    "Max Lifting Height (in)": "max_lift_height_in_text",
+    "Drive Type": "drive_type",
+    "Series": "series",
+}
+
+def _normalize_record(rec):
+    """Take one raw row (with your headers) → clean dict for templates + AI."""
+    # Pull raw fields with safe defaults
+    r = {k: rec.get(src) for src, k in COLUMN_MAP.items()}
+
+    # Parse numbers from the text fields
+    capacity_lb = _num_from_text(r["capacity_lbs_text"])
+    turning_in = _num_from_text(r["turning_radius_in_text"])
+    load_center_in = _num_from_text(r["load_center_in_text"])
+    batt_v = _num_from_text(r["battery_voltage_text"])
+    wheel_base_in = _num_from_text(r["wheel_base_text"])
+    oh_in = _num_from_text(r["overall_height_in_text"])
+    ol_in = _num_from_text(r["overall_length_in_text"])
+    ow_in = _num_from_text(r["overall_width_in_text"])
+    mlh_in = _num_from_text(r["max_lift_height_in_text"])
+
+    power_norm = _norm_power(r["power_text"])
+
+    model = {
+        # identity
+        "model": r["model_name"] or "Unknown Model",
+        "_display": r["model_name"] or "Unknown Model",
+        "_slug": _slugify(r["model_name"] or "unknown"),
+
+        # primary descriptors
+        "series": r["series"] or "—",
+        "power": power_norm or (r["power_text"] or "—"),
+        "drive_type": r["drive_type"] or "—",
+        "controller": r["controller"] or "—",
+
+        # string versions with units (for UI)
+        "capacity": _fmt_lb(capacity_lb) or (r["capacity_lbs_text"] or "Not specified"),
+        "turning_radius": _fmt_in(turning_in) or (r["turning_radius_in_text"] or "Not specified"),
+        "load_center": _fmt_in(load_center_in) or (r["load_center_in_text"] or "Not specified"),
+        "battery_voltage": _fmt_v(batt_v) or (r["battery_voltage_text"] or "Not specified"),
+        "wheel_base": _fmt_in(wheel_base_in) or (r["wheel_base_text"] or "Not specified"),
+        "overall_height": _fmt_in(oh_in) or (r["overall_height_in_text"] or "Not specified"),
+        "overall_length": _fmt_in(ol_in) or (r["overall_length_in_text"] or "Not specified"),
+        "overall_width": _fmt_in(ow_in) or (r["overall_width_in_text"] or "Not specified"),
+        "max_lift_height": _fmt_in(mlh_in) or (r["max_lift_height_in_text"] or "Not specified"),
+
+        # numeric versions (for simple rules/filters later)
+        "_capacity_lb": capacity_lb,
+        "_turning_in": turning_in,
+        "_load_center_in": load_center_in,
+        "_battery_v": batt_v,
+        "_wheel_base_in": wheel_base_in,
+        "_overall_width_in": ow_in,
+        "_overall_length_in": ol_in,
+        "_overall_height_in": oh_in,
+        "_max_lift_height_in": mlh_in,
+    }
+
+    # Simple rule-based enrichment for "Best Environments" + "Why it wins"
+    why = []
+    env_in = []
+    env_out = []
+    env_special = []
+
+    # Power-based hints
+    if "Electric" in model["power"]:
+        why += ["Zero local emissions", "Lower routine maintenance vs. IC", "Quiet operation"]
+        if "Li-ion" in model["power"]:
+            why += ["Opportunity charging; uptime friendly"]
+            env_special += ["Cold storage friendly vs. lead-acid (battery chemistry)"]
+
+    # Drive type / maneuverability
+    if model["drive_type"] and "three wheel" in model["drive_type"].lower():
+        why += ["Tight turning in narrow aisles"]
+        env_in += ["Narrow aisles, docks, staging"]
+
+    # Width / turning radius influence
+    if model["_overall_width_in"] and model["_overall_width_in"] <= 36:
+        env_in += ["Very tight aisle layouts"]
+        why += [f"Compact width ({model['overall_width']})"]
+    if model["_turning_in"] and model["_turning_in"] <= 60:
+        why += [f"Small turning radius ({model['turning_radius']})"]
+
+    # Capacity
+    if model["_capacity_lb"]:
+        why += [f"Right-sized capacity ({model['capacity']})"]
+
+    # Defaults if empty
+    if not env_in:
+        env_in = ["General warehouse"]
+    if not env_out:
+        env_out = ["Smooth outdoor pavement (light duty)"]
+    if not env_special:
+        env_special = ["Not specified"]
+
+    model["indoors"] = ", ".join(dict.fromkeys(env_in))  # preserve order, de-dupe
+    model["outdoors"] = ", ".join(dict.fromkeys(env_out))
+    model["special_env"] = ", ".join(dict.fromkeys(env_special))
+    model["why_wins"] = list(dict.fromkeys(why)) or ["Not specified"]
+
+    return model
+
+@lru_cache(maxsize=1)
+def _load_models():
+    """Read models.json and normalize every row using your headers."""
+    with open("models.json", "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    rows = raw if isinstance(raw, list) else raw.get("models", [])
+    models = [_normalize_record(row) for row in rows]
+    return models
+
+def _find_model_by_slug(slug: str):
+    for m in _load_models():
+        if m["_slug"] == slug:
+            return m
+    return None
+
+# ------------------------------ routes ---------------------------------------
+@app.route("/battlecards")
+def battlecards_index():
+    models = _load_models()
+    q = (request.args.get("q") or "").strip().lower()
+    if q:
+        models = [m for m in models if q in json.dumps(m).lower()]
+    return render_template("battlecards_index.html", models=models, q=q)
+
+@app.route("/battlecards/<slug>")
+def battlecard_view(slug):
+    model = _find_model_by_slug(slug)
+    if not model:
+        abort(404)
+    return render_template("battlecard.html", model=model)
+
+# -------------------------- ASK AI FOR FIT -----------------------------------
+@app.route("/api/ai_fit")
+def api_ai_fit():
+    slug = (request.args.get("model") or "").strip()
+    m = _find_model_by_slug(slug)
+    if not m:
+        return jsonify({"error": "Model not found"}), 404
+
+    model_spec = {
+        "Model": m["model"],
+        "Series": m.get("series", "—"),
+        "Power": m.get("power", "—"),
+        "Drive Type": m.get("drive_type", "—"),
+        "Controller": m.get("controller", "—"),
+        "Capacity": m.get("capacity", "Not specified"),
+        "Load Center": m.get("load_center", "Not specified"),
+        "Turning Radius": m.get("turning_radius", "Not specified"),
+        "Overall Width": m.get("overall_width", "Not specified"),
+        "Overall Length": m.get("overall_length", "Not specified"),
+        "Overall Height": m.get("overall_height", "Not specified"),
+        "Wheel Base": m.get("wheel_base", "Not specified"),
+        "Max Lift Height": m.get("max_lift_height", "Not specified"),
+        "Indoors": m.get("indoors", "Not specified"),
+        "Outdoors": m.get("outdoors", "Not specified"),
+        "Special Environments": m.get("special_env", "Not specified"),
+        "Why Wins (precomputed hints)": "; ".join(m.get("why_wins", [])) or "Not specified",
+    }
+    spec_lines = "\n".join(f"- {k}: {v}" for k, v in model_spec.items())
+
+    system = (
+        "You are a forklift sales engineer. Use only details in MODEL_SPEC. "
+        "If a detail is missing, say 'Not specified'. Be concise and practical for reps."
+    )
+    user = f"""MODEL_SPEC
+{spec_lines}
+
+Write a skimmable briefing with:
+
+1) Overview – one sentence on ideal use (who/where).
+2) Why it wins – 4–6 bullets tied strictly to the spec.
+3) Best environments – bullets (indoor/outdoor/special) from spec.
+4) Fit checklist – 5 quick checks to confirm with the customer.
+5) Watchouts – 2–4 bullets only if relevant to spec (aisle width, ventilation, charging, flooring, etc).
+
+≈120–160 words. No fluff; do not invent specs.
+"""
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+        )
+        text = resp.choices[0].message.content.strip()
+        return jsonify({"html": f"<div class='ai-fit'>{text.replace(chr(10), '<br>')}</div>"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ─── Entrypoint ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))

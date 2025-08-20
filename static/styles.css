@@ -225,3 +225,17 @@ body{
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; scroll-behavior:auto!important}
 }
+
+/* Battle Cards nav button */
+.btn-nav{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:10px 14px; border-radius:12px;
+  border:1px solid #cc0000; color:#fff; text-decoration:none;
+  font-weight:800; letter-spacing:.02em;
+  background:transparent; transition:transform .08s ease, box-shadow .12s ease, background .12s ease;
+}
+.btn-nav:hover{ background:#cc0000; box-shadow:0 6px 20px rgba(204,0,0,.35) }
+.btn-nav:active{ transform:translateY(1px) }
+@media (max-width:720px){
+  .btn-nav{ padding:9px 12px; border-radius:10px; font-weight:700 }
+}
