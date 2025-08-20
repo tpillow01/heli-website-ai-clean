@@ -773,8 +773,8 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
-# --- Battle Cards (models.json normalizer + routes + AI fit) ------------------
-import os, json, re, math
+# --- Battle Cards (robust models.json normalizer + routes + AI fit) ----------
+import os, json, re, math, hashlib
 from functools import lru_cache
 from flask import render_template, jsonify, request, abort
 
@@ -785,40 +785,64 @@ except NameError:
     from openai import OpenAI
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ---------- helpers to normalize your spreadsheet-like JSON -------------------
-NA_VALUES = {"", "n/a", "na", "null", "none", "—", "-"}
+# ----------------------- tolerant header + parsing helpers --------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_PATH = os.path.join(BASE_DIR, "models.json")
 
-def _is_na(s):
+NA_VALUES = {"", "n/a", "na", "null", "none", "—", "-", "not specified"}
+
+def _canon(s: str) -> str:
+    """Canonicalize header: lowercase, trim, collapse spaces, drop punctuation/spaces."""
     if s is None:
-        return True
-    if isinstance(s, str) and s.strip().lower() in NA_VALUES:
-        return True
-    return False
+        return ""
+    t = re.sub(r"\s+", " ", str(s)).strip().lower()
+    t = re.sub(r"[^a-z0-9 ]+", "", t)
+    return t.replace(" ", "")
+
+# synonyms → canonical keys we’ll look up per row
+HEADERS = {
+    "model_name": {"modelname", "model", "modelcode", "model#", "modelid", "modelno", "modelnumber"},
+    "capacity_lbs": {"loadcapacitylbs", "capacitylbs", "ratedcapacity", "capacity"},
+    "turning_in": {"minoutsideturningradiusin", "turningradiusin", "outsideturningradius", "turningin"},
+    "load_center_in": {"loadcenterin", "loadcenter"},
+    "battery_v": {"batteryvoltage", "battvoltage", "voltage"},
+    "controller": {"controller", "control", "controllerbrand"},
+    "power": {"power", "powertype"},
+    "wheel_base_in": {"wheelbase", "wheelbasein"},
+    "overall_height_in": {"overallheightin", "heightin"},
+    "overall_length_in": {"overalllengthin", "lengthin"},
+    "overall_width_in": {"overallwidthin", "widthin"},
+    "max_lift_height_in": {"maxliftingheightin", "maxliftht", "mastmaxheightin"},
+    "drive_type": {"drivetype", "drive"},
+    "series": {"series", "family"},
+}
 
 _num_re = re.compile(r"-?\d+(\.\d+)?")
 
 def _num_from_text(s):
-    """Extract first number from '1700 lbs', '58', '80 V', etc."""
+    """Extract first numeric value from strings like '1700 lbs', '58', '80 V'."""
     if s is None:
         return None
     m = _num_re.search(str(s))
     return float(m.group(0)) if m else None
 
 def _fmt_int(n):
-    """1,700 formatting, return None if not a number."""
-    if n is None or math.isnan(n):
+    try:
+        if n is None:
+            return None
+        return f"{int(round(float(n))):,}"
+    except (TypeError, ValueError):
         return None
-    return f"{int(round(n)):,}"
 
-def _fmt_in(n):   # inches
+def _fmt_in(n):  # inches
     v = _fmt_int(n)
     return f"{v} in" if v is not None else None
 
-def _fmt_lb(n):   # pounds
+def _fmt_lb(n):  # pounds
     v = _fmt_int(n)
     return f"{v} lb" if v is not None else None
 
-def _fmt_v(n):    # volts
+def _fmt_v(n):   # volts
     v = _fmt_int(n)
     return f"{v} V" if v is not None else None
 
@@ -828,8 +852,7 @@ def _slugify(s):
 def _norm_power(p):
     if not p:
         return None
-    t = p.strip().lower()
-    # normalize common variants
+    t = str(p).strip().lower()
     if "lith" in t:
         return "Electric (Li-ion)"
     if t in {"electric", "lead acid", "lead-acid", "la", "acid"}:
@@ -838,130 +861,139 @@ def _norm_power(p):
         return "LPG"
     if "diesel" in t:
         return "Diesel"
-    return p  # leave as-is if unknown
+    return p
 
-# Map your exact column names → internal keys
-COLUMN_MAP = {
-    "Model Name": "model_name",
-    "Load Capacity (lbs)": "capacity_lbs_text",
-    "Min. Outside Turning Radius (in)": "turning_radius_in_text",
-    "Load Center (in)": "load_center_in_text",
-    "Battery Voltage": "battery_voltage_text",
-    "Controller": "controller",
-    "Power": "power_text",
-    "Wheel Base": "wheel_base_text",
-    "Overall Height (in)": "overall_height_in_text",
-    "Overall Length (in)": "overall_length_in_text",
-    "Overall Width (in)": "overall_width_in_text",
-    "Max Lifting Height (in)": "max_lift_height_in_text",
-    "Drive Type": "drive_type",
-    "Series": "series",
-}
+def _row_lookup(row: dict):
+    """Build normalized-header → value map for a single row."""
+    lut = {}
+    for k, v in row.items():
+        lut[_canon(k)] = v
+    return lut
+
+def _get_any(lut: dict, keys: set):
+    for k in keys:
+        v = lut.get(k)
+        if v is not None and str(v).strip() != "":
+            return v
+    return None
 
 def _normalize_record(rec):
-    """Take one raw row (with your headers) → clean dict for templates + AI."""
-    # Pull raw fields with safe defaults
-    r = {k: rec.get(src) for src, k in COLUMN_MAP.items()}
+    """One raw row → clean dict for templates + AI (tolerant to header drift)."""
+    lut = _row_lookup(rec)
 
-    # Parse numbers from the text fields
-    capacity_lb = _num_from_text(r["capacity_lbs_text"])
-    turning_in = _num_from_text(r["turning_radius_in_text"])
-    load_center_in = _num_from_text(r["load_center_in_text"])
-    batt_v = _num_from_text(r["battery_voltage_text"])
-    wheel_base_in = _num_from_text(r["wheel_base_text"])
-    oh_in = _num_from_text(r["overall_height_in_text"])
-    ol_in = _num_from_text(r["overall_length_in_text"])
-    ow_in = _num_from_text(r["overall_width_in_text"])
-    mlh_in = _num_from_text(r["max_lift_height_in_text"])
+    raw_model = _get_any(lut, HEADERS["model_name"])
+    cap = _num_from_text(_get_any(lut, HEADERS["capacity_lbs"]))
+    trn = _num_from_text(_get_any(lut, HEADERS["turning_in"]))
+    lctr = _num_from_text(_get_any(lut, HEADERS["load_center_in"]))
+    batt = _num_from_text(_get_any(lut, HEADERS["battery_v"]))
+    wbase = _num_from_text(_get_any(lut, HEADERS["wheel_base_in"]))
+    oh = _num_from_text(_get_any(lut, HEADERS["overall_height_in"]))
+    ol = _num_from_text(_get_any(lut, HEADERS["overall_length_in"]))
+    ow = _num_from_text(_get_any(lut, HEADERS["overall_width_in"]))
+    mlh = _num_from_text(_get_any(lut, HEADERS["max_lift_height_in"]))
+    controller = _get_any(lut, HEADERS["controller"])
+    power_raw = _get_any(lut, HEADERS["power"])
+    drive = _get_any(lut, HEADERS["drive_type"])
+    series = _get_any(lut, HEADERS["series"])
 
-    power_norm = _norm_power(r["power_text"])
+    power_norm = _norm_power(power_raw)
+
+    # string fallbacks (so UI shows something human-ish even if numeric parse fails)
+    cap_raw = _get_any(lut, HEADERS["capacity_lbs"])
+    trn_raw = _get_any(lut, HEADERS["turning_in"])
+    lctr_raw = _get_any(lut, HEADERS["load_center_in"])
+    batt_raw = _get_any(lut, HEADERS["battery_v"])
+    wbase_raw = _get_any(lut, HEADERS["wheel_base_in"])
+    oh_raw = _get_any(lut, HEADERS["overall_height_in"])
+    ol_raw = _get_any(lut, HEADERS["overall_length_in"])
+    ow_raw = _get_any(lut, HEADERS["overall_width_in"])
+    mlh_raw = _get_any(lut, HEADERS["max_lift_height_in"])
 
     model = {
         # identity
-        "model": r["model_name"] or "Unknown Model",
-        "_display": r["model_name"] or "Unknown Model",
-        "_slug": _slugify(r["model_name"] or "unknown"),
+        "model": raw_model or "Unknown Model",
+        "_display": raw_model or "Unknown Model",
+        # slug is assigned in _load_models() with collision handling
+        "_slug": None,
 
         # primary descriptors
-        "series": r["series"] or "—",
-        "power": power_norm or (r["power_text"] or "—"),
-        "drive_type": r["drive_type"] or "—",
-        "controller": r["controller"] or "—",
+        "series": series or "—",
+        "power": power_norm or (power_raw or "—"),
+        "drive_type": drive or "—",
+        "controller": controller or "—",
 
-        # string versions with units (for UI)
-        "capacity": _fmt_lb(capacity_lb) or (r["capacity_lbs_text"] or "Not specified"),
-        "turning_radius": _fmt_in(turning_in) or (r["turning_radius_in_text"] or "Not specified"),
-        "load_center": _fmt_in(load_center_in) or (r["load_center_in_text"] or "Not specified"),
-        "battery_voltage": _fmt_v(batt_v) or (r["battery_voltage_text"] or "Not specified"),
-        "wheel_base": _fmt_in(wheel_base_in) or (r["wheel_base_text"] or "Not specified"),
-        "overall_height": _fmt_in(oh_in) or (r["overall_height_in_text"] or "Not specified"),
-        "overall_length": _fmt_in(ol_in) or (r["overall_length_in_text"] or "Not specified"),
-        "overall_width": _fmt_in(ow_in) or (r["overall_width_in_text"] or "Not specified"),
-        "max_lift_height": _fmt_in(mlh_in) or (r["max_lift_height_in_text"] or "Not specified"),
+        # UI strings with units
+        "capacity": _fmt_lb(cap) or (cap_raw or "Not specified"),
+        "turning_radius": _fmt_in(trn) or (trn_raw or "Not specified"),
+        "load_center": _fmt_in(lctr) or (lctr_raw or "Not specified"),
+        "battery_voltage": _fmt_v(batt) or (batt_raw or "Not specified"),
+        "wheel_base": _fmt_in(wbase) or (wbase_raw or "Not specified"),
+        "overall_height": _fmt_in(oh) or (oh_raw or "Not specified"),
+        "overall_length": _fmt_in(ol) or (ol_raw or "Not specified"),
+        "overall_width": _fmt_in(ow) or (ow_raw or "Not specified"),
+        "max_lift_height": _fmt_in(mlh) or (mlh_raw or "Not specified"),
 
-        # numeric versions (for simple rules/filters later)
-        "_capacity_lb": capacity_lb,
-        "_turning_in": turning_in,
-        "_load_center_in": load_center_in,
-        "_battery_v": batt_v,
-        "_wheel_base_in": wheel_base_in,
-        "_overall_width_in": ow_in,
-        "_overall_length_in": ol_in,
-        "_overall_height_in": oh_in,
-        "_max_lift_height_in": mlh_in,
+        # numeric values (handy for rules/filters)
+        "_capacity_lb": cap, "_turning_in": trn, "_load_center_in": lctr, "_battery_v": batt,
+        "_wheel_base_in": wbase, "_overall_width_in": ow, "_overall_length_in": ol,
+        "_overall_height_in": oh, "_max_lift_height_in": mlh,
     }
 
-    # Simple rule-based enrichment for "Best Environments" + "Why it wins"
-    why = []
-    env_in = []
-    env_out = []
-    env_special = []
+    # Lightweight enrichment for Environments + Why It Wins
+    why, env_in, env_out, env_special = [], [], [], []
 
-    # Power-based hints
     if "Electric" in model["power"]:
         why += ["Zero local emissions", "Lower routine maintenance vs. IC", "Quiet operation"]
         if "Li-ion" in model["power"]:
             why += ["Opportunity charging; uptime friendly"]
-            env_special += ["Cold storage friendly vs. lead-acid (battery chemistry)"]
+            env_special += ["Cold storage friendly vs. lead-acid"]
 
-    # Drive type / maneuverability
-    if model["drive_type"] and "three wheel" in model["drive_type"].lower():
+    if model["drive_type"] and "three wheel" in str(model["drive_type"]).lower():
         why += ["Tight turning in narrow aisles"]
         env_in += ["Narrow aisles, docks, staging"]
 
-    # Width / turning radius influence
     if model["_overall_width_in"] and model["_overall_width_in"] <= 36:
         env_in += ["Very tight aisle layouts"]
         why += [f"Compact width ({model['overall_width']})"]
+
     if model["_turning_in"] and model["_turning_in"] <= 60:
         why += [f"Small turning radius ({model['turning_radius']})"]
 
-    # Capacity
     if model["_capacity_lb"]:
         why += [f"Right-sized capacity ({model['capacity']})"]
 
-    # Defaults if empty
-    if not env_in:
-        env_in = ["General warehouse"]
-    if not env_out:
-        env_out = ["Smooth outdoor pavement (light duty)"]
-    if not env_special:
-        env_special = ["Not specified"]
+    if not env_in: env_in = ["General warehouse"]
+    if not env_out: env_out = ["Smooth outdoor pavement (light duty)"]
+    if not env_special: env_special = ["Not specified"]
 
-    model["indoors"] = ", ".join(dict.fromkeys(env_in))  # preserve order, de-dupe
+    model["indoors"] = ", ".join(dict.fromkeys(env_in))
     model["outdoors"] = ", ".join(dict.fromkeys(env_out))
     model["special_env"] = ", ".join(dict.fromkeys(env_special))
     model["why_wins"] = list(dict.fromkeys(why)) or ["Not specified"]
-
     return model
 
 @lru_cache(maxsize=1)
 def _load_models():
-    """Read models.json and normalize every row using your headers."""
-    with open("models.json", "r", encoding="utf-8") as f:
+    """Read models.json and normalize rows (supports array, {'models': [...]}, or {'data': [...]})"""
+    with open(MODELS_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)
-    rows = raw if isinstance(raw, list) else raw.get("models", [])
-    models = [_normalize_record(row) for row in rows]
+    rows = raw if isinstance(raw, list) else raw.get("models", raw.get("data", []))
+    models = []
+    used_slugs = set()
+
+    for i, row in enumerate(rows or []):
+        m = _normalize_record(row)
+        base_slug_src = m["model"] if m["model"] and m["model"] != "Unknown Model" else (row.get("Model Name") or f"unknown-{i+1}")
+        slug = _slugify(base_slug_src) or f"unknown-{i+1}"
+
+        # ensure uniqueness (avoid many /battlecards/unknown links)
+        if slug in used_slugs:
+            slug = f"{slug}-{i+1}"
+        used_slugs.add(slug)
+        m["_slug"] = slug
+        m["_display"] = m["model"]
+        models.append(m)
+
     return models
 
 def _find_model_by_slug(slug: str):
@@ -970,7 +1002,7 @@ def _find_model_by_slug(slug: str):
             return m
     return None
 
-# ------------------------------ routes ---------------------------------------
+# ---------------------------------- routes -----------------------------------
 @app.route("/battlecards")
 def battlecards_index():
     models = _load_models()
@@ -986,7 +1018,7 @@ def battlecard_view(slug):
         abort(404)
     return render_template("battlecard.html", model=model)
 
-# -------------------------- ASK AI FOR FIT -----------------------------------
+# ------------------------------- ASK AI FOR FIT ------------------------------
 @app.route("/api/ai_fit")
 def api_ai_fit():
     slug = (request.args.get("model") or "").strip()
