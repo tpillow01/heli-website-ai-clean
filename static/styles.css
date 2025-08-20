@@ -226,16 +226,26 @@ body{
   *{animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; scroll-behavior:auto!important}
 }
 
-/* Battle Cards nav button */
-.btn-nav{
+/* Cream pill nav (Chat / Map / Battle Cards) */
+.nav-pill{
   display:inline-flex; align-items:center; gap:8px;
-  padding:10px 14px; border-radius:12px;
-  border:1px solid #cc0000; color:#fff; text-decoration:none;
-  font-weight:800; letter-spacing:.02em;
-  background:transparent; transition:transform .08s ease, box-shadow .12s ease, background .12s ease;
+  padding:8px 12px; border-radius:12px;
+  background:var(--cream, #f6efe3);
+  border:1px solid var(--line, #e7dac6);
+  color:var(--ink, #5e4b3f);
+  text-decoration:none; font-weight:800;
+  box-shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
+  transition:background .12s ease, transform .06s ease;
 }
-.btn-nav:hover{ background:#cc0000; box-shadow:0 6px 20px rgba(204,0,0,.35) }
-.btn-nav:active{ transform:translateY(1px) }
-@media (max-width:720px){
-  .btn-nav{ padding:9px 12px; border-radius:10px; font-weight:700 }
+.nav-pill:hover{ background:var(--cream-2, #fbf6ee) }
+.nav-pill:active{ transform:translateY(1px) }
+.nav-pill.active{ outline:2px solid rgba(204,0,0,.25) }
+
+/* Ask AI button on the card */
+.btn-ask{
+  background:linear-gradient(#d8493f,#c61c10);
+  color:#fff; border:none; border-radius:14px;
+  padding:12px 18px; font-weight:900; letter-spacing:.03em;
+  box-shadow:0 6px 18px rgba(204,0,0,.25); cursor:pointer;
 }
+.btn-ask:hover{ filter:brightness(1.02) }
