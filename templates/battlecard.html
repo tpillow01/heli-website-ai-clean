@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Battle Card – {{ model.model }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=46) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=47) }}">
 
   <style>
     :root{
@@ -111,9 +111,19 @@
     }
     .modal-title{ font-weight:900; }
     .close-x{ border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer; font-weight:900; }
+
+    /* Center the briefing content */
     .modal-body{
       padding:var(--modal-pad);
       line-height:1.65;
+      display:flex;                 /* center container */
+      justify-content:center;
+    }
+    .briefing-inner{
+      width:100%;
+      max-width:720px;              /* nice readable line length */
+      margin:0 auto;
+      text-align:left;
     }
     .modal-body p{ margin:.65em 0; }
     .modal-body ul{ padding-left:24px; }
@@ -126,11 +136,11 @@
       .bc-hero-bar{ flex-direction:column; align-items:flex-start; gap:10px; }
       .btn-briefing{ width:100%; justify-content:center; }
       :root{ --card-pad:20px; --block-pad:20px; --modal-pad:22px; }
+      .briefing-inner{ max-width:600px; }   /* slightly narrower on small devices */
     }
   </style>
 </head>
 <body>
-  <!-- Top anchor to force start at top -->
   <div id="card-top" class="bc-page">
     <a class="back-link" href="{{ url_for('battlecards_index') }}">← Back to Battle Cards</a>
 
@@ -157,18 +167,9 @@
           </div>
 
           <div class="bc-hero-metrics">
-            <div class="metric">
-              <div class="k">Width</div>
-              <div class="v">{{ model.overall_width }}</div>
-            </div>
-            <div class="metric">
-              <div class="k">Turning</div>
-              <div class="v">{{ model.turning_radius }}</div>
-            </div>
-            <div class="metric">
-              <div class="k">Load Center</div>
-              <div class="v">{{ model.load_center }}</div>
-            </div>
+            <div class="metric"><div class="k">Width</div><div class="v">{{ model.overall_width }}</div></div>
+            <div class="metric"><div class="k">Turning</div><div class="v">{{ model.turning_radius }}</div></div>
+            <div class="metric"><div class="k">Load Center</div><div class="v">{{ model.load_center }}</div></div>
           </div>
         </section>
 
@@ -234,7 +235,7 @@
 
   <script>
     (function () {
-      // Always start at top (new load + iOS bfcache restore)
+      /* Always start at top (new load + iOS bfcache restore) */
       if ('scrollRestoration' in history) { history.scrollRestoration = 'manual'; }
       function forceTop() {
         var topEl = document.getElementById('card-top');
@@ -279,12 +280,13 @@
           var r = await fetch('/api/ai_fit?model=' + encodeURIComponent(slug), { cache: 'no-store' });
           var j = await r.json();
           if (j && j.html) {
-            bodyBox.innerHTML = j.html;  // already formatted HTML
+            // Center the briefing by wrapping it in a max-width container
+            bodyBox.innerHTML = '<div class="briefing-inner">' + j.html + '</div>';
           } else {
-            bodyBox.innerHTML = '<p>Error: No briefing returned.</p>';
+            bodyBox.innerHTML = '<div class="briefing-inner"><p>Error: No briefing returned.</p></div>';
           }
         } catch (err) {
-          bodyBox.innerHTML = '<p>Error loading briefing: ' + String(err) + '</p>';
+          bodyBox.innerHTML = '<div class="briefing-inner"><p>Error loading briefing: ' + String(err) + '</p></div>';
         }
       }
 
