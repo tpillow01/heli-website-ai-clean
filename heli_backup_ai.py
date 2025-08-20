@@ -1069,7 +1069,7 @@ Produce HTML with two <section> blocks, each wrapped with a root <div> that has 
    • Why it wins – 4–6 bullets tied strictly to the spec and the precomputed hints.
    • Best environments – bullets using the spec.
    • Fit checklist – 5 quick checks to confirm with the customer.
-   • Watchouts – 2–4 bullets only if relevant (aisle width, ventilation, charging, flooring, etc).
+   • Watchouts – 2–4 bullets only if relevant.
 
 2) In data-block="edge", write a short “Competitive Edge vs Other Brands” (≈90–130 words) that:
    • Uses general forklift knowledge.
@@ -1088,7 +1088,6 @@ Use short paragraphs and bullets, avoid fluff, and DO NOT output anything outsid
             temperature=0.3,
         )
         html = resp.choices[0].message.content.strip()
-        # Safety: if model didn't wrap blocks, wrap simply
         if 'data-block="fit"' not in html or 'data-block="edge"' not in html:
             html = (
                 "<div data-block=\"fit\"><p>Briefing unavailable.</p></div>"
@@ -1097,7 +1096,6 @@ Use short paragraphs and bullets, avoid fluff, and DO NOT output anything outsid
         return jsonify({"html": html})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
