@@ -12,34 +12,26 @@
       --ink:#3b2a23; --sub:#866f62; --muted:#7b6559; --brand:#a9342a;
     }
 
-    /* --- Global/mobile scroll safety ------------------------------------- */
+    /* Mobile-safe page scrolling */
     * { box-sizing: border-box; }
     html{
       min-height:100%;
-      /* iOS dynamic viewport height */
-      min-height: 100dvh;
+      min-height: 100dvh;              /* iOS dynamic viewport height */
+      overflow-y:auto !important;       /* never hard-lock the page */
+      -webkit-overflow-scrolling: touch;
     }
     body{
       min-height:100%;
-      /* keep page scrollable on mobile, even if some global CSS sets hidden */
+      min-height: 100dvh;
       overflow-y:auto !important;
-      -webkit-overflow-scrolling: touch;
-      position: relative;
       color:var(--ink);
-    }
-
-    /* when modal is open, we lock the body WITHOUT breaking the page height */
-    .lock-scroll{
-      position: fixed;
-      inset: 0 0 auto 0;
-      width:100%;
-      overflow:hidden !important;
+      position:relative;
     }
 
     .bc-page{
       max-width:1180px;
       margin:0 auto;
-      padding:18px 18px 108px 18px; /* breathing room at bottom */
+      padding:18px 18px 108px 18px;     /* breathing room at bottom */
       padding-left:calc(18px + env(safe-area-inset-left, 0px));
       padding-right:calc(18px + env(safe-area-inset-right, 0px));
       min-height:100dvh;
@@ -112,7 +104,7 @@
     .modal.show{ display:grid; }
     .modal-card{
       width:min(900px, 96vw); max-height:85vh;
-      overflow:auto; /* modal scrolls internally */
+      overflow:auto;                          /* modal scrolls internally */
       -webkit-overflow-scrolling: touch;
       background:var(--cream); border:1px solid var(--line); border-radius:16px; box-shadow:0 20px 50px rgba(0,0,0,.25);
     }
@@ -135,7 +127,6 @@
     .briefing-wrap ul{ padding-left:1.25rem; margin:8px 0 12px; }
     .briefing-wrap li{ margin:6px 0; line-height:1.55; }
 
-    /* small-screen tweaks */
     @media (max-width:680px){
       .bc-hero-bar{ flex-direction:column; align-items:flex-start; gap:10px; }
       .btn-briefing{ width:100%; justify-content:center; }
@@ -246,26 +237,23 @@
       var fitHTML = '';
       var edgeHTML = '';
 
-      /* --- robust scroll lock (prevents stuck “no scroll” on mobile) --- */
-      var scrollY = 0;
-      function lockScroll(){
-        scrollY = window.scrollY || window.pageYOffset || 0;
-        document.body.style.top = (-scrollY) + 'px';
-        document.body.classList.add('lock-scroll');
+      /* Simple, non-sticky background lock */
+      function lockBackground(){
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
       }
-      function unlockScroll(){
-        document.body.classList.remove('lock-scroll');
-        document.body.style.top = '';
-        window.scrollTo(0, scrollY);
+      function unlockBackground(){
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
       }
 
       function openModal(){
         modal.classList.add('show');
-        lockScroll();
+        lockBackground();
       }
       function closeModal(){
         modal.classList.remove('show');
-        unlockScroll();
+        unlockBackground();
       }
 
       function renderWithWrap(html){
@@ -323,13 +311,10 @@
         tabs[i].addEventListener('click', function(){ setActiveTab(this.getAttribute('data-tab')); });
       }
 
-      /* Safety: if no modal is visible, ensure page scroll is enabled */
-      window.addEventListener('pageshow', function(){
-        if (!modal.classList.contains('show')) {
-          document.body.classList.remove('lock-scroll');
-          document.body.style.top = '';
-        }
-      });
+      /* Hard reset in case a previous page left overflow hidden */
+      window.addEventListener('load', unlockBackground, { once:true });
+      window.addEventListener('pageshow', function(){ if (!modal.classList.contains('show')) unlockBackground(); });
+      window.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible' && !modal.classList.contains('show')) unlockBackground(); });
     })();
   </script>
 </body>
