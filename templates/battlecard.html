@@ -5,7 +5,7 @@
   <meta charset="utf-8" />
   <title>{{ title }} – Battle Card</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=47) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=48) }}">
   <style>
     :root{
       --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6;
@@ -14,14 +14,24 @@
       --radius: 18px;
     }
 
-    /* --- Page shell --- */
-    html,body{height:100%}
+    /* --- HARD RESET so the header sits above, not in a side rail --- */
+    html, body { width:100%; height:auto; }
     body{
-      margin:0; color:var(--ink);
+      display:block !important;           /* overrides any global flex layout */
+      justify-content:unset !important;
+      align-items:unset !important;
+      margin:0;
+      color:var(--ink);
       background:repeating-linear-gradient(0deg,#f3eadc 0 28px,#f1e6d6 28px 29px);
     }
-    .top{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);
-      backdrop-filter:saturate(1.1) blur(6px);border-bottom:1px solid var(--line)}
+
+    /* --- Top nav --- */
+    .top{
+      position:sticky; top:0; left:0; right:0; z-index:100;
+      background:rgba(255,255,255,.66);
+      backdrop-filter:saturate(1.1) blur(6px);
+      border-bottom:1px solid var(--line);
+    }
     .wrap{max-width:1200px;margin:0 auto;padding:18px}
     .brand{display:flex;justify-content:space-between;align-items:center}
     .brand .left{font-weight:900;color:#7e5140}
@@ -32,12 +42,12 @@
     .nav-link.active{color:#1f1713}
     .nav-link.active::after{content:"";position:absolute;left:0;bottom:-6px;width:24px;height:3px;border-radius:2px;background:var(--brand)}
 
-    .crumbs{margin:10px 0 6px}
+    .crumbs{margin:12px 0 10px}
     .crumbs a{color:#7b6559;text-decoration:none}
     .crumbs a:hover{text-decoration:underline}
 
     /* --- Layout grid --- */
-    .shell{display:grid;grid-template-columns: minmax(0,1fr) 360px;gap:22px}
+    .shell{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:22px}
     .leftcol{min-width:0}
     .rightcol{min-width:0}
 
@@ -54,19 +64,13 @@
       padding:7px 12px;font-weight:800;color:#6a5146;white-space:nowrap
     }
     .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
-    .kpi{
-      background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 12px;
-      display:flex;flex-direction:column;gap:2px;box-shadow:inset 0 1px 0 #fff8f0
-    }
+    .kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;box-shadow:inset 0 1px 0 #fff8f0}
     .kpi small{color:#8a796d;font-weight:800;letter-spacing:.03em}
     .kpi b{color:#2f231e;font-size:20px;line-height:1}
 
     /* --- Cards --- */
-    .card{background:var(--cream);border:1px solid var(--line);border-radius:var(--radius);
-      padding:16px;box-shadow:var(--shadow)}
+    .card{background:var(--cream);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
     .card h2{margin:0 0 12px 0;color:#6b4c3e;font-size:20px;letter-spacing:.01em}
-
-    /* Best Environments + Why bullets */
     .bullets{margin:0;padding-left:22px}
     .bullets li{margin:6px 0}
     .win li{list-style:none;position:relative;padding-left:18px}
@@ -76,31 +80,29 @@
     }
 
     /* --- Sticky specs panel --- */
-    .specs{
-      position:sticky; top:96px;
-      background:var(--cream); border:1px solid var(--line); border-radius:var(--radius);
-      box-shadow:var(--shadow); padding:16px;
-    }
+    .specs{position:sticky; top:96px; background:var(--cream); border:1px solid var(--line);
+      border-radius:var(--radius); box-shadow:var(--shadow); padding:16px}
     .specs h3{margin:2px 0 12px 0;color:#6b4c3e;font-size:18px}
     .specgrid{display:grid;grid-template-columns:1fr;gap:10px}
-    .spec{
-      display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px;
-      background:var(--cream-2); border:1px solid var(--line); border-radius:12px; padding:8px 10px
-    }
+    .spec{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px;background:var(--cream-2);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
     .spec .k{color:#8a796d;font-weight:800}
     .spec .v{justify-self:end;color:#2f231e;font-weight:800}
 
-    /* CTA */
+    /* --- CTA --- */
     .toolbar{display:flex;justify-content:flex-end;margin-top:16px}
-    .btn{
-      background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;
-      font-weight:800;color:#63463a;cursor:pointer;box-shadow:0 4px 14px rgba(93,69,49,.10)
-    }
+    .btn{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-weight:800;color:#63463a;cursor:pointer;box-shadow:0 4px 14px rgba(93,69,49,.10)}
     .btn:hover{transform:translateY(-1px)}
 
-    /* Modal (unchanged behavior; just styling aligned) */
+    /* --- Center the dialog modal on every browser, ignoring global CSS --- */
     dialog.ai{border:none;border-radius:18px;padding:0;background:transparent}
     dialog.ai::backdrop{background:rgba(0,0,0,.35)}
+    dialog.ai[open]{
+      position:fixed !important;
+      top:50% !important; left:50% !important;
+      transform:translate(-50%,-50%) !important;
+      margin:0; padding:0;
+      display:block !important;
+    }
     .modal{background:var(--cream);border:1px solid var(--line);border-radius:18px;overflow:hidden;
       box-shadow:0 12px 34px rgba(93,69,49,.18), inset 0 1px 0 #fff8f0;width:min(860px,92vw)}
     .modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
@@ -119,7 +121,7 @@
   </style>
 </head>
 <body>
-  <!-- Top nav -->
+  <!-- Top nav (now always above card) -->
   <div class="top">
     <div class="wrap">
       <div class="brand">
@@ -200,7 +202,7 @@
     </div>
   </main>
 
-  <!-- Modal (same API contract as before) -->
+  <!-- Modal (centered) -->
   <dialog id="aiFitDialog" class="ai">
     <div class="modal">
       <div class="modal-head">
