@@ -4,26 +4,35 @@
   <meta charset="utf-8" />
   <title>Battle Cards</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <!-- Use your main stylesheet; the v param helps bust the SW/cache -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=9) }}">
   <style>
+    /* Page-specific styles to match your tan/cream theme */
     :root{
       --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6; --ink:#5e4b3f; --muted:#8a796d; --brand:#cc0000;
       --shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
     }
-    body{background:repeating-linear-gradient(0deg, #f3eadc 0 28px, #f1e6d6 28px 29px)}
-    .topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);backdrop-filter:saturate(1.1) blur(6px);
-      border-bottom:1px solid var(--line)}
+    body{margin:0;background:repeating-linear-gradient(0deg,#f3eadc 0 28px,#f1e6d6 28px 29px);color:var(--ink)}
+    .topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);backdrop-filter:saturate(1.1) blur(6px);border-bottom:1px solid var(--line)}
     .wrap{max-width:1150px;margin:0 auto;padding:18px}
     .brand{display:flex;align-items:center;justify-content:space-between}
     .brand .left{font-weight:900;color:#7e5140;letter-spacing:.02em}
     .brand .right{font-weight:900;color:#a9342a;letter-spacing:.08em}
+
     .tabs{display:flex;gap:10px;margin:10px 0 2px}
-    .nav-pill{background:var(--cream);border:1px solid var(--line);color:var(--ink);padding:9px 14px;border-radius:12px;
-      text-decoration:none;font-weight:700;box-shadow:var(--shadow)}
+    /* Fallback pill styling in case it's not in styles.css */
+    .nav-pill{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:9px 14px;border-radius:12px;background:var(--cream);
+      border:1px solid var(--line);color:var(--ink);text-decoration:none;font-weight:800;box-shadow:var(--shadow)
+    }
+    .nav-pill:hover{background:var(--cream-2)}
     .nav-pill.active{outline:2px solid rgba(204,0,0,.25)}
+
     .searchbar{display:flex;gap:10px;margin:14px 0 18px}
     .searchbar input{flex:1;background:var(--cream-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--ink)}
     .searchbar button{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-weight:700;color:var(--ink)}
+
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
     .card{background:var(--cream);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
     .series{color:#a15c48;font-weight:800;margin-bottom:6px}
@@ -42,15 +51,16 @@
         <div class="right">HELI</div>
       </div>
       <nav class="tabs">
-        <a href="{{ url_for('chat_page') if 'chat_page' in globals() else '/' }}" class="nav-pill">Chat</a>
-        <a href="{{ url_for('map_page') if 'map_page' in globals() else '/map' }}" class="nav-pill">Map</a>
-        <a href="{{ url_for('battlecards_index') }}" class="nav-pill active">Battle Cards</a>
+        <!-- Use simple, safe paths to avoid endpoint name mismatches -->
+        <a href="/" class="nav-pill {{ 'active' if request.path == '/' else '' }}">Chat</a>
+        <a href="/map" class="nav-pill {{ 'active' if request.path.startswith('/map') else '' }}">Map</a>
+        <a href="/battlecards" class="nav-pill {{ 'active' if request.path.startswith('/battlecards') else '' }}">Battle Cards</a>
       </nav>
     </div>
   </div>
 
   <main class="wrap">
-    <form class="searchbar" action="{{ url_for('battlecards_index') }}" method="get">
+    <form class="searchbar" action="/battlecards" method="get">
       <input name="q" value="{{ q or '' }}" placeholder="Search models, series, power, capacity…" />
       <button type="submit">Search</button>
     </form>

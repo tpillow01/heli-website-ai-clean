@@ -39,7 +39,9 @@
       <nav class="tabs">
         <a href="#" class="tab active">Chat</a>
         <a href="{{ url_for('map_page') }}" class="tab">Map</a>
-        <a href="{{ url_for('battlecards_index') }}" class="nav-pill">Battle Cards</a>
+        <a href="/battlecards" class="nav-link {{ 'active' if request.path.startswith('/battlecards') else '' }}">
+        Battle Cards
+        </a>
       </nav>
 
       <div class="nav-actions">
