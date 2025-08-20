@@ -12,21 +12,37 @@
       --ink:#3b2a23; --sub:#866f62; --muted:#7b6559; --brand:#a9342a;
     }
 
-    /* ensure page scrolls nicely on mobile */
-    html, body { height:100%; }
+    /* --- Global/mobile scroll safety ------------------------------------- */
+    * { box-sizing: border-box; }
+    html{
+      min-height:100%;
+      /* iOS dynamic viewport height */
+      min-height: 100dvh;
+    }
     body{
-      color:var(--ink);
-      overflow-y:auto;
+      min-height:100%;
+      /* keep page scrollable on mobile, even if some global CSS sets hidden */
+      overflow-y:auto !important;
       -webkit-overflow-scrolling: touch;
+      position: relative;
+      color:var(--ink);
     }
 
-    /* page container + safe-area padding on mobile */
+    /* when modal is open, we lock the body WITHOUT breaking the page height */
+    .lock-scroll{
+      position: fixed;
+      inset: 0 0 auto 0;
+      width:100%;
+      overflow:hidden !important;
+    }
+
     .bc-page{
       max-width:1180px;
       margin:0 auto;
-      padding:18px 18px 96px 18px; /* extra bottom so last card breathes */
+      padding:18px 18px 108px 18px; /* breathing room at bottom */
       padding-left:calc(18px + env(safe-area-inset-left, 0px));
       padding-right:calc(18px + env(safe-area-inset-right, 0px));
+      min-height:100dvh;
     }
 
     .back-link{display:inline-block;margin:6px 0 14px 2px;color:#7a4d3a;font-weight:700;text-decoration:none}
@@ -44,7 +60,7 @@
       border:1px solid var(--line);
       border-radius:16px;
       box-shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
-      overflow:hidden; /* keeps rounded corners crisp */
+      overflow:hidden;
     }
 
     /* HERO */
@@ -71,22 +87,14 @@
     .metric .k{ font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--sub); margin-bottom:4px; font-weight:800; }
     .metric .v{ font-size:18px; color:var(--ink); font-weight:900; }
 
-    /* content blocks — make padding more generous so bullets aren't hugging edges */
+    /* content blocks — extra inner padding so nothing hugs the edges */
     .block{ padding:26px 26px 30px 26px; }
     .block h2{ margin:0 0 12px 0; font-size:20px; font-weight:900; }
     .kv{ display:flex; gap:8px; }
     .kv .k{ color:var(--ink); font-weight:800; }
     .kv .v{ color:var(--muted); }
-    .block ul{
-      padding-left:1.25rem;   /* bullet indent */
-      margin:8px 0 0;
-    }
-    .block li{
-      margin:8px 0;
-      line-height:1.6;        /* easier to read + more air */
-      word-break:break-word;  /* prevent edge hugging on long tokens */
-      hyphens:auto;
-    }
+    .block ul{ padding-left:1.25rem; margin:8px 0 0; }
+    .block li{ margin:8px 0; line-height:1.6; word-break:break-word; hyphens:auto; }
 
     /* specs panel */
     .specs{ padding:18px; }
@@ -103,7 +111,9 @@
     .modal{ position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.45); z-index:60; padding:24px; }
     .modal.show{ display:grid; }
     .modal-card{
-      width:min(900px, 96vw); max-height:85vh; overflow:auto;
+      width:min(900px, 96vw); max-height:85vh;
+      overflow:auto; /* modal scrolls internally */
+      -webkit-overflow-scrolling: touch;
       background:var(--cream); border:1px solid var(--line); border-radius:16px; box-shadow:0 20px 50px rgba(0,0,0,.25);
     }
     .modal-head{
@@ -116,21 +126,23 @@
     .tab.active{ background:#f6efe3; }
     .close-x{ border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer; font-weight:900; }
 
-    /* Improved briefing spacing/typography */
+    /* roomy briefing */
     .modal-body{ padding:30px 32px; }
-    .briefing-wrap{ max-width:820px; margin:0 auto; padding:2px 2px; }
+    .briefing-wrap{ max-width:820px; margin:0 auto; padding:2px; }
     .briefing-wrap h1, .briefing-wrap h2, .briefing-wrap h3{ margin:0 0 12px; line-height:1.25; }
     .briefing-wrap h2{ font-size:22px; border-bottom:2px solid #ead9c6; padding-bottom:6px; }
     .briefing-wrap p{ margin:12px 0; line-height:1.6; }
     .briefing-wrap ul{ padding-left:1.25rem; margin:8px 0 12px; }
     .briefing-wrap li{ margin:6px 0; line-height:1.55; }
 
+    /* small-screen tweaks */
     @media (max-width:680px){
       .bc-hero-bar{ flex-direction:column; align-items:flex-start; gap:10px; }
       .btn-briefing{ width:100%; justify-content:center; }
       .block{ padding:22px 22px 26px 22px; }
       .specs{ padding:16px; }
       .spec-row{ padding:12px; }
+      .modal-body{ padding:24px; }
     }
   </style>
 </head>
@@ -186,19 +198,15 @@
       <!-- RIGHT COLUMN: Key Specs -->
       <aside class="card specs">
         <h3>Key Specs</h3>
-
         <div class="spec-row"><div class="k">Power</div><div class="v">{{ model.power }}</div></div>
         <div class="spec-row"><div class="k">Drive Type</div><div class="v">{{ model.drive_type }}</div></div>
         <div class="spec-row"><div class="k">Controller</div><div class="v">{{ model.controller }}</div></div>
-
         <div class="spec-row"><div class="k">Capacity</div><div class="v">{{ model.capacity }}</div></div>
         <div class="spec-row"><div class="k">Load Center</div><div class="v">{{ model.load_center }}</div></div>
         <div class="spec-row"><div class="k">Turning Radius</div><div class="v">{{ model.turning_radius }}</div></div>
-
         <div class="spec-row"><div class="k">Overall Width</div><div class="v">{{ model.overall_width }}</div></div>
         <div class="spec-row"><div class="k">Overall Length</div><div class="v">{{ model.overall_length }}</div></div>
         <div class="spec-row"><div class="k">Overall Height</div><div class="v">{{ model.overall_height }}</div></div>
-
         <div class="spec-row"><div class="k">Wheel Base</div><div class="v">{{ model.wheel_base }}</div></div>
         <div class="spec-row"><div class="k">Max Lift Height</div><div class="v">{{ model.max_lift_height }}</div></div>
         <div class="spec-row"><div class="k">Battery Voltage</div><div class="v">{{ model.battery_voltage }}</div></div>
@@ -206,7 +214,7 @@
     </div>
   </div>
 
-  <!-- Pass data to JS safely (no Jinja inside <script>) -->
+  <!-- Pass data to JS safely -->
   <script id="page-data" type="application/json">
     {{ {"slug": model._slug}|tojson }}
   </script>
@@ -238,14 +246,28 @@
       var fitHTML = '';
       var edgeHTML = '';
 
+      /* --- robust scroll lock (prevents stuck “no scroll” on mobile) --- */
+      var scrollY = 0;
+      function lockScroll(){
+        scrollY = window.scrollY || window.pageYOffset || 0;
+        document.body.style.top = (-scrollY) + 'px';
+        document.body.classList.add('lock-scroll');
+      }
+      function unlockScroll(){
+        document.body.classList.remove('lock-scroll');
+        document.body.style.top = '';
+        window.scrollTo(0, scrollY);
+      }
+
       function openModal(){
         modal.classList.add('show');
-        document.body.style.overflow = 'hidden';
+        lockScroll();
       }
       function closeModal(){
         modal.classList.remove('show');
-        document.body.style.overflow = '';
+        unlockScroll();
       }
+
       function renderWithWrap(html){
         return '<div class="briefing-wrap">' + html + '</div>';
       }
@@ -300,6 +322,14 @@
       for (var i=0;i<tabs.length;i++){
         tabs[i].addEventListener('click', function(){ setActiveTab(this.getAttribute('data-tab')); });
       }
+
+      /* Safety: if no modal is visible, ensure page scroll is enabled */
+      window.addEventListener('pageshow', function(){
+        if (!modal.classList.contains('show')) {
+          document.body.classList.remove('lock-scroll');
+          document.body.style.top = '';
+        }
+      });
     })();
   </script>
 </body>
