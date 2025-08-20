@@ -773,12 +773,12 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
-# --- Battle Cards (robust normalizer + routes + AI Fit) ----------------------
+# --- Battle Cards (models.json normalizer + routes + AI Fit) -----------------
 import os, json, re
 from functools import lru_cache
 from flask import render_template, jsonify, request, abort
 
-# Reuse an existing OpenAI client if you've already created one above
+# Reuse an existing OpenAI client if already created above
 try:
     client  # noqa: F821
 except NameError:
@@ -787,20 +787,19 @@ except NameError:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_PATH = os.path.join(BASE_DIR, "models.json")
-DEBUG_PARSE = os.getenv("BATTLECARD_DEBUG", "0") == "1"
 
-# ----------------------------- helpers ---------------------------------------
+# ------------------------------- helpers -------------------------------------
 _num_re = re.compile(r"-?\d+(\.\d+)?")
 
 def _canon(s: str) -> str:
-    """Normalize header keys: lowercase → trim → collapse ws → drop punctuation/spaces."""
+    """Normalize header keys: lowercase -> trim -> collapse ws -> drop punctuation/spaces."""
     if s is None:
         return ""
     t = re.sub(r"\s+", " ", str(s)).strip().lower()
-    t = re.sub(r"[^a-z0-9 ]+", "", t)   # remove punctuation ((), -, /, etc.)
-    return t.replace(" ", "")           # and spaces
+    t = re.sub(r"[^a-z0-9 ]+", "", t)
+    return t.replace(" ", "")
 
-# Treat these as missing
+# Treat these as missing values
 NA_VALUES = {"", "na", "n/a", "n.a", "null", "none", "not applicable", "—", "-", "not specified"}
 _NA_CANON = {re.sub(r"[^a-z0-9]+", "", v) for v in NA_VALUES}
 
@@ -814,7 +813,7 @@ def _clean_or(v, fallback):
     return fallback if _is_na_value(v) else v
 
 def _num_from_text(s):
-    """Return the FIRST number in a string; for ranges like '49-57' we take 49."""
+    """Return the first number in a string (for '49-57' we take 49)."""
     if s is None:
         return None
     m = _num_re.search(str(s))
@@ -859,54 +858,77 @@ def _get_any(lut: dict, keys: set):
             return v
     return None
 
-# Wider synonyms to tolerate header drift (trailing spaces, slight wording)
+# Header synonyms (supports both your JSON schema and old spreadsheet headers)
 HEADERS = {
+    # identity
     "model_name": {
-        "modelname","model","modelcode","model#","modelid","modelno","modelnumber"
+        "model", "modelname", "modelcode", "model#", "modelid", "modelno", "modelnumber", "modelname"
     },
+
+    # capacity
     "capacity_lbs": {
-        "loadcapacitylbs","capacitylbs","ratedcapacity","capacity","ratedload","ratedcapacitylbs"
+        "capacity_lbs", "loadcapacitylbs", "capacitylbs", "ratedcapacity", "capacity", "ratedload", "ratedcapacitylbs"
     },
+
+    # turning radius
     "turning_in": {
-        "minoutsideturningradiusin","outsideturningradius","turningradiusin","turningin",
-        "minimumoutsideturningradius","outsideturningradiusin"
+        "minoutsideturningradiusin", "outsideturningradius", "turningradiusin", "turningin",
+        "minimumoutsideturningradius", "outsideturningradiusin"
     },
+
+    # load center
     "load_center_in": {
-        "loadcenterin","loadcenter","lc","loadcentrein"
+        "loadcenterin", "loadcenter", "lc", "loadcentrein"
     },
+
+    # battery voltage
     "battery_v": {
-        "batteryvoltage","batteryv","battvoltage","battv","voltage","voltagev"
+        "batteryvoltage", "battery_v", "batteryv", "battvoltage", "battv", "voltage", "voltagev"
     },
+
+    # controller
     "controller": {
-        "controller","controllerbrand","controller ", "control"
+        "controller", "controllerbrand", "controller ", "control"
     },
+
+    # power
     "power": {
-        "power","powertype","powertrain"
+        "power", "powertype", "powertrain"
     },
-    "wheel_base_in": {
-        "wheelbase","wheelbasein"
+
+    # drive type (your JSON uses "Type")
+    "drive_type": {
+        "drivetype", "drive", "drivesystem", "type"
     },
+
+    # basic dims (your JSON uses Height_in, Width_in, Length_in)
     "overall_height_in": {
-        "overallheightin","heightin","overallheight"
+        "overallheightin", "heightin", "overallheight", "height_in"
     },
     "overall_length_in": {
-        "overalllengthin","lengthin","overalllength"
+        "overalllengthin", "lengthin", "overalllength", "length_in"
     },
     "overall_width_in": {
-        "overallwidthin","widthin","overallwidth"
+        "overallwidthin", "widthin", "overallwidth", "width_in"
     },
+
+    # max lift height (your JSON uses LiftHeight_in)
     "max_lift_height_in": {
-        "maxliftingheightin","maxliftht","mastmaxheightin","maxliftht(in)","maxlifthtin"
+        "maxliftingheightin", "maxliftht", "mastmaxheightin", "maxliftht(in)", "maxlifthtin", "liftheight_in", "liftheightin"
     },
-    "drive_type": {
-        "drivetype","drive","drivesystem"
+
+    # wheel base optional
+    "wheel_base_in": {
+        "wheelbase", "wheelbasein"
     },
+
+    # series & workplace
     "series": {
-        "series","family","productseries"
+        "series", "family", "productseries"
     },
     "workplace": {
-        "workplace","environment","application"
-    }
+        "workplace", "environment", "application"
+    },
 }
 
 def _normalize_record(rec):
@@ -927,7 +949,7 @@ def _normalize_record(rec):
 
     controller = _get_any(lut, HEADERS["controller"])
     power_raw  = _get_any(lut, HEADERS["power"])
-    drive      = _get_any(lut, HEADERS["drive_type"])
+    drive      = _get_any(lut, HEADERS["drive_type"])   # <- will pick up "Type"
     series     = _get_any(lut, HEADERS["series"])
     workplace  = _get_any(lut, HEADERS["workplace"])
 
@@ -951,7 +973,7 @@ def _normalize_record(rec):
 
         "series": _clean_or(series, "—"),
         "power": _clean_or(power_norm or power_raw, "—"),
-        "drive_type": _clean_or(drive, "—"),
+        "drive_type": _clean_or(drive, "—"),          # maps your "Type"
         "controller": _clean_or(controller, "—"),
 
         "capacity": _fmt_lb(cap)           or _clean_or(cap_raw, "Not specified"),
@@ -959,20 +981,19 @@ def _normalize_record(rec):
         "load_center": _fmt_in(lctr)       or _clean_or(lctr_raw, "Not specified"),
         "battery_voltage": _fmt_v(batt)    or _clean_or(batt_raw, "Not specified"),
         "wheel_base": _fmt_in(wbase)       or _clean_or(wbase_raw, "Not specified"),
-        "overall_height": _fmt_in(oh)      or _clean_or(oh_raw, "Not specified"),
-        "overall_length": _fmt_in(ol)      or _clean_or(ol_raw, "Not specified"),
-        "overall_width": _fmt_in(ow)       or _clean_or(ow_raw, "Not specified"),
-        "max_lift_height": _fmt_in(mlh)    or _clean_or(mlh_raw, "Not specified"),
+        "overall_height": _fmt_in(oh)      or _clean_or(oh_raw, "Not specified"),   # Height_in supported
+        "overall_length": _fmt_in(ol)      or _clean_or(ol_raw, "Not specified"),   # Length_in supported
+        "overall_width": _fmt_in(ow)       or _clean_or(ow_raw, "Not specified"),   # Width_in supported
+        "max_lift_height": _fmt_in(mlh)    or _clean_or(mlh_raw, "Not specified"),  # LiftHeight_in supported
 
         "_capacity_lb": cap, "_turning_in": trn, "_load_center_in": lctr, "_battery_v": batt,
         "_wheel_base_in": wbase, "_overall_width_in": ow, "_overall_length_in": ol,
         "_overall_height_in": oh, "_max_lift_height_in": mlh,
 
-        # pass through optional field (not required in UI yet)
         "workplace": _clean_or(workplace, None),
     }
 
-    # Precompute “Best Environments” + “Why It Wins”
+    # Precompute “Best Environments” + “Why It Wins” (simple, spec-driven)
     why, env_in, env_out, env_special = [], [], [], []
     if "Electric" in model["power"]:
         why += ["Zero local emissions", "Lower routine maintenance vs. IC", "Quiet operation"]
@@ -996,10 +1017,6 @@ def _normalize_record(rec):
     model["outdoors"] = ", ".join(dict.fromkeys(env_out))
     model["special_env"] = ", ".join(dict.fromkeys(env_special))
     model["why_wins"] = list(dict.fromkeys(why)) or ["Not specified"]
-
-    if DEBUG_PARSE and raw_model:
-        print("[BATTLECARD_DEBUG]", raw_model, "keys:", sorted(list(_row_lookup(rec).keys())))
-
     return model
 
 @lru_cache(maxsize=1)
@@ -1011,7 +1028,7 @@ def _load_models():
     models, used = [], set()
     for i, row in enumerate(rows or []):
         m = _normalize_record(row)
-        base = m["model"] if m["model"] and m["model"] != "Unknown Model" else (row.get("Model Name") or f"unknown-{i+1}")
+        base = m["model"] if m["model"] and m["model"] != "Unknown Model" else (row.get("Model") or row.get("Model Name") or f"unknown-{i+1}")
         slug = _slugify(base) or f"unknown-{i+1}"
         if slug in used: slug = f"{slug}-{i+1}"
         used.add(slug)
