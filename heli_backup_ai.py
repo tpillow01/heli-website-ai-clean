@@ -773,52 +773,57 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
-# --- Battle Cards (robust models.json normalizer + routes + AI Fit) ----------
-import os, json, re, math
+# --- Battle Cards (robust normalizer + routes + AI Fit) ----------------------
+import os, json, re
 from functools import lru_cache
 from flask import render_template, jsonify, request, abort
 
-# Reuse existing OpenAI client if defined above
+# Reuse an existing OpenAI client if you've already created one above
 try:
     client  # noqa: F821
 except NameError:
     from openai import OpenAI
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ----------------------------- helpers ---------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_PATH = os.path.join(BASE_DIR, "models.json")
+DEBUG_PARSE = os.getenv("BATTLECARD_DEBUG", "0") == "1"
 
+# ----------------------------- helpers ---------------------------------------
 _num_re = re.compile(r"-?\d+(\.\d+)?")
 
 def _canon(s: str) -> str:
-    """Lowercase, trim, collapse whitespace, remove punctuation/spaces."""
-    if s is None: return ""
+    """Normalize header keys: lowercase → trim → collapse ws → drop punctuation/spaces."""
+    if s is None:
+        return ""
     t = re.sub(r"\s+", " ", str(s)).strip().lower()
-    t = re.sub(r"[^a-z0-9 ]+", "", t)
-    return t.replace(" ", "")
+    t = re.sub(r"[^a-z0-9 ]+", "", t)   # remove punctuation ((), -, /, etc.)
+    return t.replace(" ", "")           # and spaces
 
-# Accept common NA placeholders
+# Treat these as missing
 NA_VALUES = {"", "na", "n/a", "n.a", "null", "none", "not applicable", "—", "-", "not specified"}
 _NA_CANON = {re.sub(r"[^a-z0-9]+", "", v) for v in NA_VALUES}
 
 def _is_na_value(v) -> bool:
-    if v is None: return True
+    if v is None:
+        return True
     t = re.sub(r"[^a-z0-9]+", "", str(v).strip().lower())
     return t in _NA_CANON
 
 def _clean_or(v, fallback):
-    """Return fallback if v is NA-like, else v."""
     return fallback if _is_na_value(v) else v
 
 def _num_from_text(s):
-    if s is None: return None
+    """Return the FIRST number in a string; for ranges like '49-57' we take 49."""
+    if s is None:
+        return None
     m = _num_re.search(str(s))
     return float(m.group(0)) if m else None
 
 def _fmt_int(n):
     try:
-        if n is None: return None
+        if n is None:
+            return None
         return f"{int(round(float(n))):,}"
     except (TypeError, ValueError):
         return None
@@ -854,46 +859,81 @@ def _get_any(lut: dict, keys: set):
             return v
     return None
 
-# Flexible header synonyms
+# Wider synonyms to tolerate header drift (trailing spaces, slight wording)
 HEADERS = {
-    "model_name": {"modelname", "model", "modelcode", "model#", "modelid", "modelno", "modelnumber"},
-    "capacity_lbs": {"loadcapacitylbs", "capacitylbs", "ratedcapacity", "capacity"},
-    "turning_in": {"minoutsideturningradiusin", "turningradiusin", "outsideturningradius", "turningin"},
-    "load_center_in": {"loadcenterin", "loadcenter"},
-    "battery_v": {"batteryvoltage", "battvoltage", "voltage"},
-    "controller": {"controller", "controllerbrand", "control"},
-    "power": {"power", "powertype"},
-    "wheel_base_in": {"wheelbase", "wheelbasein"},
-    "overall_height_in": {"overallheightin", "heightin"},
-    "overall_length_in": {"overalllengthin", "lengthin"},
-    "overall_width_in": {"overallwidthin", "widthin"},
-    "max_lift_height_in": {"maxliftingheightin", "maxliftht", "mastmaxheightin"},
-    "drive_type": {"drivetype", "drive"},
-    "series": {"series", "family"},
+    "model_name": {
+        "modelname","model","modelcode","model#","modelid","modelno","modelnumber"
+    },
+    "capacity_lbs": {
+        "loadcapacitylbs","capacitylbs","ratedcapacity","capacity","ratedload","ratedcapacitylbs"
+    },
+    "turning_in": {
+        "minoutsideturningradiusin","outsideturningradius","turningradiusin","turningin",
+        "minimumoutsideturningradius","outsideturningradiusin"
+    },
+    "load_center_in": {
+        "loadcenterin","loadcenter","lc","loadcentrein"
+    },
+    "battery_v": {
+        "batteryvoltage","batteryv","battvoltage","battv","voltage","voltagev"
+    },
+    "controller": {
+        "controller","controllerbrand","controller ", "control"
+    },
+    "power": {
+        "power","powertype","powertrain"
+    },
+    "wheel_base_in": {
+        "wheelbase","wheelbasein"
+    },
+    "overall_height_in": {
+        "overallheightin","heightin","overallheight"
+    },
+    "overall_length_in": {
+        "overalllengthin","lengthin","overalllength"
+    },
+    "overall_width_in": {
+        "overallwidthin","widthin","overallwidth"
+    },
+    "max_lift_height_in": {
+        "maxliftingheightin","maxliftht","mastmaxheightin","maxliftht(in)","maxlifthtin"
+    },
+    "drive_type": {
+        "drivetype","drive","drivesystem"
+    },
+    "series": {
+        "series","family","productseries"
+    },
+    "workplace": {
+        "workplace","environment","application"
+    }
 }
 
 def _normalize_record(rec):
-    """One raw row → clean dict for templates + AI (tolerant to header drift / NA)."""
+    """Row → clean dict for templates + AI (tolerant headers / NA)."""
     lut = _row_lookup(rec)
 
+    # numeric-friendly pulls
     raw_model = _get_any(lut, HEADERS["model_name"])
-    cap = _num_from_text(_get_any(lut, HEADERS["capacity_lbs"]))
-    trn = _num_from_text(_get_any(lut, HEADERS["turning_in"]))
+    cap  = _num_from_text(_get_any(lut, HEADERS["capacity_lbs"]))
+    trn  = _num_from_text(_get_any(lut, HEADERS["turning_in"]))
     lctr = _num_from_text(_get_any(lut, HEADERS["load_center_in"]))
     batt = _num_from_text(_get_any(lut, HEADERS["battery_v"]))
-    wbase = _num_from_text(_get_any(lut, HEADERS["wheel_base_in"]))
-    oh = _num_from_text(_get_any(lut, HEADERS["overall_height_in"]))
-    ol = _num_from_text(_get_any(lut, HEADERS["overall_length_in"]))
-    ow = _num_from_text(_get_any(lut, HEADERS["overall_width_in"]))
-    mlh = _num_from_text(_get_any(lut, HEADERS["max_lift_height_in"]))
+    wbase= _num_from_text(_get_any(lut, HEADERS["wheel_base_in"]))
+    oh   = _num_from_text(_get_any(lut, HEADERS["overall_height_in"]))
+    ol   = _num_from_text(_get_any(lut, HEADERS["overall_length_in"]))
+    ow   = _num_from_text(_get_any(lut, HEADERS["overall_width_in"]))
+    mlh  = _num_from_text(_get_any(lut, HEADERS["max_lift_height_in"]))
+
     controller = _get_any(lut, HEADERS["controller"])
-    power_raw = _get_any(lut, HEADERS["power"])
-    drive = _get_any(lut, HEADERS["drive_type"])
-    series = _get_any(lut, HEADERS["series"])
+    power_raw  = _get_any(lut, HEADERS["power"])
+    drive      = _get_any(lut, HEADERS["drive_type"])
+    series     = _get_any(lut, HEADERS["series"])
+    workplace  = _get_any(lut, HEADERS["workplace"])
 
     power_norm = _norm_power(power_raw)
 
-    # raw strings (for fallbacks if numeric not parsed)
+    # raw strings for fallbacks (when numbers are missing)
     cap_raw  = _get_any(lut, HEADERS["capacity_lbs"])
     trn_raw  = _get_any(lut, HEADERS["turning_in"])
     lctr_raw = _get_any(lut, HEADERS["load_center_in"])
@@ -905,35 +945,34 @@ def _normalize_record(rec):
     mlh_raw  = _get_any(lut, HEADERS["max_lift_height_in"])
 
     model = {
-        # identity
         "model": raw_model or "Unknown Model",
         "_display": raw_model or "Unknown Model",
         "_slug": None,  # set later
 
-        # primary descriptors (NA-safe)
         "series": _clean_or(series, "—"),
         "power": _clean_or(power_norm or power_raw, "—"),
         "drive_type": _clean_or(drive, "—"),
         "controller": _clean_or(controller, "—"),
 
-        # strings with units (NA-safe)
-        "capacity": _fmt_lb(cap) or _clean_or(cap_raw, "Not specified"),
-        "turning_radius": _fmt_in(trn) or _clean_or(trn_raw, "Not specified"),
-        "load_center": _fmt_in(lctr) or _clean_or(lctr_raw, "Not specified"),
-        "battery_voltage": _fmt_v(batt) or _clean_or(batt_raw, "Not specified"),
-        "wheel_base": _fmt_in(wbase) or _clean_or(wbase_raw, "Not specified"),
-        "overall_height": _fmt_in(oh) or _clean_or(oh_raw, "Not specified"),
-        "overall_length": _fmt_in(ol) or _clean_or(ol_raw, "Not specified"),
-        "overall_width": _fmt_in(ow) or _clean_or(ow_raw, "Not specified"),
-        "max_lift_height": _fmt_in(mlh) or _clean_or(mlh_raw, "Not specified"),
+        "capacity": _fmt_lb(cap)           or _clean_or(cap_raw, "Not specified"),
+        "turning_radius": _fmt_in(trn)     or _clean_or(trn_raw, "Not specified"),
+        "load_center": _fmt_in(lctr)       or _clean_or(lctr_raw, "Not specified"),
+        "battery_voltage": _fmt_v(batt)    or _clean_or(batt_raw, "Not specified"),
+        "wheel_base": _fmt_in(wbase)       or _clean_or(wbase_raw, "Not specified"),
+        "overall_height": _fmt_in(oh)      or _clean_or(oh_raw, "Not specified"),
+        "overall_length": _fmt_in(ol)      or _clean_or(ol_raw, "Not specified"),
+        "overall_width": _fmt_in(ow)       or _clean_or(ow_raw, "Not specified"),
+        "max_lift_height": _fmt_in(mlh)    or _clean_or(mlh_raw, "Not specified"),
 
-        # numeric stash
         "_capacity_lb": cap, "_turning_in": trn, "_load_center_in": lctr, "_battery_v": batt,
         "_wheel_base_in": wbase, "_overall_width_in": ow, "_overall_length_in": ol,
         "_overall_height_in": oh, "_max_lift_height_in": mlh,
+
+        # pass through optional field (not required in UI yet)
+        "workplace": _clean_or(workplace, None),
     }
 
-    # Light enrichment: environments + why-wins
+    # Precompute “Best Environments” + “Why It Wins”
     why, env_in, env_out, env_special = [], [], [], []
     if "Electric" in model["power"]:
         why += ["Zero local emissions", "Lower routine maintenance vs. IC", "Quiet operation"]
@@ -957,11 +996,15 @@ def _normalize_record(rec):
     model["outdoors"] = ", ".join(dict.fromkeys(env_out))
     model["special_env"] = ", ".join(dict.fromkeys(env_special))
     model["why_wins"] = list(dict.fromkeys(why)) or ["Not specified"]
+
+    if DEBUG_PARSE and raw_model:
+        print("[BATTLECARD_DEBUG]", raw_model, "keys:", sorted(list(_row_lookup(rec).keys())))
+
     return model
 
 @lru_cache(maxsize=1)
 def _load_models():
-    """Read models.json; support array or {'models': [...]} or {'data': [...]}."""
+    """Read models.json as list OR {'models': [...]} OR {'data': [...]}."""
     with open(MODELS_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)
     rows = raw if isinstance(raw, list) else raw.get("models", raw.get("data", []))
@@ -970,8 +1013,7 @@ def _load_models():
         m = _normalize_record(row)
         base = m["model"] if m["model"] and m["model"] != "Unknown Model" else (row.get("Model Name") or f"unknown-{i+1}")
         slug = _slugify(base) or f"unknown-{i+1}"
-        if slug in used:
-            slug = f"{slug}-{i+1}"
+        if slug in used: slug = f"{slug}-{i+1}"
         used.add(slug)
         m["_slug"] = slug
         m["_display"] = m["model"]
@@ -1034,7 +1076,7 @@ Write a skimmable briefing with:
 2) Why it wins – 4–6 bullets tied strictly to the spec.
 3) Best environments – bullets (indoor/outdoor/special) from spec.
 4) Fit checklist – 5 quick checks to confirm with the customer.
-5) Watchouts – 2–4 bullets only if relevant to spec (aisle width, ventilation, charging, flooring, etc).
+5) Watchouts – 2–4 bullets only if relevant to spec.
 
 ≈120–160 words. No fluff; do not invent specs.
 """

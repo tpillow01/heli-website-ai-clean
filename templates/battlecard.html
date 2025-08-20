@@ -5,16 +5,16 @@
   <meta charset="utf-8" />
   <title>{{ title }} – Battle Card</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=13) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=20) }}">
   <style>
     :root{ --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6; --ink:#5e4b3f; --muted:#8a796d; --brand:#cc0000; }
     body{margin:0;background:repeating-linear-gradient(0deg,#f3eadc 0 28px,#f1e6d6 28px 29px);color:var(--ink)}
-    .topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);backdrop-filter:saturate(1.1) blur(6px);border-bottom:1px solid var(--line)}
+    .top{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);backdrop-filter:saturate(1.1) blur(6px);border-bottom:1px solid var(--line)}
     .wrap{max-width:1100px;margin:0 auto;padding:18px}
-    .brand{display:flex;align-items:center;justify-content:space-between}
+    .brand{display:flex;justify-content:space-between;align-items:center}
     .brand .left{font-weight:900;color:#7e5140}
     .brand .right{font-weight:900;color:#a9342a;letter-spacing:.08em}
-    .tabs{display:flex;gap:16px;align-items:center;margin:10px 0 6px}
+    .tabs{display:flex;gap:16px;align-items:center;margin:10px 0 8px}
     .nav-link{background:transparent;border:none;padding:8px 0;color:var(--ink);font-weight:800;text-decoration:none;border-radius:6px;position:relative}
     .nav-link:hover{color:#3c2f28}
     .nav-link.active{color:#1f1713}
@@ -23,7 +23,6 @@
     .crumbs{margin:8px 0 2px}
     .crumbs a{color:#7b6559;text-decoration:none}
     .crumbs a:hover{text-decoration:underline}
-
     .hero{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;align-items:center;margin:10px 0}
     .title{margin:0 0 2px 0;color:#613f34}
     .tag{color:#a9342a;font-weight:800;letter-spacing:.06em}
@@ -36,11 +35,9 @@
     .specs div{display:flex;justify-content:space-between;gap:10px;background:var(--cream-2);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
     .specs span{color:var(--muted)}
     .bullets{margin:0;padding-left:18px}
-
     .cta{display:flex;justify-content:center;margin:18px 0 4px}
     .btn-ask{background:linear-gradient(#d8493f,#c61c10);color:#fff;border:none;border-radius:14px;padding:12px 18px;font-weight:900;letter-spacing:.03em;box-shadow:0 6px 18px rgba(204,0,0,.25);cursor:pointer}
     .btn-ask:hover{filter:brightness(1.02)}
-
     dialog.ai{border:none;border-radius:18px;padding:0;background:transparent}
     dialog.ai::backdrop{background:rgba(0,0,0,.35)}
     .modal{background:var(--cream);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;width:min(760px,92vw)}
@@ -53,7 +50,7 @@
   </style>
 </head>
 <body>
-  <div class="topbar">
+  <div class="top">
     <div class="wrap">
       <div class="brand">
         <div class="left">Tynan Equipment AI</div>
@@ -109,9 +106,7 @@
       <article class="panel" style="grid-column:1/-1">
         <h2>Why It Wins</h2>
         <ul class="bullets">
-          {% for p in model.why_wins %}
-          <li>{{ p }}</li>
-          {% endfor %}
+          {% for p in model.why_wins %}<li>{{ p }}</li>{% endfor %}
         </ul>
       </article>
     </section>
