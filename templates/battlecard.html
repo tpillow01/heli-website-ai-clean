@@ -5,27 +5,77 @@
   <meta charset="utf-8" />
   <title>{{ title }} – Battle Card</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='battlecards.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    :root{
+      --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6; --ink:#5e4b3f; --muted:#8a796d; --brand:#cc0000;
+      --shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
+    }
+    body{background:repeating-linear-gradient(0deg, #f3eadc 0 28px, #f1e6d6 28px 29px)}
+    .topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);backdrop-filter:saturate(1.1) blur(6px);
+      border-bottom:1px solid var(--line)}
+    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+    .brand{display:flex;align-items:center;justify-content:space-between}
+    .brand .left{font-weight:900;color:#7e5140}
+    .brand .right{font-weight:900;color:#a9342a;letter-spacing:.08em}
+    .tabs{display:flex;gap:10px;margin:10px 0 2px}
+    .nav-pill{background:var(--cream);border:1px solid var(--line);color:var(--ink);padding:9px 14px;border-radius:12px;
+      text-decoration:none;font-weight:700;box-shadow:var(--shadow)}
+    .nav-pill.active{outline:2px solid rgba(204,0,0,.25)}
+    .hero{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;align-items:center;margin:10px 0}
+    .title{margin:0 0 2px 0;color:#613f34}
+    .tag{color:#a9342a;font-weight:800;letter-spacing:.06em}
+    .sil{height:180px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#f8f2e9,#f4eadf);
+      box-shadow:var(--shadow)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+    .panel{background:var(--cream);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+    .panel h2{margin:0 0 8px 0;color:#6b4c3e}
+    .specs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .specs div{display:flex;justify-content:space-between;gap:10px;background:var(--cream-2);border:1px solid var(--line);
+      border-radius:12px;padding:8px 10px}
+    .specs span{color:var(--muted)}
+    .bullets{margin:0;padding-left:18px}
+    .cta{display:flex;justify-content:center;margin:18px 0 4px}
+    .btn-ask{background:linear-gradient(#d8493f,#c61c10);color:#fff;border:none;border-radius:14px;padding:12px 18px;
+      font-weight:900;letter-spacing:.03em;box-shadow:0 6px 18px rgba(204,0,0,.25);cursor:pointer}
+    dialog.ai{border:none;border-radius:18px;padding:0;background:transparent}
+    dialog.ai::backdrop{background:rgba(0,0,0,.35)}
+    .modal{background:var(--cream);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);
+      width:min(760px,92vw)}
+    .modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+    .modal-body{padding:16px;min-height:140px;color:#493a31}
+    .btn-close{background:#fff;border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-weight:700;color:#63463a}
+    .spinner{width:34px;height:34px;border-radius:50%;border:4px solid #e0d4c4;border-top-color:#cc0000;margin:24px auto;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width:900px){ .hero{grid-template-columns:1fr} .grid{grid-template-columns:1fr} }
+  </style>
 </head>
-<body class="bc-body">
-  <header class="bc-header">
-    <div class="brand-left"><div class="tynan">TYNAN EQUIPMENT AI</div></div>
-    <div class="brand-right">HELI</div>
-  </header>
+<body>
+  <div class="topbar">
+    <div class="wrap">
+      <div class="brand">
+        <div class="left">Tynan Equipment AI</div>
+        <div class="right">HELI</div>
+      </div>
+      <nav class="tabs">
+        <a href="{{ url_for('chat_page') if 'chat_page' in globals() else '/' }}" class="nav-pill">Chat</a>
+        <a href="{{ url_for('map_page') if 'map_page' in globals() else '/map' }}" class="nav-pill">Map</a>
+        <a href="{{ url_for('battlecards_index') }}" class="nav-pill active">Battle Cards</a>
+      </nav>
+    </div>
+  </div>
 
-  <main class="bc-wrap">
-    <section class="bc-hero">
-      <div class="bc-hero-text">
-        <h1 class="bc-title">{{ (model.series or "Series") | upper }} – {{ title }}</h1>
-        <p class="bc-tagline">Fast • Tough • Efficient</p>
+  <main class="wrap">
+    <section class="hero">
+      <div>
+        <h1 class="title">{{ (model.series or "Series") | upper }} – {{ title }}</h1>
+        <div class="tag">Fast • Tough • Efficient</div>
       </div>
-      <div class="bc-hero-art" aria-hidden="true">
-        <div class="forklift-silhouette"></div>
-      </div>
+      <div class="sil" aria-hidden="true"></div>
     </section>
 
-    <section class="bc-grid">
-      <article class="bc-panel">
+    <section class="grid">
+      <article class="panel">
         <h2>Best Environments</h2>
         <ul class="bullets">
           <li>Indoors: {{ model.indoors }}</li>
@@ -34,7 +84,7 @@
         </ul>
       </article>
 
-      <article class="bc-panel">
+      <article class="panel">
         <h2>Key Specs</h2>
         <div class="specs">
           <div><span>Power</span><b>{{ model.power }}</b></div>
@@ -52,7 +102,7 @@
         </div>
       </article>
 
-      <article class="bc-panel bc-wide">
+      <article class="panel" style="grid-column:1/-1">
         <h2>Why It Wins</h2>
         <ul class="bullets">
           {% for p in model.why_wins %}
@@ -62,17 +112,17 @@
       </article>
     </section>
 
-    <div class="bc-cta-row">
-      <button id="askAiBtn" class="btn-primary">ASK AI FOR FIT</button>
+    <div class="cta">
+      <button id="askAiBtn" class="btn-ask">ASK AI FOR FIT</button>
     </div>
 
-    <dialog id="aiFitDialog" class="ai-dialog">
-      <div class="ai-dialog-inner">
-        <div class="ai-dialog-head">
+    <dialog id="aiFitDialog" class="ai">
+      <div class="modal">
+        <div class="modal-head">
           <h3>AI Fit – {{ title }}</h3>
-          <button id="closeAi" class="btn-ghost">✕</button>
+          <button id="closeAi" class="btn-close">Close</button>
         </div>
-        <div id="aiOutput" class="ai-output"><div class="spinner"></div></div>
+        <div id="aiOutput" class="modal-body"><div class="spinner"></div></div>
       </div>
     </dialog>
   </main>
