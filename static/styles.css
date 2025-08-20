@@ -264,3 +264,45 @@ body{
   width:24px; height:3px; border-radius:2px;
   background:var(--brand, #cc0000);
 }
+
+/* -------- Text-only header tabs ---------- */
+.tabs { display:flex; gap:16px; align-items:center; }
+.nav-link{
+  background:transparent; border:none; padding:8px 0;
+  color:var(--ink, #5e4b3f); font-weight:800; text-decoration:none;
+  border-radius:6px; position:relative;
+}
+.nav-link:hover{ color:#3c2f28 }
+.nav-link.active{ color:#1f1713 }
+.nav-link.active::after{
+  content:""; position:absolute; left:0; bottom:-6px;
+  width:24px; height:3px; border-radius:2px; background:var(--brand, #cc0000);
+}
+
+/* -------- Battle Cards index grid ---------- */
+.bc-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:18px }
+.bc-card{
+  background:var(--cream, #f6efe3); border:1px solid var(--line, #e7dac6);
+  border-radius:16px; padding:14px;
+  box-shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
+}
+.bc-ser{ color:#a15c48; font-weight:800; margin-bottom:6px }
+.bc-title{ margin:0 0 6px 0; font-weight:900; color:#613f34 }
+.bc-sub{ color:var(--muted, #8a796d); font-size:.95rem }
+.bc-cta{ display:flex; justify-content:space-between; align-items:center; margin-top:12px }
+.bc-open{
+  background:#fff; border:1px solid var(--line, #e7dac6);
+  border-radius:10px; padding:8px 12px; font-weight:700; color:#63463a; text-decoration:none;
+}
+.bc-chip{
+  font-size:.85rem; background:#fff; border:1px dashed var(--line, #e7dac6);
+  border-radius:10px; padding:6px 10px; color:#7b6559;
+}
+
+/* -------- Ask-AI button ---------- */
+.btn-ask{
+  background:linear-gradient(#d8493f,#c61c10); color:#fff; border:none; border-radius:14px;
+  padding:12px 18px; font-weight:900; letter-spacing:.03em;
+  box-shadow:0 6px 18px rgba(204,0,0,.25); cursor:pointer;
+}
+.btn-ask:hover{ filter:brightness(1.02) }

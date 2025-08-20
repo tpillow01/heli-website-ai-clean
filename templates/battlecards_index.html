@@ -4,43 +4,33 @@
   <meta charset="utf-8" />
   <title>Battle Cards</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Use your main stylesheet; the v param helps bust the SW/cache -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=9) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=13) }}">
   <style>
-    /* Page-specific styles to match your tan/cream theme */
-    :root{
-      --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6; --ink:#5e4b3f; --muted:#8a796d; --brand:#cc0000;
-      --shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
-    }
+    :root{ --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6; --ink:#5e4b3f; --muted:#8a796d; --brand:#cc0000; }
     body{margin:0;background:repeating-linear-gradient(0deg,#f3eadc 0 28px,#f1e6d6 28px 29px);color:var(--ink)}
     .topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.6);backdrop-filter:saturate(1.1) blur(6px);border-bottom:1px solid var(--line)}
-    .wrap{max-width:1150px;margin:0 auto;padding:18px}
+    .wrap{max-width:1200px;margin:0 auto;padding:18px}
     .brand{display:flex;align-items:center;justify-content:space-between}
     .brand .left{font-weight:900;color:#7e5140;letter-spacing:.02em}
     .brand .right{font-weight:900;color:#a9342a;letter-spacing:.08em}
-
-    .tabs{display:flex;gap:10px;margin:10px 0 2px}
-    /* Fallback pill styling in case it's not in styles.css */
-    .nav-pill{
-      display:inline-flex;align-items:center;gap:8px;
-      padding:9px 14px;border-radius:12px;background:var(--cream);
-      border:1px solid var(--line);color:var(--ink);text-decoration:none;font-weight:800;box-shadow:var(--shadow)
-    }
-    .nav-pill:hover{background:var(--cream-2)}
-    .nav-pill.active{outline:2px solid rgba(204,0,0,.25)}
-
-    .searchbar{display:flex;gap:10px;margin:14px 0 18px}
+    .tabs{display:flex;gap:16px;align-items:center;margin:10px 0 6px}
+    .nav-link{background:transparent;border:none;padding:8px 0;color:var(--ink);font-weight:800;text-decoration:none;border-radius:6px;position:relative}
+    .nav-link:hover{color:#3c2f28}
+    .nav-link.active{color:#1f1713}
+    .nav-link.active::after{content:"";position:absolute;left:0;bottom:-6px;width:24px;height:3px;border-radius:2px;background:var(--brand)}
+    .pagehead{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-top:6px}
+    .pagehead h1{margin:0;color:#613f34;font-size:22px}
+    .searchbar{display:flex;gap:10px;margin:12px 0 18px}
     .searchbar input{flex:1;background:var(--cream-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--ink)}
     .searchbar button{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-weight:700;color:var(--ink)}
-
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
-    .card{background:var(--cream);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
-    .series{color:#a15c48;font-weight:800;margin-bottom:6px}
-    .model{margin:0 0 6px 0;font-weight:900;color:#613f34}
-    .sub{color:var(--muted);font-size:.95rem}
-    .cta-row{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
-    .open{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:700;color:#63463a;text-decoration:none}
-    .chip{font-size:.85rem;background:#fff;border:1px dashed var(--line);border-radius:10px;padding:6px 10px;color:#7b6559}
+    .bc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
+    .bc-card{background:var(--cream);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0}
+    .bc-ser{color:#a15c48;font-weight:800;margin-bottom:6px}
+    .bc-title{margin:0 0 6px 0;font-weight:900;color:#613f34}
+    .bc-sub{color:var(--muted);font-size:.95rem}
+    .bc-cta{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+    .bc-open{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:700;color:#63463a;text-decoration:none}
+    .bc-chip{font-size:.85rem;background:#fff;border:1px dashed var(--line);border-radius:10px;padding:6px 10px;color:#7b6559}
   </style>
 </head>
 <body>
@@ -51,29 +41,44 @@
         <div class="right">HELI</div>
       </div>
       <nav class="tabs">
-        <!-- Use simple, safe paths to avoid endpoint name mismatches -->
-        <a href="/" class="nav-pill {{ 'active' if request.path == '/' else '' }}">Chat</a>
-        <a href="/map" class="nav-pill {{ 'active' if request.path.startswith('/map') else '' }}">Map</a>
-        <a href="/battlecards" class="nav-pill {{ 'active' if request.path.startswith('/battlecards') else '' }}">Battle Cards</a>
+        <a href="/"            class="nav-link {{ 'active' if request.path == '/' else '' }}">Chat</a>
+        <a href="/map"         class="nav-link {{ 'active' if request.path.startswith('/map') else '' }}">Map</a>
+        <a href="/battlecards" class="nav-link {{ 'active' if request.path.startswith('/battlecards') else '' }}">Battle Cards</a>
       </nav>
     </div>
   </div>
 
   <main class="wrap">
+    <div class="pagehead">
+      <h1>Battle Cards</h1>
+    </div>
+
     <form class="searchbar" action="/battlecards" method="get">
       <input name="q" value="{{ q or '' }}" placeholder="Search models, series, power, capacity…" />
       <button type="submit">Search</button>
     </form>
 
-    <section class="grid">
+    <section class="bc-grid">
       {% for m in models %}
-      <article class="card">
-        <div class="series">{{ m.get('series','—') }}</div>
-        <h3 class="model">{{ m.get('model') or m.get('_display') }}</h3>
-        <div class="sub">{{ m.get('power','—') }} · {{ m.get('capacity','—') }}</div>
-        <div class="cta-row">
-          <a class="open" href="/battlecards/{{ m._slug }}">Open Card</a>
-          <div class="chip">Turning {{ m.get('turning_radius','—') }}</div>
+      <article class="bc-card">
+        {% if m.get('series') and m.get('series') != '—' %}
+          <div class="bc-ser">{{ m.get('series') }}</div>
+        {% endif %}
+        <h3 class="bc-title">{{ m.get('model') or m.get('_display') }}</h3>
+        <div class="bc-sub">
+          {# show “power · capacity” only if we have at least one #}
+          {% set p = m.get('power') %}
+          {% set c = m.get('capacity') %}
+          {% if p and p != '—' %}{{ p }}{% endif %}
+          {% if p and p != '—' and c and 'Not specified' not in c %} · {% endif %}
+          {% if c and 'Not specified' not in c %}{{ c }}{% endif %}
+          {% if (not p or p == '—') and (not c or 'Not specified' in c) %}—{% endif %}
+        </div>
+        <div class="bc-cta">
+          <a class="bc-open" href="/battlecards/{{ m._slug }}">Open Card</a>
+          {% if m.get('turning_radius') and 'Not specified' not in m.get('turning_radius') %}
+            <div class="bc-chip">Turning {{ m.get('turning_radius') }}</div>
+          {% endif %}
         </div>
       </article>
       {% endfor %}
