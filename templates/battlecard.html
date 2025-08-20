@@ -1,251 +1,305 @@
-{% set title = (model.model or model._display) %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>{{ title }} – Battle Card</title>
+  <title>Battle Card – {{ model.model }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=48) }}">
+  <!-- keep your global CSS; cache-bust if needed -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=46) }}">
+
+  <!-- Page-scoped styles -->
   <style>
     :root{
       --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6;
-      --ink:#4b3a30; --ink-2:#2f231e; --muted:#8a796d; --brand:#cc0000;
-      --shadow: 0 10px 28px rgba(68,48,36,.10), inset 0 1px 0 #fff8f0;
-      --radius: 18px;
+      --ink:#3b2a23; --sub:#866f62; --muted:#7b6559;
+      --brand:#a9342a; --brand-2:#c64a3f;
+    }
+    body{color:var(--ink);}
+    .bc-page{max-width:1180px;margin:0 auto;padding:18px;}
+    .back-link{display:inline-block;margin:6px 0 14px 2px;color:#7a4d3a;font-weight:700;text-decoration:none}
+    .back-link:hover{text-decoration:underline}
+
+    /* grid */
+    .bc-grid{display:grid;grid-template-columns:3fr 1.4fr;gap:18px;align-items:start}
+    @media (max-width:980px){.bc-grid{grid-template-columns:1fr}}
+
+    /* card shell */
+    .card{
+      background:var(--cream);
+      border:1px solid var(--line);
+      border-radius:16px;
+      box-shadow:0 8px 26px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
     }
 
-    /* --- HARD RESET so the header sits above, not in a side rail --- */
-    html, body { width:100%; height:auto; }
-    body{
-      display:block !important;           /* overrides any global flex layout */
-      justify-content:unset !important;
-      align-items:unset !important;
-      margin:0;
-      color:var(--ink);
-      background:repeating-linear-gradient(0deg,#f3eadc 0 28px,#f1e6d6 28px 29px);
-    }
-
-    /* --- Top nav --- */
-    .top{
-      position:sticky; top:0; left:0; right:0; z-index:100;
-      background:rgba(255,255,255,.66);
-      backdrop-filter:saturate(1.1) blur(6px);
-      border-bottom:1px solid var(--line);
-    }
-    .wrap{max-width:1200px;margin:0 auto;padding:18px}
-    .brand{display:flex;justify-content:space-between;align-items:center}
-    .brand .left{font-weight:900;color:#7e5140}
-    .brand .right{font-weight:900;color:#a9342a;letter-spacing:.08em}
-    .tabs{display:flex;gap:16px;align-items:center;margin:10px 0 8px}
-    .nav-link{background:transparent;border:none;padding:8px 0;color:var(--ink);
-      font-weight:800;text-decoration:none;border-radius:6px;position:relative}
-    .nav-link.active{color:#1f1713}
-    .nav-link.active::after{content:"";position:absolute;left:0;bottom:-6px;width:24px;height:3px;border-radius:2px;background:var(--brand)}
-
-    .crumbs{margin:12px 0 10px}
-    .crumbs a{color:#7b6559;text-decoration:none}
-    .crumbs a:hover{text-decoration:underline}
-
-    /* --- Layout grid --- */
-    .shell{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:22px}
-    .leftcol{min-width:0}
-    .rightcol{min-width:0}
-
-    /* --- Hero --- */
-    .hero{
-      background:var(--cream); border:1px solid var(--line); border-radius:var(--radius);
-      padding:18px 18px 14px; box-shadow:var(--shadow);
-    }
-    .title{margin:0;color:var(--ink-2);font-weight:900;letter-spacing:.01em;font-size:32px;line-height:1.12}
-    .subgrid{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
-    .chip{
+    /* HERO */
+    .bc-hero{padding:20px}
+    .bc-hero-bar{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .bc-title{margin:0;font-weight:900;color:var(--ink);line-height:1.15;font-size:clamp(22px,2.2vw,32px)}
+    .btn-briefing{
       display:inline-flex;align-items:center;gap:8px;
-      background:#fff;border:1px solid var(--line);border-radius:999px;
-      padding:7px 12px;font-weight:800;color:#6a5146;white-space:nowrap
+      padding:10px 14px;border-radius:12px;border:1px solid var(--line);
+      background:#fff;color:#5e4b3f;font-weight:800;cursor:pointer;
+      box-shadow:0 2px 0 rgba(0,0,0,.06);transition:transform .06s, box-shadow .06s;
+      white-space:nowrap
     }
-    .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
-    .kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;box-shadow:inset 0 1px 0 #fff8f0}
-    .kpi small{color:#8a796d;font-weight:800;letter-spacing:.03em}
-    .kpi b{color:#2f231e;font-size:20px;line-height:1}
+    .btn-briefing:hover{box-shadow:0 4px 10px rgba(0,0,0,.08)}
+    .btn-briefing:active{transform:translateY(1px)}
+    .btn-briefing svg{display:block}
 
-    /* --- Cards --- */
-    .card{background:var(--cream);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
-    .card h2{margin:0 0 12px 0;color:#6b4c3e;font-size:20px;letter-spacing:.01em}
-    .bullets{margin:0;padding-left:22px}
-    .bullets li{margin:6px 0}
-    .win li{list-style:none;position:relative;padding-left:18px}
-    .win li::before{
-      content:"";position:absolute;left:0;top:.55em;width:8px;height:8px;border-radius:2px;
-      background:linear-gradient(#d74a40,#c21c10);box-shadow:0 0 0 1px rgba(0,0,0,.06) inset
+    .bc-hero-pills{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+    .pill{background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-weight:800;color:#63463a;white-space:nowrap}
+
+    .bc-hero-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    @media (max-width:540px){.bc-hero-metrics{grid-template-columns:1fr}}
+    .metric{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+    .metric .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin-bottom:4px;font-weight:800}
+    .metric .v{font-size:18px;color:var(--ink);font-weight:900}
+
+    /* sections */
+    .block{padding:18px 20px}
+    .block h2{margin:0 0 10px 0;font-size:20px;font-weight:900}
+    .kv{display:flex;gap:8px}
+    .kv .k{color:var(--ink);font-weight:800}
+    .kv .v{color:var(--muted)}
+
+    /* specs */
+    .specs{padding:14px}
+    .specs h3{margin:6px 10px 10px 10px;font-weight:900;font-size:18px}
+    .spec-row{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
+    .spec-row .k{color:#7a5f53;font-weight:900}
+    .spec-row .v{color:#2f241f;font-weight:900}
+
+    /* MODAL */
+    .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.45);z-index:60;padding:24px}
+    .modal.show{display:grid}
+    .modal-card{width:min(920px,96vw);max-height:85vh;overflow:auto;background:var(--cream);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+
+    .modal-head{
+      position:sticky;top:0;z-index:1;
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      padding:10px 12px;border-bottom:1px solid var(--line);background:#fff
     }
 
-    /* --- Sticky specs panel --- */
-    .specs{position:sticky; top:96px; background:var(--cream); border:1px solid var(--line);
-      border-radius:var(--radius); box-shadow:var(--shadow); padding:16px}
-    .specs h3{margin:2px 0 12px 0;color:#6b4c3e;font-size:18px}
-    .specgrid{display:grid;grid-template-columns:1fr;gap:10px}
-    .spec{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px;background:var(--cream-2);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
-    .spec .k{color:#8a796d;font-weight:800}
-    .spec .v{justify-self:end;color:#2f231e;font-weight:800}
-
-    /* --- CTA --- */
-    .toolbar{display:flex;justify-content:flex-end;margin-top:16px}
-    .btn{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-weight:800;color:#63463a;cursor:pointer;box-shadow:0 4px 14px rgba(93,69,49,.10)}
-    .btn:hover{transform:translateY(-1px)}
-
-    /* --- Center the dialog modal on every browser, ignoring global CSS --- */
-    dialog.ai{border:none;border-radius:18px;padding:0;background:transparent}
-    dialog.ai::backdrop{background:rgba(0,0,0,.35)}
-    dialog.ai[open]{
-      position:fixed !important;
-      top:50% !important; left:50% !important;
-      transform:translate(-50%,-50%) !important;
-      margin:0; padding:0;
-      display:block !important;
+    /* segmented tabs */
+    .segmented{position:relative;display:inline-flex;background:#f7efe2;border:1px solid var(--line);border-radius:12px;padding:4px}
+    .segmented .tab{
+      appearance:none;border:0;background:transparent;color:#604c41;font-weight:900;
+      padding:8px 12px;border-radius:10px;cursor:pointer;min-width:140px;text-align:center
     }
-    .modal{background:var(--cream);border:1px solid var(--line);border-radius:18px;overflow:hidden;
-      box-shadow:0 12px 34px rgba(93,69,49,.18), inset 0 1px 0 #fff8f0;width:min(860px,92vw)}
-    .modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
-    .tabs2{display:flex;gap:8px}
-    .tab{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-weight:800;color:#5b463b;cursor:pointer}
-    .tab.active{background:#f1dfcf}
-    .modal-body{padding:16px 16px 18px 16px;min-height:220px;color:#493a31}
-    .btn-close{background:#fff;border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-weight:700;color:#63463a}
-    .spinner{width:34px;height:34px;border-radius:50%;border:4px solid #e0d4c4;border-top-color:#cc0000;margin:24px auto;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
+    .segmented .tab:focus-visible{outline:2px solid #bfa897;outline-offset:2px}
+    .segmented .tab.active{background:#fff;border:1px solid var(--line)}
+    .segmented .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-6px;height:3px;border-radius:2px;background:var(--brand)}
 
-    @media (max-width:1000px){
-      .shell{grid-template-columns:1fr}
-      .specs{position:static}
+    .close-x{border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 10px;cursor:pointer;font-weight:900}
+    .close-x:hover{background:#fff7f0}
+
+    .modal-body{padding:16px 18px}
+
+    /* >>> Briefing content polish <<< */
+    .briefing-content h2{
+      margin:8px 0 4px 0;font-size:22px;font-weight:900;
+      border-bottom:2px solid #ead9c6;padding-bottom:6px
+    }
+    .briefing-content h3{margin:14px 0 6px 0;font-size:18px;font-weight:900}
+    .briefing-content p{margin:8px 0;line-height:1.55}
+    .briefing-content ul{margin:6px 0 10px 0;padding-left:0;list-style:none}
+    .briefing-content li{position:relative;margin:6px 0 6px 0;padding-left:20px;line-height:1.5}
+    .briefing-content li::before{
+      content:"";position:absolute;left:0;top:0.65em;width:9px;height:9px;background:var(--brand);border-radius:2px
+    }
+    /* two-column lists on wide screens */
+    @media (min-width: 860px){
+      .briefing-content .columns-2{columns:2;column-gap:28px}
+    }
+    /* subtle notes */
+    .briefing-note{
+      margin-top:10px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px;background:#fff8f1;color:#6b5a50;font-size:.95rem
+    }
+
+    @media (max-width:680px){
+      .bc-hero-bar{flex-direction:column;align-items:flex-start;gap:10px}
+      .btn-briefing{width:100%;justify-content:center}
+      .segmented{width:100%}
+      .segmented .tab{flex:1}
     }
   </style>
 </head>
 <body>
-  <!-- Top nav (now always above card) -->
-  <div class="top">
-    <div class="wrap">
-      <div class="brand">
-        <div class="left">Tynan Equipment AI</div>
-        <div class="right">HELI</div>
+  <div class="bc-page">
+    <a class="back-link" href="{{ url_for('battlecards_index') }}">← Back to Battle Cards</a>
+
+    <div class="bc-grid">
+      <!-- LEFT -->
+      <div class="left-col">
+        <!-- HERO -->
+        <section class="card bc-hero">
+          <div class="bc-hero-bar">
+            <h1 class="bc-title">{{ model.series }} – {{ model.model }}</h1>
+            <!-- Open Briefing aligned with title -->
+            <button id="open-briefing-trigger" class="btn-briefing" type="button" aria-haspopup="dialog" data-slug="{{ model._slug }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14m-7-7h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Open Briefing
+            </button>
+          </div>
+
+          <div class="bc-hero-pills">
+            {% if model.power %}<span class="pill">{{ model.power }}</span>{% endif %}
+            {% if model.capacity %}<span class="pill">Capacity: {{ model.capacity }}</span>{% endif %}
+            {% if model.drive_type and model.drive_type != '—' %}<span class="pill">{{ model.drive_type }}</span>{% endif %}
+          </div>
+
+          <div class="bc-hero-metrics">
+            <div class="metric"><div class="k">Width</div><div class="v">{{ model.overall_width }}</div></div>
+            <div class="metric"><div class="k">Turning</div><div class="v">{{ model.turning_radius }}</div></div>
+            <div class="metric"><div class="k">Load Center</div><div class="v">{{ model.load_center }}</div></div>
+          </div>
+        </section>
+
+        <!-- Environments -->
+        <section class="card block">
+          <h2>Best Environments</h2>
+          <p class="kv"><span class="k">Indoors:</span><span class="v">{{ model.indoors }}</span></p>
+          <p class="kv"><span class="k">Outdoors:</span><span class="v">{{ model.outdoors }}</span></p>
+          <p class="kv"><span class="k">Special:</span><span class="v">{{ model.special_env }}</span></p>
+        </section>
+
+        <!-- Why it wins -->
+        <section class="card block">
+          <h2>Why It Wins</h2>
+          <ul class="columns-2">
+            {% for w in model.why_wins %}<li>{{ w }}</li>{% endfor %}
+          </ul>
+        </section>
       </div>
-      <nav class="tabs">
-        <a href="/"            class="nav-link {{ 'active' if request.path == '/' else '' }}">Chat</a>
-        <a href="/map"         class="nav-link {{ 'active' if request.path.startswith('/map') else '' }}">Map</a>
-        <a href="/battlecards" class="nav-link {{ 'active' if request.path.startswith('/battlecards') else '' }}">Battle Cards</a>
-      </nav>
+
+      <!-- RIGHT: Specs -->
+      <aside class="card specs">
+        <h3>Key Specs</h3>
+        <div class="spec-row"><div class="k">Power</div><div class="v">{{ model.power }}</div></div>
+        <div class="spec-row"><div class="k">Drive Type</div><div class="v">{{ model.drive_type }}</div></div>
+        <div class="spec-row"><div class="k">Controller</div><div class="v">{{ model.controller }}</div></div>
+        <div class="spec-row"><div class="k">Capacity</div><div class="v">{{ model.capacity }}</div></div>
+        <div class="spec-row"><div class="k">Load Center</div><div class="v">{{ model.load_center }}</div></div>
+        <div class="spec-row"><div class="k">Turning Radius</div><div class="v">{{ model.turning_radius }}</div></div>
+        <div class="spec-row"><div class="k">Overall Width</div><div class="v">{{ model.overall_width }}</div></div>
+        <div class="spec-row"><div class="k">Overall Length</div><div class="v">{{ model.overall_length }}</div></div>
+        <div class="spec-row"><div class="k">Overall Height</div><div class="v">{{ model.overall_height }}</div></div>
+        <div class="spec-row"><div class="k">Wheel Base</div><div class="v">{{ model.wheel_base }}</div></div>
+        <div class="spec-row"><div class="k">Max Lift Height</div><div class="v">{{ model.max_lift_height }}</div></div>
+        <div class="spec-row"><div class="k">Battery Voltage</div><div class="v">{{ model.battery_voltage }}</div></div>
+      </aside>
     </div>
   </div>
 
-  <main class="wrap">
-    <div class="crumbs"><a href="/battlecards">← Back to Battle Cards</a></div>
-
-    <div class="shell">
-      <!-- LEFT: hero + content -->
-      <section class="leftcol">
-        <div class="hero">
-          <h1 class="title">{{ (model.series or "Series") | upper }} – {{ title }}</h1>
-
-          <div class="subgrid">
-            {% if model.power and model.power != '—' %}<span class="chip">{{ model.power }}</span>{% endif %}
-            {% if model.capacity and "Not specified" not in model.capacity %}<span class="chip">Capacity: {{ model.capacity }}</span>{% endif %}
-            {% if model.drive_type and model.drive_type != '—' %}<span class="chip">{{ model.drive_type }}</span>{% endif %}
-          </div>
-
-          <div class="kpis">
-            <div class="kpi"><small>WIDTH</small><b>{{ "—" if not model.overall_width or "Not specified" in model.overall_width else model.overall_width }}</b></div>
-            <div class="kpi"><small>TURNING</small><b>{{ "—" if not model.turning_radius or "Not specified" in model.turning_radius else model.turning_radius }}</b></div>
-            <div class="kpi"><small>LOAD CENTER</small><b>{{ "—" if not model.load_center or "Not specified" in model.load_center else model.load_center }}</b></div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:16px">
-          <h2>Best Environments</h2>
-          <ul class="bullets">
-            <li><b>Indoors:</b> {{ model.indoors }}</li>
-            <li><b>Outdoors:</b> {{ model.outdoors }}</li>
-            <li><b>Special:</b> {{ model.special_env }}</li>
-          </ul>
-        </div>
-
-        <div class="card" style="margin-top:16px">
-          <h2>Why It Wins</h2>
-          <ul class="bullets win">
-            {% for p in model.why_wins %}<li>{{ p }}</li>{% endfor %}
-          </ul>
-        </div>
-
-        <div class="toolbar">
-          <button id="openBrief" class="btn">Open Briefing</button>
-        </div>
-      </section>
-
-      <!-- RIGHT: sticky specs -->
-      <aside class="rightcol">
-        <div class="specs">
-          <h3>Key Specs</h3>
-          <div class="specgrid">
-            <div class="spec"><div class="k">Power</div><div class="v">{{ model.power }}</div></div>
-            <div class="spec"><div class="k">Drive Type</div><div class="v">{{ model.drive_type }}</div></div>
-            <div class="spec"><div class="k">Controller</div><div class="v">{{ model.controller }}</div></div>
-            <div class="spec"><div class="k">Capacity</div><div class="v">{{ model.capacity }}</div></div>
-            <div class="spec"><div class="k">Load Center</div><div class="v">{{ model.load_center }}</div></div>
-            <div class="spec"><div class="k">Turning Radius</div><div class="v">{{ model.turning_radius }}</div></div>
-            <div class="spec"><div class="k">Overall Width</div><div class="v">{{ model.overall_width }}</div></div>
-            <div class="spec"><div class="k">Overall Length</div><div class="v">{{ model.overall_length }}</div></div>
-            <div class="spec"><div class="k">Overall Height</div><div class="v">{{ model.overall_height }}</div></div>
-            <div class="spec"><div class="k">Wheel Base</div><div class="v">{{ model.wheel_base }}</div></div>
-            <div class="spec"><div class="k">Max Lift Height</div><div class="v">{{ model.max_lift_height }}</div></div>
-            <div class="spec"><div class="k">Battery Voltage</div><div class="v">{{ model.battery_voltage }}</div></div>
-          </div>
-        </div>
-      </aside>
-    </div>
-  </main>
-
-  <!-- Modal (centered) -->
-  <dialog id="aiFitDialog" class="ai">
-    <div class="modal">
+  <!-- Briefing Modal -->
+  <div id="briefing-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
+    <div class="modal-card">
       <div class="modal-head">
-        <div class="tabs2">
-          <button class="tab active" data-tab="fit">Fit Briefing</button>
-          <button class="tab" data-tab="edge">Competitive Edge</button>
+        <div class="segmented" role="tablist" aria-label="Briefing tabs">
+          <button class="tab active" role="tab" aria-selected="true"  aria-controls="tab-fit"  id="tabbtn-fit"  data-tab="fit">Fit Briefing</button>
+          <button class="tab"        role="tab" aria-selected="false" aria-controls="tab-edge" id="tabbtn-edge" data-tab="edge">Competitive Edge</button>
         </div>
-        <button id="closeAi" class="btn-close">Close</button>
+        <button class="close-x" aria-label="Close briefing">Close</button>
       </div>
-      <div id="aiOutput" class="modal-body"><div class="spinner"></div></div>
+      <div class="modal-body" id="tab-panel">
+        <p class="loading">Loading briefing…</p>
+      </div>
     </div>
-  </dialog>
+  </div>
 
+  <!-- ES5 JS (linters safe) -->
   <script>
-    const slug = "{{ model._slug }}";
-    const dlg = document.getElementById('aiFitDialog');
-    const out = document.getElementById('aiOutput');
-    const btnOpen = document.getElementById('openBrief');
-    const closeBtn = document.getElementById('closeAi');
-    const tabBtns = Array.from(document.querySelectorAll('.tab'));
-    let cacheHTML = null;
+  (function () {
+    var openBtn = document.getElementById('open-briefing-trigger');
+    var modal   = document.getElementById('briefing-modal');
+    var body    = modal.querySelector('.modal-body');
+    var tabs    = modal.querySelectorAll('.tab');
+    var closeX  = modal.querySelector('.close-x');
+    var slug    = openBtn.getAttribute('data-slug');
 
-    function setTab(name){
-      tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-      const blocks = out.querySelectorAll('[data-block]');
-      blocks.forEach(el => el.style.display = (el.dataset.block === name ? '' : 'none'));
+    var fitHTML  = '';
+    var edgeHTML = '';
+
+    function openModal() {
+      modal.classList.add('show');
+      document.body.style.overflow = 'hidden';
     }
-    async function ensureContent(){
-      if (cacheHTML) return;
-      out.innerHTML = '<div class="spinner"></div>';
-      const r = await fetch(`/api/ai_fit?model=${encodeURIComponent(slug)}`);
-      const j = await r.json();
-      out.innerHTML = j.html ? j.html : `<pre>${(j.error||'Unknown error')}</pre>`;
-      cacheHTML = out.innerHTML;
+    function closeModal() {
+      modal.classList.remove('show');
+      document.body.style.overflow = '';
+    }
+    function setActiveTab(name) {
+      for (var i=0;i<tabs.length;i++){
+        var t = tabs[i];
+        var active = (t.getAttribute('data-tab') === name);
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+      if (name === 'fit') {
+        body.innerHTML = '<div class="briefing-content">'+ (fitHTML || '<p>Unavailable.</p>') +'</div>';
+      } else {
+        body.innerHTML = '<div class="briefing-content">'+ (edgeHTML || '<p>Unavailable.</p>') +'</div>';
+      }
     }
 
-    btnOpen.addEventListener('click', async () => {
-      if (typeof dlg.showModal === 'function') dlg.showModal();
-      await ensureContent();
-      setTab('fit');
+    function fetchBriefing() {
+      body.innerHTML = '<p class="loading">Loading briefing…</p>';
+      fetch('/api/ai_fit?model=' + encodeURIComponent(slug))
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if (j && j.html) {
+            var wrap = document.createElement('div');
+            wrap.innerHTML = j.html;
+
+            // Prefer two-block structure if available
+            var fit  = wrap.querySelector('[data-block="fit"]');
+            var edge = wrap.querySelector('[data-block="edge"]');
+
+            if (fit)  { fitHTML  = fit.outerHTML; }
+            else      { fitHTML  = j.html; }   // single-block fallback
+            if (edge) { edgeHTML = edge.outerHTML; } else { edgeHTML = ''; }
+
+            setActiveTab('fit');
+          } else {
+            body.innerHTML = '<p>Error: ' + (j && j.error ? j.error : 'No content returned') + '</p>';
+          }
+        })
+        .catch(function(err){
+          body.innerHTML = '<p>Error loading briefing: ' + String(err) + '</p>';
+        });
+    }
+
+    // open/close
+    openBtn.addEventListener('click', function(){ openModal(); fetchBriefing(); });
+    closeX.addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e){ if(e.target === modal) closeModal(); });
+    window.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeModal(); });
+
+    // tab click + keyboard left/right
+    for (var i=0;i<tabs.length;i++){
+      tabs[i].addEventListener('click', function(){ setActiveTab(this.getAttribute('data-tab')); });
+    }
+    modal.addEventListener('keydown', function(e){
+      var activeIdx = -1;
+      for (var i=0;i<tabs.length;i++){ if(tabs[i].classList.contains('active')) { activeIdx=i; break; } }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        var idx = Math.min(activeIdx + 1, tabs.length - 1);
+        tabs[idx].click(); tabs[idx].focus();
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        var idxL = Math.max(activeIdx - 1, 0);
+        tabs[idxL].click(); tabs[idxL].focus();
+      }
+      if (e.key === 'Enter' || e.key === ' ') {
+        var el = document.activeElement;
+        if (el && el.classList.contains('tab')) { e.preventDefault(); el.click(); }
+      }
     });
-    closeBtn.addEventListener('click', () => dlg.close());
-    tabBtns.forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  })();
   </script>
 </body>
 </html>
