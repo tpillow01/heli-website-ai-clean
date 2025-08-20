@@ -1,54 +1,52 @@
-import pandas as pd
 import json
+from pathlib import Path
+import pandas as pd
 
-file = r"data\Heli Product Details.xlsx"
+# --- paths ---
+EXCEL_PATH = Path(r"data\Heli Product Details.xlsx")  # adjust if needed
+SHEET_NAME = 0  # use 0 for first sheet, or put the sheet name string here
+OUTPUT_JSON = Path("models.json")
 
-try:
-    df = pd.read_excel(file, engine="openpyxl")
-    print(f"✅ Loaded Excel file with {len(df)} rows and {len(df.columns)} columns")
+def clean_headers(cols):
+    fixed = []
+    for c in cols:
+        name = "" if c is None else str(c)
+        name = name.replace("\u00A0", " ")          # normalize NBSP
+        name = " ".join(name.split())               # collapse internal spaces
+        fixed.append(name.strip())
+    return fixed
 
-    # Strip whitespace from column names
-    df.columns = df.columns.str.strip()
+def main():
+    # Read as strings so values like '49-57' stay intact
+    df = pd.read_excel(EXCEL_PATH, sheet_name=SHEET_NAME, engine="openpyxl", dtype=str)
+    print(f"✅ Loaded Excel with {len(df)} rows and {len(df.columns)} columns")
 
-    # Rename to consistent internal names
-    df = df.rename(columns={
-        "Model Name": "Model",
-        "Load Capacity (lbs)": "Capacity_lbs",
-        "Drive Type": "Type",
-        "Power": "Power",
-        "Series": "Series",
-        "Workplace": "Workplace",
-        "Overall Height (in)": "Height_in",
-        "Overall Length (in)": "Length_in",
-        "Overall Width (in)": "Width_in",  # ✅ corrected spelling here
-        "Max Lifting Height (in)": "LiftHeight_in"
-    })
+    # Keep ALL columns; just clean headers/whitespace
+    df.columns = clean_headers(df.columns)
 
-    # Convert all columns to object type to allow "N/A"
-    df = df.astype("object")
-    df.fillna("N/A", inplace=True)
+    # Trim cell strings, keep non-strings as-is
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
-    # Columns to keep in the final JSON
-    columns_to_keep = [
-        "Model", "Type", "Power", "Capacity_lbs", "Series", "Workplace",
-        "Height_in", "Width_in", "Length_in", "LiftHeight_in"
-    ]
+    # Drop fully empty rows/columns, dedupe columns
+    df = df.dropna(how="all")
+    df = df.dropna(axis=1, how="all")
+    df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
-    # Check for any missing required columns
-    missing = [col for col in columns_to_keep if col not in df.columns]
-    if missing:
-        raise ValueError(f"❌ Missing column(s): {missing}")
+    # Fill remaining empties with "N/A"
+    df = df.fillna("N/A")
 
-    # Keep only the desired columns
-    df = df[columns_to_keep]
+    # Show exactly what headers will be written
+    print("🧾 Columns going to JSON:")
+    for c in df.columns:
+        print("  •", c)
 
-    # Convert to JSON
-    models_list = df.to_dict(orient="records")
+    # Write list-of-records JSON with ALL columns
+    records = df.to_dict(orient="records")
+    OUTPUT_JSON.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"✅ Successfully wrote {len(records)} models to {OUTPUT_JSON.resolve()}")
 
-    with open("models.json", "w", encoding="utf-8") as f:
-        json.dump(models_list, f, indent=2, ensure_ascii=False)
-
-    print(f"✅ Successfully wrote {len(models_list)} models to models.json")
-
-except Exception as e:
-    print("❌ Error:", e)
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print("❌ Error:", e)
