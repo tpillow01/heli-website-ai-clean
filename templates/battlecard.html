@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <title>Battle Card – {{ model.model }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=47) }}">
+  <!-- keep your site css; cache-bust version number as you like -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=48) }}">
 
   <style>
     :root{
@@ -12,7 +13,7 @@
       --s-8: 8px; --s-10: 10px; --s-12: 12px; --s-14: 14px; --s-16: 16px;
       --s-18: 18px; --s-20: 20px; --s-22: 22px; --s-24: 24px; --s-28: 28px;
 
-      /* palette (matches your site) */
+      /* palette aligned to your app */
       --cream:#f6efe3; --cream-2:#fbf6ee; --line:#e7dac6;
       --ink:#3b2a23; --muted:#746055; --brand:#a9342a; --brand-2:#c64a3f;
     }
@@ -43,15 +44,14 @@
     .grid{display:grid;grid-template-columns:3fr 1.35fr;gap: var(--s-22); align-items:start;}
     @media (max-width:980px){.grid{grid-template-columns:1fr}}
 
-    /* ===== Cards ===== */
+    /* ===== Card base ===== */
     .card{
       background:var(--cream);
       border:1px solid var(--line);
       border-radius:16px;
       box-shadow:0 8px 24px rgba(93,69,49,.08), inset 0 1px 0 #fff8f0;
-      padding: var(--s-22) var(--s-24);
+      padding: var(--s-22) var(--s-24);  /* plenty of breathing room */
     }
-    /* make sure content never touches edges */
     .card > * + *{margin-top: var(--s-18)}
 
     /* ===== Hero ===== */
@@ -121,7 +121,7 @@
 </head>
 <body>
 
-  <!-- ===== Header restored ===== -->
+  <!-- ===== Header (hardcoded links to avoid Jinja globals) ===== -->
   <header class="bc-top">
     <div class="container">
       <div class="brand-line">
@@ -129,9 +129,9 @@
         <div class="brand-right">HELI</div>
       </div>
       <nav class="tabs">
-        <a href="{{ url_for('home') if 'home' in globals() else '/' }}" class="nav-link">Chat</a>
-        <a href="{{ url_for('map_page') if 'map_page' in globals() else '/map' }}" class="nav-link">Map</a>
-        <a href="{{ url_for('battlecards_index') }}" class="nav-link active">Battle Cards</a>
+        <a href="/" class="nav-link">Chat</a>
+        <a href="/map" class="nav-link">Map</a>
+        <a href="/battlecards" class="nav-link active">Battle Cards</a>
       </nav>
     </div>
   </header>
@@ -198,7 +198,7 @@
     </div>
   </main>
 
-  <!-- Briefing Modal (unchanged structure; spacing improved) -->
+  <!-- Briefing Modal -->
   <div id="briefing-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
     <div class="modal-card">
       <div class="modal-head">
