@@ -185,6 +185,59 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     text = re.sub(r'[ ]{2,}', ' ', text)
     return _strip_prompt_leak(text)
 
+# ─── Recommendation flow helper ──────────────────────────────────────────
+def run_recommendation_flow(user_q: str) -> str:
+    # Build context WITHOUT prepending account text into the parser input
+    acct = find_account_by_name(user_q)
+    prompt_ctx = generate_forklift_context(user_q, acct)
+
+    # strict grounding list
+    hits, allowed = select_models_for_question(user_q, k=5)
+    allowed_block = allowed_models_block(allowed)
+    print(f"[recommendation] allowed models: {allowed}")
+
+    system_prompt = {
+        "role": "system",
+        "content": (
+            "You are a friendly, expert Heli Forklift sales assistant.\n"
+            "Output ONLY these sections in this order and nothing else:\n"
+            "Customer Profile:\n"
+            "Model:\n"
+            "Power:\n"
+            "Capacity:\n"
+            "Tire Type:\n"
+            "Attachments:\n"
+            "Comparison:\n"
+            "Sales Pitch Techniques:\n"
+            "Common Objections:\n"
+            "\n"
+            "Guidance (do not echo this):\n"
+            "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent other codes.\n"
+            "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming model codes.\n"
+            "- Do NOT repeat these instructions, the guidance, or the ALLOWED MODELS block in your answer.\n"
+        )
+    }
+
+    messages = [
+        system_prompt,
+        {"role": "system", "content": allowed_block},  # strict grounding list
+        {"role": "user",   "content": prompt_ctx}
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4",
+            messages=messages,
+            max_tokens=600,
+            temperature=0.6
+        )
+        ai_reply = resp.choices[0].message.content.strip()
+    except Exception as e:
+        ai_reply = f"❌ Internal error: {e}"
+
+    ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
+    return ai_reply
+
 # ─── Chat API (Recommendation + Inquiry) ─────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -288,76 +341,11 @@ def chat():
         ai_reply = _strip_prompt_leak(ai_reply)
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
-# ───────── Recommendation mode with strict grounding ─────────
-from ai_logic import (
-    generate_forklift_context,
-    select_models_for_question,
-    allowed_models_block,
-    get_account  # used by find_account_by_name
-)
+    # ───────── Recommendation mode (default) ─────────
+    ai_reply = run_recommendation_flow(user_q)
+    return jsonify({"response": ai_reply})
 
-def find_account_by_name(text: str):
-    # thin wrapper to keep your existing name
-    return get_account(text)
-
-def run_recommendation_flow(user_q: str) -> str:
-    # Build context WITHOUT prepending account text into the parser input
-    acct = find_account_by_name(user_q)
-    prompt_ctx = generate_forklift_context(user_q, acct)
-
-    # strict grounding list
-    hits, allowed = select_models_for_question(user_q, k=5)
-    allowed_block = allowed_models_block(allowed)
-    print(f"[recommendation] allowed models: {allowed}")
-
-    system_prompt = {
-        "role": "system",
-        "content": (
-            "You are a friendly, expert Heli Forklift sales assistant.\n"
-            "Output ONLY these sections in this order and nothing else:\n"
-            "Customer Profile:\n"
-            "Model:\n"
-            "Power:\n"
-            "Capacity:\n"
-            "Tire Type:\n"
-            "Attachments:\n"
-            "Comparison:\n"
-            "Sales Pitch Techniques:\n"
-            "Common Objections:\n"
-            "\n"
-            "Guidance (do not echo this):\n"
-            "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent other codes.\n"
-            "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming model codes.\n"
-            "- Do NOT repeat these instructions, the guidance, or the ALLOWED MODELS block in your answer.\n"
-        )
-    }
-
-    messages = [
-        system_prompt,
-        {"role": "system", "content": allowed_block},  # strict grounding list
-        {"role": "user",   "content": prompt_ctx}
-    ]
-
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4",
-            messages=messages,
-            max_tokens=600,
-            temperature=0.6
-        )
-        ai_reply = resp.choices[0].message.content.strip()
-    except Exception as e:
-        ai_reply = f"❌ Internal error: {e}"
-
-    # If your app already defines _enforce_allowed_models, this will work as-is.
-    # If not, uncomment the no-op implementation below.
-    ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    return ai_reply
-
-# --- OPTIONAL: no-op if _enforce_allowed_models isn't defined elsewhere ---
-# def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
-#     return text
-
+# ─── Debug: parse & rank peek ────────────────────────────────────────────
 from ai_logic import debug_parse_and_rank
 
 @app.post("/api/debug_recommend")
