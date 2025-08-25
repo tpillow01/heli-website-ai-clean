@@ -230,39 +230,82 @@ def _unify_model_mentions(text: str, allowed: list[str]) -> str:
 
     return body.replace('<<MODEL_SECTION>>', model_sec)
 
-
-def _fix_common_objections(text: str) -> str:
+def _fix_labels_and_breaks(text: str) -> str:
     """
-    Normalize Common Objections bullets, avoid truncation, and ensure each line
-    ends with a 'Next:' guidance if missing.
+    Clean odd line wraps like 'Minimum\\nCapacity:' and 'Suggested\\nAttachments:'.
+    Also normalize those labels to 'Capacity:', 'Attachments:', 'Tire:'.
     """
     if not isinstance(text, str) or not text.strip():
         return text
 
-    pat = r'(?s)(?:^|\n)Common Objections:\n(.*?)(?=\n[A-Z][^\n]*:|\Z)'
-    m = re.search(pat, text)
+    # merge split labels across a newline
+    text = re.sub(r'(?mi)^-\s*Minimum\s*\n\s*Capacity:', '- Capacity:', text)
+    text = re.sub(r'(?mi)^-\s*Suggested\s*\n\s*Attachments:', '- Attachments:', text)
+    text = re.sub(r'(?mi)^-\s*Suggested\s*\n\s*Tire:', '- Tire:', text)
+
+    # direct label normalization (in case they weren’t split)
+    text = re.sub(r'(?mi)^-\s*Minimum\s+Capacity:', '- Capacity:', text)
+    text = re.sub(r'(?mi)^-\s*Suggested\s+Attachments:', '- Attachments:', text)
+    text = re.sub(r'(?mi)^-\s*Suggested\s+Tire:', '- Tire:', text)
+
+    # fix any stray "Next; Next:" typos the model sometimes emits
+    text = text.replace('Next; Next:', 'Next:')
+
+    return text
+
+def _fix_common_objections(text: str) -> str:
+    """
+    Reformat Common Objections into concise, scan-friendly single-line bullets:
+    - <Objection> — Ask: … | Reframe: … | Proof: … | Next: …
+    Preserves content, just tidies punctuation/spacing and ensures 'Next:' exists.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return text
+
+    block_pat = r'(?s)(?:^|\n)Common Objections:\n(.*?)(?=\n[A-Z][^\n]*:|\Z)'
+    m = re.search(block_pat, text)
     if not m:
         return text
 
     block = m.group(1)
-    # split, keep non-empty lines, strip extra whitespace/dashes
-    raw_lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
-    cleaned = []
-    for ln in raw_lines:
-        s = ln.lstrip('- ').strip()
-        # collapse multiple spaces
+    lines_in = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    out = []
+
+    for ln in lines_in:
+        # strip leading dash/quotes and normalize punctuation
+        s = ln.lstrip('-• ').strip()
+        s = s.replace('“', '"').replace('”', '"').replace("’", "'")
+        s = s.strip('"').strip("'")
+
+        # collapse multiple spaces and normalize separators
         s = re.sub(r'\s{2,}', ' ', s)
-        # ensure we have a “Next:” suggestion
+        s = s.replace(' — ', ' — ').replace('–', '—')  # unify dash
+        s = s.replace('; Next:', ' | Next:')           # make Next separator consistent
+        s = s.replace('; Reframe:', ' | Reframe:')
+        s = s.replace('; Proof:', ' | Proof:')
+        s = s.replace('; Ask:', ' | Ask:')
+        s = s.replace('Next; ', 'Next: ')
+        s = s.replace('Next; Next:', 'Next:')          # safety
+
+        # ensure labeled segments are present in preferred order
+        if 'Ask:' not in s and '—' in s:
+            # try to split on '—' to get the objection text
+            parts = [p.strip() for p in s.split('—', 1)]
+            objection = parts[0]
+            rest = parts[1] if len(parts) > 1 else ''
+            s = f"{objection} — {rest}"
         if 'Next:' not in s:
-            s = s.rstrip('. ')
-            s += '; Next: Schedule a quick site walk to confirm spec.'
-        cleaned.append(f'- {s}')
-        if len(cleaned) >= 8:  # keep it tight
+            s += ' | Next: Schedule a brief site walk to confirm spec.'
+
+        # keep to one tidy bullet
+        s = re.sub(r'\s*\|\s*$', '', s).rstrip('.')
+        out.append(f"- {s}.")
+
+        if len(out) >= 6:  # keep it brief but useful
             break
 
-    new_block = "Common Objections:\n" + "\n".join(cleaned) + "\n"
-    return re.sub(pat, "\n" + new_block, text)
-
+    new_block = "Common Objections:\n" + "\n".join(out) + "\n"
+    return re.sub(block_pat, "\n" + new_block, text)
 
 def _tidy_formatting(text: str) -> str:
     if not isinstance(text, str):
@@ -344,9 +387,11 @@ def run_recommendation_flow(user_q: str) -> str:
         ai_reply = f"❌ Internal error: {e}"
 
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    ai_reply = _unify_model_mentions(ai_reply, allowed)  # keep talk-tracks aligned to Top Pick
-    ai_reply = _fix_common_objections(ai_reply)          # prevent truncation + add "Next:" guidance
-    ai_reply = _tidy_formatting(ai_reply)                # tighten spacing/blank lines
+    ai_reply = _unify_model_mentions(ai_reply, allowed)  # if you added this earlier
+    ai_reply = _fix_labels_and_breaks(ai_reply)          # <<< new
+    ai_reply = _fix_common_objections(ai_reply)          # <<< improved tidy
+    ai_reply = _tidy_formatting(ai_reply)                # keep spacing neat
+
 
     return ai_reply
 

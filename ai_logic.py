@@ -421,9 +421,10 @@ def generate_forklift_context(user_q: str, acct: Dict[str, Any] | None) -> str:
         f"- Environment: {'Indoor' if want['indoor'] and not want['outdoor'] else ('Outdoor' if want['outdoor'] and not want['indoor'] else 'Mixed/Not specified')}",
         f"- Aisle Limit: {(_fmt_int(want['aisle_in']) + ' in') if want['aisle_in'] else 'Not specified'}",
         f"- Power Preference: {want['power_pref'] or 'Not specified'}",
-        f"- Minimum Capacity: {(_fmt_int(want['cap_lbs']) + ' lb') if want['cap_lbs'] else 'Not specified'}",
-        f"- Suggested Tire: {tire_suggest or 'Not specified'}",
-        f"- Suggested Attachments: {', '.join(atts_suggest) if atts_suggest else 'N/A'}",
+        # ↓↓↓ ONLY THESE THREE LINES CHANGED ↓↓↓
+        f"- Capacity: {(_fmt_int(want['cap_lbs']) + ' lb') if want['cap_lbs'] else 'Not specified'}",
+        f"- Tire: {tire_suggest or 'Not specified'}",
+        f"- Attachments: {', '.join(atts_suggest) if atts_suggest else 'N/A'}",
         ""
     ]
 
