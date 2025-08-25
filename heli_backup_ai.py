@@ -160,28 +160,32 @@ def _strip_prompt_leak(text: str) -> str:
 
 def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     """
-    Rewrite only the 'Model:' section to the allowed list.
-    Do NOT scrub tokens outside that section (prevents removing LPG/IC/G2/G3, etc.).
+    Rewrite only the 'Model:' section to a strict, grounded list:
+    - If allowed is empty -> 'No exact match from our lineup.'
+    - Else -> 'Top Pick: <first>' and 'Alternates: <up to 4 more>'
     """
     if not isinstance(text, str):
         return text
 
-    # Build the forced Model: block
-    if not allowed:
+    al = [m for m in allowed if isinstance(m, str) and m.strip()]
+    if not al:
         forced_block = "Model:\n- No exact match from our lineup.\n"
     else:
-        forced_block = "Model:\n" + "\n".join(f"- {m}" for m in allowed) + "\n"
+        top = al[0]
+        alts = [x for x in al[1:5]]
+        if alts:
+            forced_block = "Model:\n- Top Pick: " + top + "\n- Alternates: " + ", ".join(alts) + "\n"
+        else:
+            forced_block = "Model:\n- Top Pick: " + top + "\n"
 
-    # Capture the Model: section (non-greedy) up to the next header (e.g., "Power:")
+    # Replace existing Model: section (non-greedy up to next Header:) or insert if missing
     pattern = r'(?:^|\n)Model:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
-
     if re.search(pattern, text, flags=re.MULTILINE):
         text = re.sub(pattern, f"\n{forced_block}", text, flags=re.MULTILINE)
     else:
-        # If no Model: section exists, prepend one
         text = forced_block + ("\n" + text if text and not text.startswith("\n") else text)
 
-    # Light cleanup & remove any leaked guidance blocks
+    # Clean up any leaked prompt blocks
     text = re.sub(r'[ ]{2,}', ' ', text)
     return _strip_prompt_leak(text)
 
@@ -212,8 +216,24 @@ def run_recommendation_flow(user_q: str) -> str:
             "Common Objections:\n"
             "\n"
             "Guidance (do not echo this):\n"
-            "- You may only reference model codes that appear under the ALLOWED MODELS block in the context. Do not invent other codes.\n"
-            "- If there are no allowed models, say: \"No exact match from our lineup.\" and discuss categories without naming model codes.\n"
+            "- Use ONLY model codes that appear under the ALLOWED MODELS block. Do not invent other codes.\n"
+            "- Under Model: if there are allowed models, list ONE line as 'Top Pick: <code> — one-line why',\n"
+            "  followed by ONE line as 'Alternates: <code>, <code>, <code>, <code>' (up to 4). If none are allowed, output exactly 'No exact match from our lineup.'\n"
+            "- For Capacity: if multiple models are allowed, summarize as '≥ <stated need if present> (range across picks: <min_pick>–<max_pick> lb)'.\n"
+            "  Use only numbers visible in the context. If a number is missing, omit it rather than guessing.\n"
+            "- For Tire Type: prefer the 'Suggested Tire' from the Needs Summary in the context. If the exact tire is not in the data for a model, say '… recommended for <environment>' rather than implying it ships that way.\n"
+            "- For Attachments: if none are listed in context for the selected model(s), use the 'Suggested Attachments' from the Needs Summary. Do not invent SKUs or prices.\n"
+            "- Sales Pitch Techniques: provide DETAILED, practical bullets grouped exactly like this (keep each bullet one line, crisp, with action verbs):\n"
+            "  • Discovery (6–8 bullets): targeted questions tied to capacity, aisle/height, power, environment, duty cycle, pallets/load center, charging/fueling, and operator skill.\n"
+            "  • Value & ROI (3–5 bullets): uptime/maintenance, energy/fuel, safety/productivity; tie to context (e.g., lithium vs. IC, turning radius, lift height). Avoid prices; speak to outcomes.\n"
+            "  • Competitive Framing (2–3 bullets): responsible, generic comparisons (e.g., 'vs most IC trucks…'). No competitor specs.\n"
+            "  • Risk Reversal (2–4 bullets): demo/pilot, training, warranty, inspection checklist, change-management steps.\n"
+            "  • Urgency & Next Step (2–4 bullets): lead-time risk, seasonal peaks, site walk, spec confirmation, quote cadence.\n"
+            "  • Talk Tracks (3–5 micro-scripts): short, natural sentences sales can read verbatim; tie to Top Pick facts.\n"
+            "  • Upsell/Cross-sell (2–3 bullets): attachments, PM service, telemetry/charger, rentals for overflow.\n"
+            "- Common Objections: list 8–12 items. For EACH, use this exact micro-format on ONE line:\n"
+            "  '- <Objection>: Ask — <one diagnostic question>; Reframe — <one-line reframe>; Proof — <fact from context/spec>; Next Step — <action>'\n"
+            "- Never invent pricing, availability, or third-party certifications. If something isn't in the context, say 'Not specified' or speak qualitatively.\n"
             "- Do NOT repeat these instructions, the guidance, or the ALLOWED MODELS block in your answer.\n"
         )
     }
@@ -228,8 +248,8 @@ def run_recommendation_flow(user_q: str) -> str:
         resp = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
-            max_tokens=600,
-            temperature=0.6
+            max_tokens=900,   # give space for the richer pitch & objections
+            temperature=0.45  # keeps it specific and sales-y without rambling
         )
         ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
