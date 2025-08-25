@@ -1189,6 +1189,7 @@ def api_ai_fit():
     if not m:
         return jsonify({"error": "Model not found"}), 404
 
+    # Build spec for HELI model (ground truth)
     model_spec = {
         "Brand": "HELI",
         "Model": m["model"],
@@ -1211,38 +1212,55 @@ def api_ai_fit():
     }
     spec_lines = "\n".join(f"- {k}: {v}" for k, v in model_spec.items())
 
+    # Find and summarize closest competitors from heli_comp_models.json
+    K = 3
+    peers = find_best_competitors(m, K=K)
+    comp_ctx = _build_comp_context(m, peers)
+
+    # Also pass raw numeric fields for HELI where available (to enable simple math)
+    heli_nums = {
+        "capacity_lb": m.get("_capacity_lb"),
+        "turning_in": m.get("_turning_in"),
+        "width_in": m.get("_overall_width_in"),
+        "max_lift_in": m.get("_max_lift_height_in"),
+    }
+    heli_num_lines = "\n".join(f"- {k}: {v if v is not None else '—'}" for k, v in heli_nums.items())
+
     system = (
-        "You are a forklift sales engineer. You can use general forklift industry knowledge "
-        "(e.g., typical differences between electric Li-ion vs. IC, 3-wheel vs. 4-wheel, common aisle widths, "
-        "maintenance/charging realities, cold storage considerations) to guide sales conversations. "
-        "Use MODEL_SPEC as ground truth for this HELI model. "
-        "Do NOT invent exact specifications for competitors. Keep brand comparisons generic (e.g., "
-        "“vs many IC trucks”, “compared with typical 3-wheel electrics from other major OEMs”). "
-        "If a detail is missing in MODEL_SPEC, say “Not specified”. Be concise and practical for reps."
+        "You are a forklift sales engineer.\n"
+        "Use the supplied MODEL_SPEC as ground truth for this HELI model.\n"
+        "Use COMP_PEERS and PEER_STATS verbatim for competitor information; DO NOT invent numbers beyond them.\n"
+        "If a detail is missing, say “Not specified”.\n"
+        "Tie reasons to SPEC NUMBERS where possible (capacity, turning, width, lift height, power/drive)."
     )
 
     user = f"""MODEL_SPEC
 {spec_lines}
 
+MODEL_SPEC_NUMERIC
+{heli_num_lines}
+
+{comp_ctx}
 Produce HTML with two <section> blocks, each wrapped with a root <div> that has data-block attribute:
 
 <div data-block="fit">…</div>
 <div data-block="edge">…</div>
 
-1) In data-block="fit", write a skimmable briefing (≈120–160 words) with:
-   • Overview – one sentence on ideal use (who/where).
-   • Why it wins – 4–6 bullets tied strictly to the spec and the precomputed hints.
-   • Best environments – bullets using the spec.
-   • Fit checklist – 5 quick checks to confirm with the customer.
-   • Watchouts – 2–4 bullets only if relevant.
+### FIT BLOCK REQUIREMENTS (go deeper on specs)
+In <div data-block="fit">:
+- Start with a 1–2 sentence Overview (ideal use: who/where/why).
+- Key Specs (list): use the values from MODEL_SPEC; include Capacity, Load Center, Turning Radius, Overall Width, Max Lift Height, Power, Drive Type, Controller.
+- Why It Wins (5–7 bullets): tie each bullet to a SPEC number or factual attribute (e.g., “Turning radius X in supports aisles Y–Z in”, “Li-ion → opportunity charging, lower PM”).
+- Best Environments (3–5 bullets) using Indoor/Outdoors/Special Environments.
+- Fit Checklist (5 bullets): each bullet is a yes/no check referencing a SPEC (e.g., “≥ required capacity?” “Aisles ≥ turning requirement?”).
+- Watchouts (2–4 bullets): only if appropriate; mention missing specs as “Not specified”.
 
-2) In data-block="edge", write a short “Competitive Edge vs Other Brands” (≈90–130 words) that:
-   • Uses general forklift knowledge.
-   • Explains how this HELI model could compare to similar trucks from other major OEMs WITHOUT asserting specific competitor specs.
-   • Frames claims responsibly (e.g., “typically”, “often”, “many fleets find”, “vs most IC trucks”).
-   • Anchors talking points on what we do know from MODEL_SPEC (power type, drive type, turning/width, capacity, controller if present).
-
-Use short paragraphs and bullets, avoid fluff, and DO NOT output anything outside the two root blocks.
+### EDGE BLOCK REQUIREMENTS (compare to real peers)
+In <div data-block="edge">:
+- One short paragraph explaining how this HELI model stacks up vs peers based on COMP_PEERS/PEER_STATS (no fabrication).
+- Mini table (HTML <table>) comparing HELI vs peers (brand/model, capacity lb, turning in, width in, fuel). Use “—” if missing.
+- 'Where HELI Stands Out' (3–5 bullets): Use numbers to make claims when HELI is better than the PEER_STATS average (e.g., “Turning X in vs peer avg Y in”); if not better, pick other angles (power type, maintenance, controller, environments) grounded in MODEL_SPEC.
+- Tone: factual and responsible. No claims beyond supplied data. Keep it concise and sales-usable.
 """
 
     try:
@@ -1250,7 +1268,7 @@ Use short paragraphs and bullets, avoid fluff, and DO NOT output anything outsid
             model="gpt-4o-mini",
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": user}],
-            temperature=0.3,
+            temperature=0.25,
         )
         html = resp.choices[0].message.content.strip()
         if 'data-block="fit"' not in html or 'data-block="edge"' not in html:
@@ -1396,6 +1414,79 @@ def _peer_table_html(peers: list):
         + "".join(rows) +
         "</tbody></table></div>"
     )
+
+def _peer_stats(peers: list[dict]) -> dict:
+    """Compute simple ranges/averages for capacity/turning/width and list fuels."""
+    vals = {"capacity_lb": [], "turning_in": [], "width_in": []}
+    fuels = set()
+    for p in peers or []:
+        for k in vals.keys():
+            v = p.get(k)
+            try:
+                if v is None or str(v).strip() == "":
+                    continue
+                vals[k].append(float(v))
+            except Exception:
+                pass
+        fu = (p.get("fuel") or p.get("power") or "").strip()
+        if fu:
+            fuels.add(fu.title())
+
+    def stat(arr):
+        if not arr:
+            return None, None, None
+        return min(arr), (sum(arr) / len(arr)), max(arr)
+
+    cmin, cavg, cmax = stat(vals["capacity_lb"])
+    tmin, tavg, tmax = stat(vals["turning_in"])
+    wmin, wavg, wmax = stat(vals["width_in"])
+    return {
+        "capacity": {"min": cmin, "avg": cavg, "max": cmax},
+        "turning":  {"min": tmin, "avg": tavg, "max": tmax},
+        "width":    {"min": wmin, "avg": wavg, "max": wmax},
+        "fuels": sorted(fuels),
+    }
+
+def _build_comp_context(heli_model: dict, peers: list[dict]) -> str:
+    """
+    Produce a compact block the LLM can use directly. Includes each peer row
+    plus aggregated stats (min/avg/max) for capacity/turning/width and a fuel list.
+    """
+    if not peers:
+        return "COMP_PEERS\n- None found\nPEER_STATS\n- N/A\n"
+
+    stats = _peer_stats(peers)
+    lines = []
+    lines.append("COMP_PEERS")
+    for p in peers:
+        brand = p.get("brand", "")
+        model = p.get("model", "")
+        fam   = p.get("family", "")
+        cap   = p.get("capacity_lb", None)
+        turn  = p.get("turning_in", None)
+        wid   = p.get("width_in", None)
+        fuel  = (p.get("fuel") or p.get("power") or "").title()
+        cap_s = f"{int(round(float(cap))):,} lb" if cap else "—"
+        turn_s= f"{int(round(float(turn))):,} in" if turn else "—"
+        wid_s = f"{int(round(float(wid))):,} in" if wid else "—"
+        lines.append(f"- {brand} {model} | Family: {fam or '—'} | Capacity: {cap_s} | Turning: {turn_s} | Width: {wid_s} | Fuel: {fuel or '—'}")
+
+    def _fmt_rng(d, unit):
+        if not d: return "—"
+        mn = f"{int(round(d['min'])):,} {unit}" if d['min'] is not None else "—"
+        av = f"{int(round(d['avg'])):,} {unit}" if d['avg'] is not None else "—"
+        mx = f"{int(round(d['max'])):,} {unit}" if d['max'] is not None else "—"
+        return f"min {mn} | avg {av} | max {mx}"
+
+    lines.append("")
+    lines.append("PEER_STATS")
+    lines.append(f"- Capacity: {_fmt_rng(stats.get('capacity'), 'lb')}")
+    lines.append(f"- Turning: {_fmt_rng(stats.get('turning'), 'in')}")
+    lines.append(f"- Width: {_fmt_rng(stats.get('width'), 'in')}")
+    fuels = ", ".join(stats.get("fuels", [])) or "—"
+    lines.append(f"- Fuels: {fuels}")
+
+    return "\n".join(lines) + "\n"
 
 @app.get("/api/competitor_peers")
 def api_competitor_peers():
