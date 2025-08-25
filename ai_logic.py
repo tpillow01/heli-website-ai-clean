@@ -428,3 +428,38 @@ def allowed_models_block(allowed: list[str]) -> str:
     if not allowed:
         return "ALLOWED MODELS:\n(none – say 'No exact match from our lineup.')"
     return "ALLOWED MODELS:\n" + "\n".join(f"- {x}" for x in allowed)
+
+def debug_parse_and_rank(user_q: str, limit: int = 10):
+    want = _parse_requirements(user_q)
+    rows = []
+    for m in models_raw:
+        cap = _capacity_of(m) or 0.0
+        powr = _power_of(m)
+        tire = _tire_of(m)
+        ais  = _aisle_of(m)
+        hgt  = _height_of(m)
+        reach_like = _is_reach_or_vna(m)
+
+        # same scoring as filter_models
+        s = 0.0
+        if want["cap_lbs"] and cap:
+            over = (cap - want["cap_lbs"]) / want["cap_lbs"]
+            s += (2.0 - min(2.0, max(0.0, over))) if over >= 0 else -5.0
+        if want["power_pref"]: s += 1.2 if want["power_pref"] in powr else -0.6
+        if want["tire_pref"]:  s += 0.6 if want["tire_pref"]  in tire else -0.2
+        if want["aisle_in"]:
+            if ais: s += 0.8 if ais <= want["aisle_in"] else -1.0
+            else:   s += 0.6 if (want["narrow"] and reach_like) else 0.0
+        elif want["narrow"]:
+            s += 0.8 if reach_like else -0.2
+        if want["height_in"] and hgt: s += 0.4 if hgt >= want["height_in"] else -0.3
+        s += 0.05
+
+        rows.append({
+            "model": _safe_model_name(m),
+            "score": round(s, 3),
+            "cap_lbs": cap, "power": powr, "tire": tire,
+            "aisle_in": ais, "height_in": hgt
+        })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return {"parsed": want, "top": rows[:limit]}

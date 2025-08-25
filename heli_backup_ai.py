@@ -288,25 +288,27 @@ def chat():
         ai_reply = _strip_prompt_leak(ai_reply)
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
-    # ───────── Recommendation mode with strict grounding ─────────
+# ───────── Recommendation mode with strict grounding ─────────
+from ai_logic import (
+    generate_forklift_context,
+    select_models_for_question,
+    allowed_models_block,
+    get_account  # used by find_account_by_name
+)
+
+def find_account_by_name(text: str):
+    # thin wrapper to keep your existing name
+    return get_account(text)
+
+def run_recommendation_flow(user_q: str) -> str:
+    # Build context WITHOUT prepending account text into the parser input
     acct = find_account_by_name(user_q)
-    context_input = user_q
-    if acct:
-        profile_ctx = (
-            "Customer Profile:\n"
-            f"- Company: {acct.get('Account Name')}\n"
-            f"- Industry: {acct.get('Industry', 'N/A')}\n"
-            f"- SIC Code: {acct.get('SIC Code', 'N/A')}\n"
-            f"- Fleet Size: {acct.get('Total Company Fleet Size', 'N/A')}\n"
-            f"- Truck Types: {acct.get('Truck Types at Location', 'N/A')}\n\n"
-        )
-        context_input = profile_ctx + user_q
+    prompt_ctx = generate_forklift_context(user_q, acct)
 
-    prompt_ctx = generate_forklift_context(context_input, acct)
-
-    # Select 3–5 best-fit models from models.json for THIS question
+    # strict grounding list
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
+    print(f"[recommendation] allowed models: {allowed}")
 
     system_prompt = {
         "role": "system",
@@ -347,9 +349,27 @@ def chat():
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
-    # Enforce allowed models & remove any leaked instruction sections
+    # If your app already defines _enforce_allowed_models, this will work as-is.
+    # If not, uncomment the no-op implementation below.
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    return jsonify({"response": ai_reply})
+    return ai_reply
+
+# --- OPTIONAL: no-op if _enforce_allowed_models isn't defined elsewhere ---
+# def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
+#     return text
+
+from ai_logic import debug_parse_and_rank
+
+@app.post("/api/debug_recommend")
+def api_debug_recommend():
+    data = request.get_json(silent=True) or {}
+    user_q = (
+        data.get("q") or data.get("question") or
+        request.form.get("q") or request.form.get("question") or ""
+    ).strip()
+    if not user_q:
+        return jsonify({"error": "Missing 'q'"}), 400
+    return jsonify(debug_parse_and_rank(user_q, limit=10))
 
 # ─── Modes list ──────────────────────────────────────────────────────────
 @app.route("/api/modes")
