@@ -1,4 +1,4 @@
-""" 
+"""
 Pure helper module: account lookup + model filtering + prompt context builder
 Grounds model picks strictly on models.json and parses user needs robustly.
 """
@@ -7,26 +7,38 @@ import json, re, difflib
 from typing import List, Dict, Any, Tuple
 
 # ── load JSON once -------------------------------------------------------
-with open("accounts.json", "r", encoding="utf-8") as f:
-    accounts_raw = json.load(f)
+def _load_json(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-with open("models.json", "r", encoding="utf-8") as f:
-    models_raw: List[Dict[str, Any]] = json.load(f)
+accounts_raw = _load_json("accounts.json")
+models_raw   = _load_json("models.json")
+
+# In case models.json is wrapped like {"models":[...]}
+if not isinstance(models_raw, list):
+    if isinstance(models_raw, dict) and "models" in models_raw and isinstance(models_raw["models"], list):
+        models_raw = models_raw["models"]
+    else:
+        models_raw = []
+
+print(f"[ai_logic] Loaded accounts: {len(accounts_raw)} | models: {len(models_raw)}")
 
 # Common key aliases we’ll look for in models.json
 CAPACITY_KEYS = [
     "Capacity_lbs", "capacity_lbs", "Capacity", "Rated Capacity", "Load Capacity",
-    "Capacity (lbs)", "capacity", "LoadCapacity", "capacityLbs", "RatedCapacity"
+    "Capacity (lbs)", "capacity", "LoadCapacity", "capacityLbs", "RatedCapacity",
+    "Load Capacity (lbs)", "Rated Capacity (lbs)"
 ]
 HEIGHT_KEYS = [
     "Lift Height_in", "Max Lift Height (in)", "Lift Height", "Max Lift Height",
-    "Mast Height", "lift_height_in", "LiftHeight"
+    "Mast Height", "lift_height_in", "LiftHeight", "Lift Height (in)", "Mast Height (in)"
 ]
 AISLE_KEYS = [
-    "Aisle_min_in", "Aisle Width_min_in", "Aisle Width (in)", "Min Aisle (in)"
+    "Aisle_min_in", "Aisle Width_min_in", "Aisle Width (in)", "Min Aisle (in)",
+    "Right Angle Aisle (in)", "Right-Angle Aisle (in)", "RA Aisle (in)"
 ]
-POWER_KEYS = ["Power", "power", "Fuel", "fuel", "Drive"]
-TYPE_KEYS  = ["Type", "Category", "Segment", "Class"]
+POWER_KEYS = ["Power", "power", "Fuel", "fuel", "Drive", "Power Type", "PowerType"]
+TYPE_KEYS  = ["Type", "Category", "Segment", "Class", "Class/Type", "Truck Type"]
 
 # ── account helpers ------------------------------------------------------
 def get_account(text: str) -> Dict[str, Any] | None:
@@ -88,7 +100,7 @@ def _num_from_keys(row: Dict[str,Any], keys: List[str]) -> float | None:
     return None
 
 def _normalize_capacity_lbs(row: Dict[str,Any]) -> float | None:
-    # Try lbs directly
+    # Try lbs directly with unit detection
     for k in CAPACITY_KEYS:
         if k in row:
             s = str(row[k])
@@ -96,8 +108,12 @@ def _normalize_capacity_lbs(row: Dict[str,Any]) -> float | None:
             if re.search(r"\bkg\b", s, re.I):
                 v = _num(s)
                 return _to_lbs(v, "kg") if v is not None else None
-            if re.search(r"\btons?\b", s, re.I):
+            if re.search(r"\btons?\b|\btonne\b|\bmetric\s*ton\b|\b(?<!f)\bt\b", s, re.I):
                 v = _num(s)
+                # assume US ton unless clearly "metric"
+                if re.search(r"metric|tonne|\b(?<!f)\bt\b", s, re.I):
+                    # treat "t" as metric ton common in specs
+                    return _to_lbs(v, "metric ton") if v is not None else None
                 return _to_lbs(v, "ton") if v is not None else None
             v = _num(s)
             return v
@@ -200,13 +216,16 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)              # “5 ton(s)”
     if m: return (int(round(_n(m.group(1))*2000)), None)
 
-    # bare 4–5 digit number → assume lb
-    m = re.search(r'\b(\d{4,5})\b', t)
-    if m: return (int(m.group(1)), None)
+    # SAFER fallback:
+    # Only treat a bare 4–5 digit number as lb if it clearly appears near load words,
+    # so SIC/ZIP/fleet-size lines don't poison intent.
+    near = re.search(rf'{LOAD_WORDS}\D{{0,12}}(\d{{4,5}})\b', t)
+    if near:
+        return (int(near.group(1)), None)
 
     return (None, None)
 
-# --- parse requirements (REPLACE) ----------------------------------------
+# --- parse requirements ---------------------------------------------------
 def _parse_requirements(q: str) -> Dict[str,Any]:
     ql = q.lower()
 
@@ -298,7 +317,7 @@ def _power_of(row: Dict[str,Any]) -> str:
     return _text_from_keys(row, POWER_KEYS).lower()
 
 def _tire_of(row: Dict[str,Any]) -> str:
-    return str(row.get("Tire Type","") or row.get("Tires","")).lower()
+    return str(row.get("Tire Type","") or row.get("Tires","") or row.get("Tire","")).lower()
 
 def _safe_model_name(m: Dict[str, Any]) -> str:
     for k in ("Model","model","code","name","Code"):
@@ -306,7 +325,7 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
             return str(m[k]).strip()
     return "N/A"
 
-# --- model filtering & ranking (REPLACE the fallback) --------------------
+# --- model filtering & ranking ------------------------------------------
 def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
     want = _parse_requirements(user_q)
     cap_need   = want["cap_lbs"]
@@ -316,7 +335,7 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
     tire_pref  = want["tire_pref"]
     height_need= want["height_in"]
 
-    # track if we parsed anything meaningful
+    # track if we parsed anything meaningful (still used for heuristics, but no longer hard-blocking)
     parsed_any = any([cap_need, aisle_need, power_pref, tire_pref, height_need,
                       want["indoor"], want["outdoor"], want["narrow"]])
 
@@ -331,8 +350,10 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
         reach_like = _is_reach_or_vna(m)
 
         # hard filters
-        if cap_need and cap > 0 and cap < cap_need: continue
-        if aisle_need and ais and ais > aisle_need: continue
+        if cap_need and cap > 0 and cap < cap_need: 
+            continue
+        if aisle_need and ais and ais > aisle_need: 
+            continue
 
         s = 0.0
         if cap_need and cap:
@@ -347,11 +368,12 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
             s += 0.8 if reach_like else -0.2
         if height_need and hgt: s += 0.4 if hgt >= height_need else -0.3
 
+        # small prior to avoid ties
         s += 0.05
         scored.append((s, m))
 
-    # If nothing matched OR nothing was parsed, return [] so UI prints “No exact match…”
-    if not scored or not parsed_any:
+    # IMPORTANT: Allow results even if parsing was weak; only bail if *nothing* scored
+    if not scored:
         return []
 
     ranked = sorted(scored, key=lambda t: t[0], reverse=True)
@@ -359,6 +381,11 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
 
 # ── build final prompt chunk --------------------------------------------
 def generate_forklift_context(user_q: str, acct: Dict[str, Any] | None) -> str:
+    """
+    IMPORTANT: Pass ONLY the raw user question to this function from app.py.
+    The account block is added here (not mixed into user_q), so the parser
+    isn't poisoned by SIC/ZIP/fleet-size numbers.
+    """
     lines: list[str] = []
     if acct:
         lines.append(customer_block(acct))
