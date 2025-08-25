@@ -195,6 +195,75 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     text = _tidy_formatting(text)
     return _strip_prompt_leak(text)
 
+# --- Helpers to clean the LLM output ------------------------------------
+
+def _unify_model_mentions(text: str, allowed: list[str]) -> str:
+    """
+    Make sure every model name outside the Model: section refers to the Top Pick.
+    We only rewrite codes that appear in the allowed list (to avoid overreach).
+    """
+    if not isinstance(text, str) or not text.strip() or not allowed:
+        return text
+
+    # Grab the Model: section
+    sec_pat = r'(?s)(?:^|\n)Model:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
+    msec = re.search(sec_pat, text)
+    if not msec:
+        return text
+
+    model_sec = msec.group(0)
+    body = text[:msec.start()] + '<<MODEL_SECTION>>' + text[msec.end():]
+
+    # Find Top Pick inside the section
+    mtop = re.search(r'-\s*Top Pick:\s*([A-Za-z0-9().\- ]+)', model_sec)
+    if not mtop:
+        return text  # nothing to unify if we don't have a top pick
+
+    top = mtop.group(1).strip()
+
+    # Replace other allowed codes with Top Pick everywhere OUTSIDE the Model: section
+    for code in allowed:
+        code = code.strip()
+        if not code or code == top:
+            continue
+        body = re.sub(rf'\b{re.escape(code)}\b', top, body)
+
+    return body.replace('<<MODEL_SECTION>>', model_sec)
+
+
+def _fix_common_objections(text: str) -> str:
+    """
+    Normalize Common Objections bullets, avoid truncation, and ensure each line
+    ends with a 'Next:' guidance if missing.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return text
+
+    pat = r'(?s)(?:^|\n)Common Objections:\n(.*?)(?=\n[A-Z][^\n]*:|\Z)'
+    m = re.search(pat, text)
+    if not m:
+        return text
+
+    block = m.group(1)
+    # split, keep non-empty lines, strip extra whitespace/dashes
+    raw_lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    cleaned = []
+    for ln in raw_lines:
+        s = ln.lstrip('- ').strip()
+        # collapse multiple spaces
+        s = re.sub(r'\s{2,}', ' ', s)
+        # ensure we have a “Next:” suggestion
+        if 'Next:' not in s:
+            s = s.rstrip('. ')
+            s += '; Next: Schedule a quick site walk to confirm spec.'
+        cleaned.append(f'- {s}')
+        if len(cleaned) >= 8:  # keep it tight
+            break
+
+    new_block = "Common Objections:\n" + "\n".join(cleaned) + "\n"
+    return re.sub(pat, "\n" + new_block, text)
+
+
 def _tidy_formatting(text: str) -> str:
     if not isinstance(text, str):
         return text
@@ -275,6 +344,10 @@ def run_recommendation_flow(user_q: str) -> str:
         ai_reply = f"❌ Internal error: {e}"
 
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
+    ai_reply = _unify_model_mentions(ai_reply, allowed)  # keep talk-tracks aligned to Top Pick
+    ai_reply = _fix_common_objections(ai_reply)          # prevent truncation + add "Next:" guidance
+    ai_reply = _tidy_formatting(ai_reply)                # tighten spacing/blank lines
+
     return ai_reply
 
 # ─── Chat API (Recommendation + Inquiry) ─────────────────────────────────
