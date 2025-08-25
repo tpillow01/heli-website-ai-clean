@@ -336,6 +336,10 @@ def run_recommendation_flow(user_q: str) -> str:
     allowed_block = allowed_models_block(allowed)
     print(f"[recommendation] allowed models: {allowed}")
 
+    # NEW: competitor peer numbers for the Top Pick (from heli_comp_models.json)
+    # k=6 so more brands get a chance to appear if available
+    comp_block = _build_competitor_block_for_model(allowed[0], k=6) if allowed else "COMPETITOR PEERS:\n(none)"
+
     system_prompt = {
         "role": "system",
         "content": (
@@ -366,33 +370,35 @@ def run_recommendation_flow(user_q: str) -> str:
             "- Common Objections: 6–8 items, one line each in this pattern and level of detail:\n"
             "  '- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <grounded fact>; Next: <small action>'.\n"
             "- Never invent pricing, availability, or specs not present in the context.\n"
+            "- For the Comparison section, USE ONLY the numbers from the COMPETITOR PEERS block "
+            "(capacity/turning/width/fuel). Write 2–4 concise bullets contrasting the Top Pick versus those peers. "
+            "Do not invent other specs; do not restate peers not listed.\n"
         )
     }
 
     messages = [
         system_prompt,
-        {"role": "system", "content": allowed_block},  # strict grounding list
+        {"role": "system", "content": allowed_block},   # strict grounding list
+        {"role": "system", "content": comp_block},      # grounded competitor numbers
         {"role": "user",   "content": prompt_ctx}
     ]
 
     try:
         resp = client.chat.completions.create(
-            model=os.getenv("OAI_MODEL", "gpt-4o-mini"),  # fast + good; override via env if you want
+            model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             messages=messages,
-            max_tokens=650,   # a bit smaller to keep it punchy
-            temperature=0.4   # concise, still a touch salesy
+            max_tokens=650,
+            temperature=0.4
         )
         ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    ai_reply = _unify_model_mentions(ai_reply, allowed)  # if you added this earlier
-    ai_reply = _fix_labels_and_breaks(ai_reply)          # <<< new
-    ai_reply = _fix_common_objections(ai_reply)          # <<< improved tidy
-    ai_reply = _tidy_formatting(ai_reply)                # keep spacing neat
-
-
+    ai_reply = _unify_model_mentions(ai_reply, allowed)  # keep if you added earlier
+    ai_reply = _fix_labels_and_breaks(ai_reply)          # keep formatting fixes
+    ai_reply = _fix_common_objections(ai_reply)          # tidy objections
+    ai_reply = _tidy_formatting(ai_reply)                # final whitespace pass
     return ai_reply
 
 # ─── Chat API (Recommendation + Inquiry) ─────────────────────────────────
@@ -1575,6 +1581,62 @@ def api_competitor_peers():
 
     # Also return the rows if you want to render in the client
     return jsonify({"html": html, "rows": peers})
+
+# --- Chat competitor helpers --------------------------------------------------
+
+def _normkey(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+def _find_heli_model_by_name_loose(name: str):
+    """Match a HELI model by name against the normalized models from _load_models()."""
+    if not name:
+        return None
+    target = _normkey(name)
+    pool = _load_models()
+    # exact (normalized) match
+    for m in pool:
+        if _normkey(m.get("model")) == target:
+            return m
+    # close match fallback
+    try:
+        import difflib
+        names = [m.get("model","") for m in pool]
+        match = difflib.get_close_matches(name, names, n=1, cutoff=0.82)
+        if match:
+            for m in pool:
+                if m.get("model") == match[0]:
+                    return m
+    except Exception:
+        pass
+    return None
+
+def _build_competitor_block_for_model(heli_model_name: str, k: int = 4) -> str:
+    """
+    Returns a compact, numeric peer list the model can use directly.
+    Example:
+    COMPETITOR PEERS:
+    - CAT GC40K: 8,000 lb; turn 90 in; width 47 in; LPG
+    """
+    if not heli_model_name:
+        return "COMPETITOR PEERS:\n(none)"
+    heli = _find_heli_model_by_name_loose(heli_model_name)
+    if not heli:
+        return "COMPETITOR PEERS:\n(none)"
+    peers = find_best_competitors(heli, K=k) or []
+    if not peers:
+        return "COMPETITOR PEERS:\n(none)"
+
+    lines = ["COMPETITOR PEERS:"]
+    for p in peers:
+        cap  = _as_lb(p.get("capacity_lb"))
+        turn = _as_in(p.get("turning_in"))
+        wid  = _as_in(p.get("width_in"))
+        fuel = (p.get("fuel") or "—")
+        brand = (p.get("brand") or "").strip()
+        model = (p.get("model") or "").strip()
+        lines.append(f"- {brand} {model}: {cap}; turn {turn}; width {wid}; {fuel}")
+    return "\n".join(lines)
+
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
