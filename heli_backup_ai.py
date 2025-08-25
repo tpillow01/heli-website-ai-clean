@@ -1189,7 +1189,7 @@ def api_ai_fit():
     if not m:
         return jsonify({"error": "Model not found"}), 404
 
-    # Build spec for HELI model (ground truth)
+    # HELI model ground truth
     model_spec = {
         "Brand": "HELI",
         "Model": m["model"],
@@ -1212,12 +1212,7 @@ def api_ai_fit():
     }
     spec_lines = "\n".join(f"- {k}: {v}" for k, v in model_spec.items())
 
-    # Find and summarize closest competitors from heli_comp_models.json
-    K = 3
-    peers = find_best_competitors(m, K=K)
-    comp_ctx = _build_comp_context(m, peers)
-
-    # Also pass raw numeric fields for HELI where available (to enable simple math)
+    # Numeric cache for HELI (lets the LLM do light math properly)
     heli_nums = {
         "capacity_lb": m.get("_capacity_lb"),
         "turning_in": m.get("_turning_in"),
@@ -1226,12 +1221,17 @@ def api_ai_fit():
     }
     heli_num_lines = "\n".join(f"- {k}: {v if v is not None else '—'}" for k, v in heli_nums.items())
 
+    # Build brand-coverage peer set and our own clean HTML table
+    peers = find_brand_coverage_peers(m, max_rows=12)
+    comp_ctx = _build_comp_context(m, peers)  # uses your existing stats builder
+    peer_table_html = _peer_table_html(peers) # consistent spacing & styling
+
+    # Prompt: model writes text and inserts [[PEER_TABLE]] token; we replace it afterward
     system = (
         "You are a forklift sales engineer.\n"
-        "Use the supplied MODEL_SPEC as ground truth for this HELI model.\n"
-        "Use COMP_PEERS and PEER_STATS verbatim for competitor information; DO NOT invent numbers beyond them.\n"
-        "If a detail is missing, say “Not specified”.\n"
-        "Tie reasons to SPEC NUMBERS where possible (capacity, turning, width, lift height, power/drive)."
+        "Use MODEL_SPEC and MODEL_SPEC_NUMERIC as ground truth for this HELI model.\n"
+        "Use COMP_PEERS / PEER_STATS verbatim for competitor info. Do NOT invent numbers.\n"
+        "Do not wrap your output in <html> or <body>. Do not add horizontal rules."
     )
 
     user = f"""MODEL_SPEC
@@ -1246,21 +1246,21 @@ Produce HTML with two <section> blocks, each wrapped with a root <div> that has 
 <div data-block="fit">…</div>
 <div data-block="edge">…</div>
 
-### FIT BLOCK REQUIREMENTS (go deeper on specs)
+### FIT BLOCK (deep spec briefing)
 In <div data-block="fit">:
-- Start with a 1–2 sentence Overview (ideal use: who/where/why).
-- Key Specs (list): use the values from MODEL_SPEC; include Capacity, Load Center, Turning Radius, Overall Width, Max Lift Height, Power, Drive Type, Controller.
-- Why It Wins (5–7 bullets): tie each bullet to a SPEC number or factual attribute (e.g., “Turning radius X in supports aisles Y–Z in”, “Li-ion → opportunity charging, lower PM”).
-- Best Environments (3–5 bullets) using Indoor/Outdoors/Special Environments.
-- Fit Checklist (5 bullets): each bullet is a yes/no check referencing a SPEC (e.g., “≥ required capacity?” “Aisles ≥ turning requirement?”).
-- Watchouts (2–4 bullets): only if appropriate; mention missing specs as “Not specified”.
+- 1–2 sentence Overview (who/where/why).
+- Key Specs (list): Capacity, Load Center, Turning Radius, Overall Width, Max Lift Height, Power, Drive Type, Controller.
+- Why It Wins (5–7 bullets): tie each bullet to a SPEC number or clear attribute.
+- Best Environments (3–5 bullets).
+- Fit Checklist (5 bullets) referencing concrete specs.
+- Watchouts (2–4 bullets; mention “Not specified” where relevant).
 
-### EDGE BLOCK REQUIREMENTS (compare to real peers)
+### EDGE BLOCK (comparison vs peers)
 In <div data-block="edge">:
-- One short paragraph explaining how this HELI model stacks up vs peers based on COMP_PEERS/PEER_STATS (no fabrication).
-- Mini table (HTML <table>) comparing HELI vs peers (brand/model, capacity lb, turning in, width in, fuel). Use “—” if missing.
-- 'Where HELI Stands Out' (3–5 bullets): Use numbers to make claims when HELI is better than the PEER_STATS average (e.g., “Turning X in vs peer avg Y in”); if not better, pick other angles (power type, maintenance, controller, environments) grounded in MODEL_SPEC.
-- Tone: factual and responsible. No claims beyond supplied data. Keep it concise and sales-usable.
+- One concise paragraph explaining how this HELI model stacks up vs peers using COMP_PEERS/PEER_STATS only.
+- Insert this exact token on its own line where the comparison table should appear:
+[[PEER_TABLE]]
+- Then add 'Where HELI Stands Out' (3–5 bullets). Use numbers to support claims when HELI beats the peer averages; otherwise focus on power/maintenance/environments grounded in MODEL_SPEC.
 """
 
     try:
@@ -1271,6 +1271,11 @@ In <div data-block="edge">:
             temperature=0.25,
         )
         html = resp.choices[0].message.content.strip()
+        # Inject our clean table and tidy spacing/wrappers
+        html = html.replace('[[PEER_TABLE]]', peer_table_html)
+        html = _strip_root_html(html)
+        html = _collapse_table_spacing(html)
+
         if 'data-block="fit"' not in html or 'data-block="edge"' not in html:
             html = (
                 "<div data-block=\"fit\"><p>Briefing unavailable.</p></div>"
@@ -1487,6 +1492,65 @@ def _build_comp_context(heli_model: dict, peers: list[dict]) -> str:
     lines.append(f"- Fuels: {fuels}")
 
     return "\n".join(lines) + "\n"
+
+def _strip_root_html(text: str) -> str:
+    """Remove <html>/<body> wrappers, code fences, and horizontal rules."""
+    if not isinstance(text, str) or not text.strip():
+        return text
+    t = text
+    # code fences
+    t = re.sub(r'```(?:html|HTML)?\s*', '', t).replace('```', '')
+    # <html>/<body> wrappers
+    t = re.sub(r'(?is)^\s*<html[^>]*>\s*<body[^>]*>\s*', '', t)
+    t = re.sub(r'(?is)\s*</body>\s*</html>\s*$', '', t)
+    # horizontal rules
+    t = re.sub(r'(?m)^\s*[-_]{3,}\s*$', '', t)
+    t = re.sub(r'(?is)<hr[^>]*>\s*', '', t)
+    return t.strip()
+
+def _collapse_table_spacing(text: str) -> str:
+    """Tidy whitespace: collapse blank lines and trim trailing spaces."""
+    if not isinstance(text, str) or not text.strip():
+        return text
+    t = re.sub(r'\n{3,}', '\n\n', text)
+    t = re.sub(r'[ \t]+\n', '\n', t)
+    return t.strip()
+
+def find_brand_coverage_peers(heli_model: dict, max_rows: int = 10, per_brand: int = 1):
+    """
+    Pick the best comparable for as many brands as possible (one per brand),
+    prioritizing same family and closest capacity/geometry.
+    """
+    comp = _load_competitors()
+    if not comp:
+        return []
+
+    fam   = _heli_family(heli_model)
+    cap   = heli_model.get("_capacity_lb") or _num_from_text(heli_model.get("capacity"))
+    turn  = heli_model.get("_turning_in") or _num_from_text(heli_model.get("turning_radius"))
+    width = heli_model.get("_overall_width_in") or _num_from_text(heli_model.get("overall_width"))
+
+    scored = []
+    for row in comp:
+        brand = (row.get("brand") or "").strip()
+        if not brand:
+            continue
+        score = 0.0
+        score += 0 if (row.get("family") == fam) else 20.0           # prefer same family
+        score += _dist(cap, row.get("capacity_lb")) / 100.0          # capacity closeness
+        if turn and row.get("turning_in"):
+            score += _dist(turn, row.get("turning_in")) / 75.0       # geometry nudges
+        if width and row.get("width_in"):
+            score += _dist(width, row.get("width_in")) / 75.0
+        scored.append((brand, score, row))
+
+    best_by_brand = {}
+    for brand, score, row in sorted(scored, key=lambda x: x[1]):
+        if best_by_brand.get(brand) is None:
+            best_by_brand[brand] = row
+
+    peers = list(best_by_brand.values())[:max_rows]
+    return peers
 
 @app.get("/api/competitor_peers")
 def api_competitor_peers():
