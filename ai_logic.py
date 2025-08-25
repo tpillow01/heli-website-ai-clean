@@ -6,15 +6,22 @@ Grounds model picks strictly on models.json and parses user needs robustly.
 
 from __future__ import annotations
 import json, re, difflib
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # ── load JSON once -------------------------------------------------------
+
 def _load_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-accounts_raw = _load_json("accounts.json")
-models_raw   = _load_json("models.json")
+try:
+    accounts_raw = _load_json("accounts.json")
+except Exception:
+    accounts_raw = []
+try:
+    models_raw = _load_json("models.json")
+except Exception:
+    models_raw = []
 
 # In case models.json is wrapped like {"models":[...]} or {"data":[...]}
 if not isinstance(models_raw, list):
@@ -44,11 +51,12 @@ AISLE_KEYS = [
     "Aisle_min_in", "Aisle Width_min_in", "Aisle Width (in)", "Min Aisle (in)",
     "Right Angle Aisle (in)", "Right-Angle Aisle (in)", "RA Aisle (in)"
 ]
-POWER_KEYS = ["Power", "power", "Fuel", "fuel", "Drive", "Power Type", "PowerType"]
-TYPE_KEYS  = ["Type", "Category", "Segment", "Class", "Class/Type", "Truck Type", "Description"]
+POWER_KEYS = ["Power", "power", "Fuel", "fuel", "Drive", "Drive Type", "Power Type", "PowerType"]
+TYPE_KEYS  = ["Type", "Category", "Segment", "Class", "Class/Type", "Truck Type"]
 
 # ── account helpers ------------------------------------------------------
-def get_account(text: str) -> Dict[str, Any] | None:
+
+def get_account(text: str) -> Optional[Dict[str, Any]]:
     low = text.lower()
     for acct in accounts_raw:  # substring pass
         name = str(acct.get("Account Name","")).lower()
@@ -75,7 +83,8 @@ def customer_block(acct: Dict[str, Any]) -> str:
         f"- Truck Types: {acct.get('Truck Types at Location', 'N/A')}\n\n"
     )
 
-# ── numeric/unit helpers -------------------------------------------------
+# ── parsing & normalization helpers -------------------------------------
+
 def _to_lbs(val: float, unit: str) -> float:
     u = unit.lower()
     if "kg" in u:
@@ -92,11 +101,56 @@ def _to_inches(val: float, unit: str) -> float:
         return float(val) * 12.0
     return float(val)
 
-def _num(s: Any) -> float | None:
+def _num(s: Any) -> Optional[float]:
     if s is None:
         return None
     m = re.search(r"-?\d+(?:\.\d+)?", str(s))
     return float(m.group(0)) if m else None
+
+def _num_from_keys(row: Dict[str,Any], keys: List[str]) -> Optional[float]:
+    for k in keys:
+        if k in row and str(row[k]).strip() != "":
+            v = _num(row[k])
+            if v is not None:
+                return v
+    return None
+
+def _normalize_capacity_lbs(row: Dict[str,Any]) -> Optional[float]:
+    """Support values like '5000', '5,000 lb', '3.5t', '3500 kg', '7000 lbs'."""
+    for k in CAPACITY_KEYS:
+        if k in row:
+            s = str(row[k]).strip()
+            if not s:
+                continue
+            # units
+            if re.search(r"\bkg\b", s, re.I):
+                v = _num(s); return _to_lbs(v, "kg") if v is not None else None
+            if re.search(r"\btonne\b|\bmetric\s*ton\b|\b(?<!f)\bt\b", s, re.I):
+                v = _num(s); return _to_lbs(v, "metric ton") if v is not None else None
+            if re.search(r"\btons?\b", s, re.I):
+                v = _num(s); return _to_lbs(v, "ton") if v is not None else None
+            # plain number (assume lb)
+            v = _num(s)
+            return float(v) if v is not None else None
+    return None
+
+def _normalize_height_in(row: Dict[str,Any]) -> Optional[float]:
+    for k in HEIGHT_KEYS:
+        if k in row:
+            s = str(row[k])
+            if re.search(r"\bft\b|'", s, re.I):
+                v = _num(s); return _to_inches(v, "ft") if v is not None else None
+            v = _num(s); return v
+    return None
+
+def _normalize_aisle_in(row: Dict[str,Any]) -> Optional[float]:
+    for k in AISLE_KEYS:
+        if k in row:
+            s = str(row[k])
+            if re.search(r"\bft\b|'", s, re.I):
+                v = _num(s); return _to_inches(v, "ft") if v is not None else None
+            v = _num(s); return v
+    return None
 
 def _text_from_keys(row: Dict[str,Any], keys: List[str]) -> str:
     for k in keys:
@@ -105,157 +159,44 @@ def _text_from_keys(row: Dict[str,Any], keys: List[str]) -> str:
             return str(v)
     return ""
 
-# ── raw field normalizers -----------------------------------------------
-def _normalize_capacity_lbs(row: Dict[str,Any]) -> float | None:
-    # Try lbs directly with unit detection
-    for k in CAPACITY_KEYS:
-        if k in row:
-            s = str(row[k])
-            if re.search(r"\bkg\b", s, re.I):
-                v = _num(s)
-                return _to_lbs(v, "kg") if v is not None else None
-            if re.search(r"\btons?\b|\btonne\b|\bmetric\s*ton\b|\b(?<!f)\bt\b", s, re.I):
-                v = _num(s)
-                if re.search(r"metric|tonne|\b(?<!f)\bt\b", s, re.I):
-                    return _to_lbs(v, "metric ton") if v is not None else None
-                return _to_lbs(v, "ton") if v is not None else None
-            v = _num(s)
-            return v
-    # sometimes JSON already has numeric capacity under a plain key
-    v = row.get("capacity_lb") or row.get("capacityLb") or row.get("RatedCapacity")
-    return float(v) if isinstance(v, (int, float)) else _num(v)
-
-def _normalize_height_in(row: Dict[str,Any]) -> float | None:
-    for k in HEIGHT_KEYS:
-        if k in row:
-            s = str(row[k])
-            if re.search(r"\bft\b|'", s, re.I):
-                v = _num(s)
-                return _to_inches(v, "ft") if v is not None else None
-            v = _num(s)
-            return v
-    return _num(row.get("MaxLiftHeight_in") or row.get("max_lift_height_in"))
-
-def _normalize_aisle_in(row: Dict[str,Any]) -> float | None:
-    for k in AISLE_KEYS:
-        if k in row:
-            s = str(row[k])
-            if re.search(r"\bft\b|'", s, re.I):
-                v = _num(s)
-                return _to_inches(v, "ft") if v is not None else None
-            v = _num(s)
-            return v
-    return _num(row.get("RA_Aisle_in") or row.get("RightAngleAisle_in"))
-
-def _power_of(row: Dict[str,Any]) -> str:
-    return _text_from_keys(row, POWER_KEYS).lower()
-
-def _tire_of(row: Dict[str,Any]) -> str:
-    return str(row.get("Tire Type","") or row.get("Tires","") or row.get("Tire","")).lower()
-
-def _safe_model_name(m: Dict[str, Any]) -> str:
-    for k in ("Model","model","Model Name","ModelName","code","name","Code"):
-        if m.get(k):
-            return str(m[k]).strip()
-    return "N/A"
-
 def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
     t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model","")) + " " + str(row.get("Model Name",""))).lower()
-    return any(w in t for w in ["reach", "vna", "order picker", "turret"]) or re.search(r"\b(cqd|rq|vna)\b", t)
+    if any(word in t for word in ["reach", "vna", "order picker", "turret"]):
+        return True
+    return bool(re.search(r"\b(cqd|rq|vna)\b", t))
 
-# --- family / product-type detection ------------------------------------
-WALKIE_HINTS = [
-    "cbd", "cbt", "cbx", "cbv", "cbdl", "pt", "pallet",
-    "walkie", "walk-behind", "stacker", "reach stacker"
-]
+def _is_three_wheel(row: Dict[str, Any]) -> bool:
+    drive = (str(row.get("Drive Type", "")) + " " + str(row.get("Drive", ""))).lower()
+    model = (str(row.get("Model","")) + " " + str(row.get("Model Name",""))).lower()
+    return ("three wheel" in drive) or ("3-wheel" in drive) or (" 3 wheel" in drive) or ("sq" in model)
 
-def _is_walkie_or_stacker(row: Dict[str, Any]) -> bool:
-    name = (_safe_model_name(row) or "").lower()
-    text = (
-        name + " " +
-        _text_from_keys(row, TYPE_KEYS).lower() + " " +
-        _text_from_keys(row, ["Truck Category", "Truck Type", "Description"]).lower()
-    )
-    return any(tok in text for tok in WALKIE_HINTS)
-
-# --- matching utilities --------------------------------------------------
-def _power_matches(pref: str | None, powr_text: str) -> bool:
+def _power_matches(pref: Optional[str], powr_text: str) -> bool:
     if not pref:
         return True
+    p = pref.lower()
     t = (powr_text or "").lower()
-    if pref == "electric":
-        return ("electric" in t) or ("lith" in t) or ("li-ion" in t) or ("lead" in t)
-    return pref in t
+    if p == "electric":
+        return any(x in t for x in ("electric", "lithium", "li-ion", "lead", "battery"))
+    if p == "lpg":
+        return any(x in t for x in ("lpg", "propane", "lp gas", "gas"))
+    if p == "diesel":
+        return "diesel" in t
+    return p in t
 
-def _tire_matches(pref: str | None, tire_text: str, ql: str) -> bool:
-    if not pref:
-        return True
-    t = (tire_text or "").lower()
-    if pref == "cushion":
-        ok = ("cushion" in t) or ("press-on" in t) or ("press on" in t)
-        if "non-marking" in ql or "non marking" in ql:
-            if t and ("non-mark" not in t):
-                return False
-        return ok
-    if pref == "pneumatic":
-        return ("pneumatic" in t) or ("super elastic" in t) or ("solid pneumatic" in t)
-    return pref in t
+# --- robust capacity intent parser (improved) -----------------------------
 
-# --- attachment extraction / suggestions --------------------------------
-ATTACHMENT_MAP: Dict[str, List[str]] = {
-    "side-shifter": ["side shifter", "sideshifter", "side-shifter"],
-    "fork positioner": ["fork positioner", "fp", "integral fp", "integral fork positioner"],
-    "blue pedestrian light": ["blue light", "blue pedestrian light", "pedestrian light"],
-    "led work lights": ["led lights", "work lights", "led work lights"],
-    "fork extensions": ["fork extension", "extensions"],
-    "paper roll clamp": ["paper roll", "roll clamp"],
-    "carton clamp": ["carton clamp"],
-    "push/pull": ["push pull", "push/pull"],
-    "rotator": ["rotator"],
-}
-
-def _extract_requested_attachments(text: str) -> list[str]:
-    ql = (text or "").lower()
-    found: List[str] = []
-    for key, terms in ATTACHMENT_MAP.items():
-        if any(term in ql for term in terms):
-            found.append(key)
-    # de-dup preserving order
-    out, seen = [], set()
-    for x in found:
-        if x not in seen:
-            seen.add(x); out.append(x)
-    return out
-
-def _suggest_attachments(want: Dict[str, Any], q: str) -> list[str]:
-    out = _extract_requested_attachments(q)
-    ql = (q or "").lower()
-    if want.get("indoor"):
-        if "side-shifter" not in out:
-            out.append("side-shifter")
-        if "fork positioner" not in out and want.get("narrow"):
-            out.append("fork positioner")
-        if ("dock" in ql or "ramp" in ql) and "blue pedestrian light" not in out:
-            out.append("blue pedestrian light")
-        if "led work lights" not in out:
-            out.append("led work lights")
-    if want.get("outdoor") and "led work lights" not in out:
-        out.append("led work lights")
-    # lithium hint
-    if want.get("power_pref") == "electric" and "charger/telemetry" not in out:
-        # represent as one suggestion
-        out.append("charger/telemetry (opportunity charging)")
-    return out[:5]
-
-# --- capacity intent parser ---------------------------------------------
-def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
+def _parse_capacity_lbs_intent(text: str) -> tuple[Optional[int], Optional[int]]:
     """
     Returns (min_required_lb, max_allowed_lb). We use min for filtering.
+    Understands: ~5,000 lb / ≈5000 lb / about 5k / 3.5t / 3.5 tonne / 5k+ /
+    3000-5000 / between 3,000 and 5,000 / up to 6000 / min 5000 / etc.
     """
     if not text:
         return (None, None)
 
     t = text.lower().replace("–", "-").replace("—", "-")
+    t = re.sub(r"[~≈≃∼]", "", t)  # remove approx markers
+    t = re.sub(r"\bapproximately\b|\bapprox\.?\b|\baround\b|\babout\b", "", t)
 
     UNIT_LB     = r'(?:lb\.?|lbs\.?|pound(?:s)?)'
     UNIT_KG     = r'(?:kg|kgs?|kilogram(?:s)?)'
@@ -263,9 +204,18 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     UNIT_TON    = r'(?:ton|tons)'
     KNUM        = r'(\d+(?:\.\d+)?)\s*k\b'
     NUM         = r'(\d[\d,\.]*)'
-    LOAD_WORDS  = r'(?:capacity|load|loads|payload|rating|lift|handle|carry|weight|weigh|weighs|wt)'
+    LOAD_WORDS  = r'(?:capacity|load|payload|rating|lift|handle|carry|weight|wt)'
 
     def _n(s: str) -> float: return float(s.replace(",", ""))
+
+    # 5k+ / 5000+ lb => min
+    m = re.search(rf'(?:{KNUM}|{NUM})\s*\+\s*(?:{UNIT_LB})?', t)
+    if m:
+        val = m.group(1) or m.group(2)
+        v = float(val.replace(",", ""))
+        if m.group(1) is not None:  # KNUM matched
+            return (int(round(v*1000)), None)
+        return (int(round(v)), None)
 
     # ranges “3k-5k”
     m = re.search(rf'{KNUM}\s*-\s*{KNUM}', t)
@@ -291,28 +241,45 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     m = re.search(rf'(?:at least|minimum|min)\s+{NUM}\s*(?:{UNIT_LB})?', t)
     if m: return (int(round(_n(m.group(1)))), None)
 
-    # “payload/load/weight … 7k/5000”
+    # “payload/load/capacity … 7k/5000”
     m = re.search(rf'{LOAD_WORDS}[^0-9k\-]*{KNUM}', t)
     if m: return (int(round(_n(m.group(1))*1000)), None)
-    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}', t)
+    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}\s*(?:{UNIT_LB})?', t)
     if m: return (int(round(_n(m.group(1)))), None)
 
-    # SAFER fallback: only treat a bare 4–5 digit number as lb if near load words
-    near = re.search(rf'{LOAD_WORDS}\D{{0,12}}(\d{{4,5}})\b', t)
+    # explicit units (kg/ton/t/tonne/lb)
+    m = re.search(rf'{KNUM}\s*(?:{UNIT_LB})?\b', t)         # “7k (lb)”
+    if m: return (int(round(_n(m.group(1))*1000)), None)
+    m = re.search(rf'{NUM}\s*{UNIT_LB}\b', t)               # “7000 lb”
+    if m: return (int(round(_n(m.group(1)))), None)
+    m = re.search(rf'{NUM}\s*{UNIT_KG}\b', t)               # “2000 kg”
+    if m: return (int(round(_n(m.group(1))*2.20462)), None)
+    m = re.search(rf'{NUM}\s*{UNIT_TONNE}\b', t)            # “3.5 tonne / 3.5t”
+    if m: return (int(round(_n(m.group(1))*2204.62)), None)
+    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)              # “5 ton(s)”
+    if m: return (int(round(_n(m.group(1))*2000)), None)
+
+    # safer fallback: a 4–5 digit number followed by lb(s)
+    m = re.search(rf'\b(\d[\d,]{{3,5}})\s*(?:{UNIT_LB})\b', t)
+    if m: return (int(m.group(1).replace(",", "")), None)
+
+    # last resort: bare 4–5 digit near load words
+    near = re.search(rf'(?:{LOAD_WORDS})\D{{0,12}}(\d{{4,5}})\b', t)
     if near:
         return (int(near.group(1)), None)
 
     return (None, None)
 
 # --- parse requirements ---------------------------------------------------
+
 def _parse_requirements(q: str) -> Dict[str,Any]:
-    ql = (q or "").lower()
+    ql = q.lower()
 
     # capacity
     cap_min, cap_max = _parse_capacity_lbs_intent(ql)
     cap_lbs = cap_min
 
-    # height (avoid matching aisle numbers)
+    # height: avoid matching “90 in” from an aisle phrase
     height_in = None
     for m in re.finditer(r'(\d[\d,\.]*)\s*(ft|feet|\'|in|\"|inches)\b', ql):
         raw, unit = m.group(1), m.group(2)
@@ -335,7 +302,7 @@ def _parse_requirements(q: str) -> Dict[str,Any]:
             except:
                 height_in = None
 
-    # aisle width (incl. right-angle aisle)
+    # aisle width (includes right-angle aisle variants)
     aisle_in = None
     m = re.search(r'(?:aisle|aisles|aisle width)\D{0,12}(\d[\d,\.]*)\s*(?:in|\"|inches|ft|\')', ql)
     if m:
@@ -353,10 +320,10 @@ def _parse_requirements(q: str) -> Dict[str,Any]:
                            else float(raw.replace(",",""))
             except: pass
 
-    # power preference
+    # power preference (broad synonyms)
     power_pref = None
     if any(w in ql for w in ["zero emission","zero-emission","emissions free","emissions-free","eco friendly",
-                             "eco-friendly","battery powered","battery-powered","battery","lithium",
+                             "eco-friendly","green","battery powered","battery-powered","battery","lithium",
                              "li-ion","li ion","lead acid","lead-acid","electric"]):
         power_pref = "electric"
     if "diesel" in ql: power_pref = "diesel"
@@ -377,32 +344,45 @@ def _parse_requirements(q: str) -> Dict[str,Any]:
                              "off-road","outdoor tires","solid pneumatic","super elastic","foam filled","foam-filled"]):
         tire_pref = tire_pref or "pneumatic"
 
-    # attachments & dock work
-    attachments = _extract_requested_attachments(ql)
-    dock_work   = ("dock" in ql) or ("ramp" in ql)
-
     return dict(
         cap_lbs=cap_lbs, height_in=height_in, aisle_in=aisle_in,
         power_pref=power_pref, indoor=indoor, outdoor=outdoor,
-        narrow=narrow, tire_pref=tire_pref,
-        attachments=attachments, dock_work=dock_work
+        narrow=narrow, tire_pref=tire_pref
     )
 
-# --- accessors -----------------------------------------------------------
-def _capacity_of(row: Dict[str,Any]) -> float | None:
+# ── accessors to raw row fields -----------------------------------------
+
+def _capacity_of(row: Dict[str,Any]) -> Optional[float]:
     return _normalize_capacity_lbs(row)
 
-def _height_of(row: Dict[str,Any]) -> float | None:
+def _height_of(row: Dict[str,Any]) -> Optional[float]:
     return _normalize_height_in(row)
 
-def _aisle_of(row: Dict[str,Any]) -> float | None:
+def _aisle_of(row: Dict[str,Any]) -> Optional[float]:
     return _normalize_aisle_in(row)
 
+def _power_of(row: Dict[str,Any]) -> str:
+    return _text_from_keys(row, POWER_KEYS).lower()
+
+def _tire_of(row: Dict[str,Any]) -> str:
+    t = str(row.get("Tire Type","") or row.get("Tires","") or row.get("Tire","") or "").lower()
+    # normalize common mentions
+    if "cushion" in t or "press" in t:
+        return "cushion" if "non-mark" not in t else "non-marking cushion"
+    if "pneumatic" in t or "solid" in t or "super elastic" in t:
+        return "pneumatic"
+    return t
+
+def _safe_model_name(m: Dict[str, Any]) -> str:
+    for k in ("Model","Model Name","model","code","name","Code"):
+        if m.get(k):
+            return str(m[k]).strip()
+    return "N/A"
+
 # --- model filtering & ranking ------------------------------------------
+
 def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
     want = _parse_requirements(user_q)
-    ql = (user_q or "").lower()
-
     cap_need    = want["cap_lbs"]
     aisle_need  = want["aisle_in"]
     power_pref  = want["power_pref"]
@@ -410,129 +390,77 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
     tire_pref   = want["tire_pref"]
     height_need = want["height_in"]
 
-    allow_walkies = any(w in ql for w in ["pallet", "walkie", "stacker", "cbd", "cbt"])
+    scored: List[Tuple[float, Dict[str,Any]]] = []
 
-    # track if we parsed anything meaningful
-    parsed_any = any([cap_need, aisle_need, power_pref, tire_pref, height_need,
-                      want["indoor"], want["outdoor"], want["narrow"]])
+    for m in models_raw:
+        cap = _capacity_of(m) or 0.0
+        powr = _power_of(m)
+        tire = _tire_of(m)
+        ais  = _aisle_of(m)
+        hgt  = _height_of(m)
+        reach_like = _is_reach_or_vna(m)
+        three_wheel = _is_three_wheel(m)
 
-    def _score_pass(strict_height_aisle: bool) -> List[Tuple[float, Dict[str,Any]]]:
-        scored: List[Tuple[float, Dict[str,Any]]] = []
-        for m in models_raw:
-            # exclude walkies unless explicitly asked
-            if not allow_walkies and _is_walkie_or_stacker(m):
+        # HARD FILTERS
+        if cap_need:
+            # exclude unknown-capacity rows when a minimum is requested
+            if cap <= 0:
                 continue
-
-            cap = _capacity_of(m) or 0.0
-            powr = _power_of(m)
-            tire = _tire_of(m)
-            ais  = _aisle_of(m)
-            hgt  = _height_of(m)
-            reach_like = _is_reach_or_vna(m)
-
-            # HARD filters
-            if cap_need and cap > 0 and cap < cap_need:
+            if cap < cap_need:
                 continue
-            if strict_height_aisle and height_need and hgt and hgt < height_need:
-                continue
-            if strict_height_aisle and aisle_need and ais and ais > aisle_need:
-                continue
+        if aisle_need and ais and ais > aisle_need:
+            continue
 
-            s = 0.0
-            # capacity closeness
-            if cap_need and cap:
-                over = (cap - cap_need) / cap_need
-                s += (2.0 - min(2.0, max(0.0, over))) if over >= 0 else -5.0
+        # SCORING
+        s = 0.0
+        if cap_need and cap:
+            over = (cap - cap_need) / cap_need
+            s += (2.0 - min(2.0, max(0.0, over))) if over >= 0 else -5.0
 
-            # power & tires
-            s += 1.2 if _power_matches(power_pref, powr) else (-0.5 if power_pref else 0.0)
-            s += 0.7 if _tire_matches(tire_pref, tire, ql) else (-0.3 if tire_pref else 0.0)
+        if power_pref:
+            s += 1.0 if _power_matches(power_pref, powr) else -0.8
 
-            # aisle / narrow
-            if aisle_need:
-                if ais: s += 0.9 if ais <= aisle_need else -1.0
-                else:   s += 0.6 if (narrow and reach_like) else 0.0
-            elif narrow:
-                s += 0.8 if reach_like else -0.2
+        if tire_pref:
+            s += 0.6 if (tire_pref in (tire or "")) else -0.2
 
-            # height
-            if height_need:
-                if hgt: s += 0.5 if hgt >= height_need else -1.5
-                else:   s += -0.2  # unknown height is slightly penalized
+        if aisle_need:
+            if ais: s += 0.8 if ais <= aisle_need else -1.0
+            else:   s += 0.6 if (narrow and reach_like) else 0.0
+        elif narrow:
+            s += 0.8 if reach_like else -0.2
 
-            # indoor/outdoor very light nudge via tire/power
-            if want["indoor"] and "cushion" in tire: s += 0.2
-            if want["outdoor"] and ("pneumatic" in tire or "super elastic" in tire or "solid" in tire): s += 0.2
+        if height_need and hgt:
+            s += 0.5 if hgt >= height_need else -0.4
 
-            s += 0.03  # small prior to avoid ties
-            scored.append((s, m))
-        return scored
+        # steer away from 3-wheel on heavier asks (≥4,500 lb)
+        if cap_need and cap_need >= 4500 and three_wheel:
+            s -= 0.8
 
-    # First pass: strict on height/aisle when provided
-    scored = _score_pass(strict_height_aisle=True)
+        # small prior to avoid ties
+        s += 0.05
+        scored.append((s, m))
 
-    # Fallback pass: relax height/aisle strictness if no results
     if not scored:
-        scored = _score_pass(strict_height_aisle=False)
-
-    if not scored or not parsed_any:
         return []
 
     ranked = sorted(scored, key=lambda t: t[0], reverse=True)
     return [m for _, m in ranked[:limit]]
 
 # ── build final prompt chunk --------------------------------------------
-def _needs_summary(want: Dict[str, Any], q: str) -> str:
-    """Compact needs summary the model can use without poisoning parsing."""
-    lines = ["<span class=\"section-label\">Needs Summary:</span>"]
-    env = []
-    if want.get("indoor"): env.append("Indoor")
-    if want.get("outdoor"): env.append("Outdoor")
-    env_txt = ", ".join(env) if env else "Not specified"
-    lines.append(f"- Environment: {env_txt}")
 
-    lines.append(f"- Aisle Limit: {int(want['aisle_in'])} in" if want.get("aisle_in") else "- Aisle Limit: Not specified")
-    if want.get("power_pref"):
-        p = "Electric" if want["power_pref"]=="electric" else want["power_pref"].upper()
-        lines.append(f"- Power Preference: {p.capitalize()}")
-    else:
-        lines.append("- Power Preference: Not specified")
-
-    if want.get("cap_lbs"):
-        lines.append(f"- Minimum Capacity: {int(want['cap_lbs']):,} lb")
-    else:
-        lines.append("- Minimum Capacity: Not specified")
-
-    if want.get("tire_pref"):
-        pref = "Cushion" if want["tire_pref"]=="cushion" else "Pneumatic"
-        lines.append(f"- Tire Preference: {pref}")
-    else:
-        lines.append("- Tire Preference: Not specified")
-
-    atts = _suggest_attachments(want, q)
-    if atts:
-        lines.append(f"- Attachments: {', '.join(atts)}")
-    else:
-        lines.append("- Attachments: Not specified")
-    return "\n".join(lines) + "\n"
-
-def generate_forklift_context(user_q: str, acct: Dict[str, Any] | None) -> str:
+def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> str:
     """
     IMPORTANT: Pass ONLY the raw user question to this function from app.py.
     The account block is added here (not mixed into user_q), so the parser
     isn't poisoned by SIC/ZIP/fleet-size numbers.
     """
-    lines: list[str] = []
+    lines: List[str] = []
     if acct:
         lines.append(customer_block(acct))
-
-    want = _parse_requirements(user_q)
-    lines.append(_needs_summary(want, user_q))
 
     hits = filter_models(user_q)
     if hits:
         lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
-        # keep a short, consistent block per model
         for m in hits:
             lines += [
                 "<span class=\"section-label\">Model:</span>",
@@ -544,73 +472,72 @@ def generate_forklift_context(user_q: str, acct: Dict[str, Any] | None) -> str:
                 "<span class=\"section-label\">Tire Type:</span>",
                 f"- {_tire_of(m) or 'N/A'}",
                 "<span class=\"section-label\">Attachments:</span>",
-                f"- {', '.join(_suggest_attachments(want, user_q)) or 'N/A'}",
+                f"- {str(m.get('Attachments','N/A'))}",
                 "<span class=\"section-label\">Comparison:</span>",
                 "- Similar capacity models available from Toyota or CAT are typically higher cost.\n"
             ]
     else:
         lines.append("No matching models found in the provided data.\n")
 
-    # include the raw question last
     lines.append(user_q)
     return "\n".join(lines)
 
 # --- expose selected list + ALLOWED block for strict grounding -----------
+
 def select_models_for_question(user_q: str, k: int = 5):
     hits = filter_models(user_q, limit=k)
     allowed = []
     for m in hits:
         nm = _safe_model_name(m)
-        if nm and nm != "N/A":
+        if nm != "N/A":
             allowed.append(nm)
     return hits, allowed
 
-def allowed_models_block(allowed: list[str]) -> str:
+def allowed_models_block(allowed: List[str]) -> str:
     if not allowed:
         return "ALLOWED MODELS:\n(none – say 'No exact match from our lineup.')"
     return "ALLOWED MODELS:\n" + "\n".join(f"- {x}" for x in allowed)
 
 # --- debug helper --------------------------------------------------------
+
 def debug_parse_and_rank(user_q: str, limit: int = 10):
     want = _parse_requirements(user_q)
     rows = []
-    ql = (user_q or "").lower()
-    allow_walkies = any(w in ql for w in ["pallet", "walkie", "stacker", "cbd", "cbt"])
-
     for m in models_raw:
-        if not allow_walkies and _is_walkie_or_stacker(m):
-            continue
-
         cap = _capacity_of(m) or 0.0
         powr = _power_of(m)
         tire = _tire_of(m)
         ais  = _aisle_of(m)
         hgt  = _height_of(m)
         reach_like = _is_reach_or_vna(m)
+        three_wheel = _is_three_wheel(m)
 
+        # scoring mirror
         s = 0.0
         if want["cap_lbs"] and cap:
             over = (cap - want["cap_lbs"]) / want["cap_lbs"]
             s += (2.0 - min(2.0, max(0.0, over))) if over >= 0 else -5.0
-        s += 1.2 if _power_matches(want["power_pref"], powr) else (-0.5 if want["power_pref"] else 0.0)
-        s += 0.7 if _tire_matches(want["tire_pref"], tire, ql) else (-0.3 if want["tire_pref"] else 0.0)
+        if want["power_pref"]:
+            s += 1.0 if _power_matches(want["power_pref"], powr) else -0.8
+        if want["tire_pref"]:
+            s += 0.6 if want["tire_pref"] in (tire or "") else -0.2
         if want["aisle_in"]:
-            if ais: s += 0.9 if ais <= want["aisle_in"] else -1.0
+            if ais: s += 0.8 if ais <= want["aisle_in"] else -1.0
             else:   s += 0.6 if (want["narrow"] and reach_like) else 0.0
         elif want["narrow"]:
             s += 0.8 if reach_like else -0.2
-        if want["height_in"]:
-            if hgt: s += 0.5 if hgt >= want["height_in"] else -1.5
-            else:   s += -0.2
-        if want["indoor"] and "cushion" in tire: s += 0.2
-        if want["outdoor"] and ("pneumatic" in tire or "super elastic" in tire or "solid" in tire): s += 0.2
-        s += 0.03
+        if want["height_in"] and hgt:
+            s += 0.5 if hgt >= want["height_in"] else -0.4
+        if want["cap_lbs"] and want["cap_lbs"] >= 4500 and three_wheel:
+            s -= 0.8
+        s += 0.05
 
         rows.append({
             "model": _safe_model_name(m),
             "score": round(s, 3),
             "cap_lbs": cap, "power": powr, "tire": tire,
-            "aisle_in": ais, "height_in": hgt
+            "aisle_in": ais, "height_in": hgt,
+            "three_wheel": three_wheel
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
     return {"parsed": want, "top": rows[:limit]}
