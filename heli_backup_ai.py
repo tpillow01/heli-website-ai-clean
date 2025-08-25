@@ -160,34 +160,58 @@ def _strip_prompt_leak(text: str) -> str:
 
 def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     """
-    Rewrite only the 'Model:' section to a strict, grounded list:
-    - If allowed is empty -> 'No exact match from our lineup.'
-    - Else -> 'Top Pick: <first>' and 'Alternates: <up to 4 more>'
+    Enforce a single, grounded 'Model:' section placed right AFTER 'Customer Profile:'.
+    Also normalizes spacing and bullets later via _tidy_formatting().
     """
     if not isinstance(text, str):
         return text
 
+    # Build grounded Model block
     al = [m for m in allowed if isinstance(m, str) and m.strip()]
     if not al:
         forced_block = "Model:\n- No exact match from our lineup.\n"
     else:
         top = al[0]
         alts = [x for x in al[1:5]]
+        forced_block = "Model:\n- Top Pick: " + top + "\n"
         if alts:
-            forced_block = "Model:\n- Top Pick: " + top + "\n- Alternates: " + ", ".join(alts) + "\n"
-        else:
-            forced_block = "Model:\n- Top Pick: " + top + "\n"
+            forced_block += "- Alternates: " + ", ".join(alts) + "\n"
 
-    # Replace existing Model: section (non-greedy up to next Header:) or insert if missing
-    pattern = r'(?:^|\n)Model:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
-    if re.search(pattern, text, flags=re.MULTILINE):
-        text = re.sub(pattern, f"\n{forced_block}", text, flags=re.MULTILINE)
+    # 1) Remove EVERY existing Model: section (keep none; we re-insert once)
+    model_sec = r'(?:^|\n)Model:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
+    text = re.sub(model_sec, "\n", text, flags=re.MULTILINE)
+
+    # 2) Insert our Model block right AFTER Customer Profile: section if present
+    cust_pat = r'(?s)(^|\n)Customer Profile:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
+    m = re.search(cust_pat, text)
+    if m:
+        end = m.end()
+        text = text[:end] + ("\n" if not text[end-1] == "\n" else "") + forced_block + text[end:]
     else:
-        text = forced_block + ("\n" + text if text and not text.startswith("\n") else text)
+        # If somehow Customer Profile isn't present, prepend
+        text = forced_block + ("\n" if text and not text.startswith("\n") else "") + text
 
-    # Clean up any leaked prompt blocks
-    text = re.sub(r'[ ]{2,}', ' ', text)
+    # 3) Final tidy pass (bullets, spacing, leaked blocks)
+    text = _tidy_formatting(text)
     return _strip_prompt_leak(text)
+
+def _tidy_formatting(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+
+    # Normalize bullets: turn • / · into "- "
+    text = re.sub(r'(?m)^\s*[•·]\s+', "- ", text)
+
+    # Remove extra blank lines after headers like "Section:\n\n" -> "Section:\n"
+    text = re.sub(r'(?m)^([A-Z][A-Za-z \/&()-]*:)\s*\n+\s*', r'\1\n', text)
+
+    # Collapse 3+ consecutive newlines -> 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # Trim trailing spaces
+    text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
+
+    return text
 
 # ─── Recommendation flow helper ──────────────────────────────────────────
 def run_recommendation_flow(user_q: str) -> str:
@@ -204,7 +228,7 @@ def run_recommendation_flow(user_q: str) -> str:
         "role": "system",
         "content": (
             "You are a friendly, expert Heli Forklift sales assistant.\n"
-            "Output ONLY these sections in this order and nothing else:\n"
+            "Output ONLY these sections in this order:\n"
             "Customer Profile:\n"
             "Model:\n"
             "Power:\n"
@@ -215,19 +239,20 @@ def run_recommendation_flow(user_q: str) -> str:
             "Sales Pitch Techniques:\n"
             "Common Objections:\n"
             "\n"
-            "Guidance (do not echo this):\n"
-            "- Use ONLY model codes that appear under the ALLOWED MODELS block. Do not invent other codes.\n"
-            "- Under Model: if there are allowed models, write ONE line 'Top Pick: <code> — one-line why', then ONE line "
-            "'Alternates: <code>, <code>, <code>, <code>' (up to 4). If none, write exactly 'No exact match from our lineup.'\n"
-            "- Capacity/Tires/Attachments: summarize from the context/needs; if a spec is missing, say 'Not specified'.\n"
-            "- SALES PITCH TECHNIQUES (compact):\n"
-            "  • Discovery (3 bullets, ≤14 words): load & center; aisle/turning & mast height; duty cycle/power.\n"
-            "  • Value & ROI (2 bullets, ≤16 words): uptime/maintenance; energy or fuel savings vs typical alternatives.\n"
-            "  • Competitive Framing (2 bullets, ≤16 words): generic, responsible comparisons; no specific competitor specs.\n"
-            "  • Risk Reversal (2 bullets, ≤16 words): demo/pilot; PM & operator training/inspection plan.\n"
-            "  • Talk Tracks (2 lines, ≤18 words): short scripts tied to the Top Pick.\n"
-            "  • Upsell/Cross-sell (2 bullets): attachments, PM service, charger/telemetry, rentals for peaks.\n"
-            "- COMMON OBJECTIONS (max 6, one line each): format 'Objection — Handle: brief ask/reframe/proof/next-step' (~18–22 words).\n"
+            "Formatting rules (do not echo):\n"
+            "- Each section header exactly as above, followed by lines that start with '- '. No bullet symbols other than '- '.\n"
+            "- No blank lines between a header and its bullet lines; keep spacing tight and consistent.\n"
+            "- Use ONLY model codes from the ALLOWED MODELS block. Do not invent codes.\n"
+            "- Under Model: ONE line '- Top Pick: <code> — brief why'; ONE line '- Alternates: <codes...>' (up to 4). If none allowed, output exactly '- No exact match from our lineup.'\n"
+            "- Capacity/Tires/Attachments: summarize from context/needs; if missing, say 'Not specified'. Keep to 1–2 bullets each.\n"
+            "- Sales Pitch Techniques (compact, a touch more detail):\n"
+            "  - Discovery: 3 bullets (load & center; aisle/turning & lift height; duty cycle & power).\n"
+            "  - Value & ROI: 2 bullets (uptime/maintenance; energy/fuel vs typical alternatives).\n"
+            "  - Risk Reversal: 2 bullets (demo/pilot; PM & operator training/inspection plan).\n"
+            "  - Talk Tracks: 2 short lines tied to the Top Pick (≤18 words each).\n"
+            "  - Upsell/Cross-sell: 2 bullets (attachments; PM/charger/telemetry or rentals for peaks).\n"
+            "- Common Objections: 6–8 items, one line each in this pattern and level of detail:\n"
+            "  '- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <grounded fact>; Next: <small action>'.\n"
             "- Never invent pricing, availability, or specs not present in the context.\n"
         )
     }
