@@ -14,10 +14,15 @@ def _load_json(path: str):
 accounts_raw = _load_json("accounts.json")
 models_raw   = _load_json("models.json")
 
-# In case models.json is wrapped like {"models":[...]}
+# In case models.json is wrapped like {"models":[...]} or {"data":[...]}
 if not isinstance(models_raw, list):
-    if isinstance(models_raw, dict) and "models" in models_raw and isinstance(models_raw["models"], list):
-        models_raw = models_raw["models"]
+    if isinstance(models_raw, dict):
+        if isinstance(models_raw.get("models"), list):
+            models_raw = models_raw["models"]
+        elif isinstance(models_raw.get("data"), list):
+            models_raw = models_raw["data"]
+        else:
+            models_raw = []
     else:
         models_raw = []
 
@@ -43,7 +48,7 @@ TYPE_KEYS  = ["Type", "Category", "Segment", "Class", "Class/Type", "Truck Type"
 # ── account helpers ------------------------------------------------------
 def get_account(text: str) -> Dict[str, Any] | None:
     low = text.lower()
-    for acct in accounts_raw:                       # substring pass
+    for acct in accounts_raw:  # substring pass
         name = str(acct.get("Account Name","")).lower()
         if name and name in low:
             return acct
@@ -110,9 +115,8 @@ def _normalize_capacity_lbs(row: Dict[str,Any]) -> float | None:
                 return _to_lbs(v, "kg") if v is not None else None
             if re.search(r"\btons?\b|\btonne\b|\bmetric\s*ton\b|\b(?<!f)\bt\b", s, re.I):
                 v = _num(s)
-                # assume US ton unless clearly "metric"
+                # assume metric if "metric"/"tonne"/standalone 't' is present
                 if re.search(r"metric|tonne|\b(?<!f)\bt\b", s, re.I):
-                    # treat "t" as metric ton common in specs
                     return _to_lbs(v, "metric ton") if v is not None else None
                 return _to_lbs(v, "ton") if v is not None else None
             v = _num(s)
@@ -149,7 +153,11 @@ def _text_from_keys(row: Dict[str,Any], keys: List[str]) -> str:
     return ""
 
 def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
-    t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model",""))).lower()
+    # Also look at "Model Name" because many of your rows use it
+    t = (
+        _text_from_keys(row, TYPE_KEYS) + " " +
+        str(row.get("Model","")) + " " + str(row.get("Model Name",""))
+    ).lower()
     return any(word in t for word in ["reach", "vna", "order picker", "turret"]) or re.search(r"\b(cqd|rq|vna)\b", t)
 
 # --- robust capacity intent parser --------------------------------------
@@ -204,21 +212,7 @@ def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}', t)
     if m: return (int(round(_n(m.group(1)))), None)
 
-    # singles with units
-    m = re.search(rf'{KNUM}\s*(?:{UNIT_LB})?\b', t)         # “7k (lb)”
-    if m: return (int(round(_n(m.group(1))*1000)), None)
-    m = re.search(rf'{NUM}\s*{UNIT_LB}\b', t)               # “7000 lb/lbs/lb.”
-    if m: return (int(round(_n(m.group(1)))), None)
-    m = re.search(rf'{NUM}\s*{UNIT_KG}\b', t)               # “2000 kg”
-    if m: return (int(round(_n(m.group(1))*2.20462)), None)
-    m = re.search(rf'{NUM}\s*{UNIT_TONNE}\b', t)            # “3.5 tonne / 3.5t”
-    if m: return (int(round(_n(m.group(1))*2204.62)), None)
-    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)              # “5 ton(s)”
-    if m: return (int(round(_n(m.group(1))*2000)), None)
-
-    # SAFER fallback:
-    # Only treat a bare 4–5 digit number as lb if it clearly appears near load words,
-    # so SIC/ZIP/fleet-size lines don't poison intent.
+    # SAFER fallback: bare 4–5 digit number only if near load words
     near = re.search(rf'{LOAD_WORDS}\D{{0,12}}(\d{{4,5}})\b', t)
     if near:
         return (int(near.group(1)), None)
@@ -314,13 +308,33 @@ def _aisle_of(row: Dict[str,Any]) -> float | None:
     return _normalize_aisle_in(row)
 
 def _power_of(row: Dict[str,Any]) -> str:
-    return _text_from_keys(row, POWER_KEYS).lower()
+    """
+    Normalize power so 'lithium' counts as electric, LPG synonyms collapse, etc.
+    This improves scoring when users ask for 'lithium' but specs say 'lithium'.
+    """
+    txt = (_text_from_keys(row, POWER_KEYS) or "").lower().strip()
+    if any(w in txt for w in ["lithium", "li-ion", "li ion", "battery", "lead acid", "lead-acid", "electric"]):
+        if "electric" not in txt:
+            txt += " electric"
+    if any(w in txt for w in ["lpg", "lp ", "lp-gas", "propane"]):
+        if "lpg" not in txt:
+            txt += " lpg"
+    return txt
 
 def _tire_of(row: Dict[str,Any]) -> str:
-    return str(row.get("Tire Type","") or row.get("Tires","") or row.get("Tire","")).lower()
+    t = str(row.get("Tire Type","") or row.get("Tires","") or row.get("Tire","")).lower()
+    if t:
+        return t
+    # Heuristic: many 3-wheel electrics are cushion by default for indoor use
+    drive = str(row.get("Drive Type","") or row.get("Drive","")).lower()
+    power = _power_of(row)
+    if "three wheel" in drive and "electric" in power:
+        return "cushion"
+    return ""
 
 def _safe_model_name(m: Dict[str, Any]) -> str:
-    for k in ("Model","model","code","name","Code"):
+    # Include "Model Name" because your JSON uses it
+    for k in ("Model","model","Model Name","code","name","Code"):
         if m.get(k):
             return str(m[k]).strip()
     return "N/A"
@@ -335,10 +349,6 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
     tire_pref  = want["tire_pref"]
     height_need= want["height_in"]
 
-    # track if we parsed anything meaningful (still used for heuristics, but no longer hard-blocking)
-    parsed_any = any([cap_need, aisle_need, power_pref, tire_pref, height_need,
-                      want["indoor"], want["outdoor"], want["narrow"]])
-
     scored: List[Tuple[float, Dict[str,Any]]] = []
 
     for m in models_raw:
@@ -350,9 +360,9 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
         reach_like = _is_reach_or_vna(m)
 
         # hard filters
-        if cap_need and cap > 0 and cap < cap_need: 
+        if cap_need and cap > 0 and cap < cap_need:
             continue
-        if aisle_need and ais and ais > aisle_need: 
+        if aisle_need and ais and ais > aisle_need:
             continue
 
         s = 0.0
@@ -368,11 +378,10 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
             s += 0.8 if reach_like else -0.2
         if height_need and hgt: s += 0.4 if hgt >= height_need else -0.3
 
-        # small prior to avoid ties
-        s += 0.05
+        s += 0.05  # small prior to avoid ties
         scored.append((s, m))
 
-    # IMPORTANT: Allow results even if parsing was weak; only bail if *nothing* scored
+    # Allow results even if parsing was weak; only bail if *nothing* scored
     if not scored:
         return []
 
