@@ -217,24 +217,18 @@ def run_recommendation_flow(user_q: str) -> str:
             "\n"
             "Guidance (do not echo this):\n"
             "- Use ONLY model codes that appear under the ALLOWED MODELS block. Do not invent other codes.\n"
-            "- Under Model: if there are allowed models, list ONE line as 'Top Pick: <code> — one-line why',\n"
-            "  followed by ONE line as 'Alternates: <code>, <code>, <code>, <code>' (up to 4). If none are allowed, output exactly 'No exact match from our lineup.'\n"
-            "- For Capacity: if multiple models are allowed, summarize as '≥ <stated need if present> (range across picks: <min_pick>–<max_pick> lb)'.\n"
-            "  Use only numbers visible in the context. If a number is missing, omit it rather than guessing.\n"
-            "- For Tire Type: prefer the 'Suggested Tire' from the Needs Summary in the context. If the exact tire is not in the data for a model, say '… recommended for <environment>' rather than implying it ships that way.\n"
-            "- For Attachments: if none are listed in context for the selected model(s), use the 'Suggested Attachments' from the Needs Summary. Do not invent SKUs or prices.\n"
-            "- Sales Pitch Techniques: provide DETAILED, practical bullets grouped exactly like this (keep each bullet one line, crisp, with action verbs):\n"
-            "  • Discovery (6–8 bullets): targeted questions tied to capacity, aisle/height, power, environment, duty cycle, pallets/load center, charging/fueling, and operator skill.\n"
-            "  • Value & ROI (3–5 bullets): uptime/maintenance, energy/fuel, safety/productivity; tie to context (e.g., lithium vs. IC, turning radius, lift height). Avoid prices; speak to outcomes.\n"
-            "  • Competitive Framing (2–3 bullets): responsible, generic comparisons (e.g., 'vs most IC trucks…'). No competitor specs.\n"
-            "  • Risk Reversal (2–4 bullets): demo/pilot, training, warranty, inspection checklist, change-management steps.\n"
-            "  • Urgency & Next Step (2–4 bullets): lead-time risk, seasonal peaks, site walk, spec confirmation, quote cadence.\n"
-            "  • Talk Tracks (3–5 micro-scripts): short, natural sentences sales can read verbatim; tie to Top Pick facts.\n"
-            "  • Upsell/Cross-sell (2–3 bullets): attachments, PM service, telemetry/charger, rentals for overflow.\n"
-            "- Common Objections: list 8–12 items. For EACH, use this exact micro-format on ONE line:\n"
-            "  '- <Objection>: Ask — <one diagnostic question>; Reframe — <one-line reframe>; Proof — <fact from context/spec>; Next Step — <action>'\n"
-            "- Never invent pricing, availability, or third-party certifications. If something isn't in the context, say 'Not specified' or speak qualitatively.\n"
-            "- Do NOT repeat these instructions, the guidance, or the ALLOWED MODELS block in your answer.\n"
+            "- Under Model: if there are allowed models, write ONE line 'Top Pick: <code> — one-line why', then ONE line "
+            "'Alternates: <code>, <code>, <code>, <code>' (up to 4). If none, write exactly 'No exact match from our lineup.'\n"
+            "- Capacity/Tires/Attachments: summarize from the context/needs; if a spec is missing, say 'Not specified'.\n"
+            "- SALES PITCH TECHNIQUES (compact):\n"
+            "  • Discovery (3 bullets, ≤14 words): load & center; aisle/turning & mast height; duty cycle/power.\n"
+            "  • Value & ROI (2 bullets, ≤16 words): uptime/maintenance; energy or fuel savings vs typical alternatives.\n"
+            "  • Competitive Framing (2 bullets, ≤16 words): generic, responsible comparisons; no specific competitor specs.\n"
+            "  • Risk Reversal (2 bullets, ≤16 words): demo/pilot; PM & operator training/inspection plan.\n"
+            "  • Talk Tracks (2 lines, ≤18 words): short scripts tied to the Top Pick.\n"
+            "  • Upsell/Cross-sell (2 bullets): attachments, PM service, charger/telemetry, rentals for peaks.\n"
+            "- COMMON OBJECTIONS (max 6, one line each): format 'Objection — Handle: brief ask/reframe/proof/next-step' (~18–22 words).\n"
+            "- Never invent pricing, availability, or specs not present in the context.\n"
         )
     }
 
@@ -246,10 +240,10 @@ def run_recommendation_flow(user_q: str) -> str:
 
     try:
         resp = client.chat.completions.create(
-            model="gpt-4",
+            model=os.getenv("OAI_MODEL", "gpt-4o-mini"),  # fast + good; override via env if you want
             messages=messages,
-            max_tokens=900,   # give space for the richer pitch & objections
-            temperature=0.45  # keeps it specific and sales-y without rambling
+            max_tokens=650,   # a bit smaller to keep it punchy
+            temperature=0.4   # concise, still a touch salesy
         )
         ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
