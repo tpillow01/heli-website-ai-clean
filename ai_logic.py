@@ -139,168 +139,144 @@ def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
 # --- robust capacity intent parser --------------------------------------
 def _parse_capacity_lbs_intent(text: str) -> tuple[int | None, int | None]:
     """
-    Returns (min_required_lb, max_allowed_lb). We use the min for filtering later.
-    Understands:
-      - “7000 pounds”, “7,000 lbs”, “7k lb”
-      - “load of 5,000 pounds”, “handle 5 ton”, “payload 3.5T/tonne/mt”
-      - ranges “3k–5k”, “3000-5000 lbs”, “between 3,000 and 5,000”
-      - bounds “up to 6000”, “max 6000”, “at least 5000”, “minimum 5k”
+    Returns (min_required_lb, max_allowed_lb). We use min for filtering.
+    Understands: “7000 lb/lbs/lb.”, “7k”, “payload 5,000”, “3.5 ton/tonne/t”,
+    ranges “3k–5k / 3000-5000 / between 3,000 and 5,000”, bounds “up to … / min …”.
     """
     if not text:
         return (None, None)
 
     t = text.lower().replace("–", "-").replace("—", "-")
 
-    UNIT_LB     = r'(?:lb|lbs|pound|pounds)'
-    UNIT_TONNE  = r'(?:tonne|tonnes|metric\s*ton(?:s)?|(?<!f)t\b)'  # bare 't' but not part of 'ft'
+    UNIT_LB     = r'(?:lb\.?|lbs\.?|pound(?:s)?)'
+    UNIT_KG     = r'(?:kg|kgs?|kilogram(?:s)?)'
+    UNIT_TONNE  = r'(?:tonne|tonnes|metric\s*ton(?:s)?|(?<!f)\bt\b)'
     UNIT_TON    = r'(?:ton|tons)'
     KNUM        = r'(\d+(?:\.\d+)?)\s*k\b'
     NUM         = r'(\d[\d,\.]*)'
-    LOAD_WORDS  = r'(?:capacity|load|loads|payload|rating|lift|handle|carry)'
+    LOAD_WORDS  = r'(?:capacity|load|loads|payload|rating|lift|handle|carry|weight|weigh|weighs|wt)'
 
-    def _n(s: str) -> float:
-        return float(s.replace(",", ""))
+    def _n(s: str) -> float: return float(s.replace(",", ""))
 
     # ranges “3k-5k”
     m = re.search(rf'{KNUM}\s*-\s*{KNUM}', t)
     if m:
-        lo = int(round(_n(m.group(1)) * 1000))
-        hi = int(round(_n(m.group(2)) * 1000))
+        lo, hi = int(round(_n(m.group(1))*1000)), int(round(_n(m.group(2))*1000))
         return (min(lo, hi), max(lo, hi))
 
     # ranges “3000-5000 (lbs optional)”
     m = re.search(rf'{NUM}\s*-\s*{NUM}\s*(?:{UNIT_LB})?', t)
     if m:
-        a = int(round(_n(m.group(1))))
-        b = int(round(_n(m.group(2))))
+        a, b = int(round(_n(m.group(1)))), int(round(_n(m.group(2))))
         return (min(a, b), max(a, b))
 
     # “between 3,000 and 5,000”
     m = re.search(rf'between\s+{NUM}\s+and\s+{NUM}', t)
     if m:
-        a = int(round(_n(m.group(1))))
-        b = int(round(_n(m.group(2))))
+        a, b = int(round(_n(m.group(1)))), int(round(_n(m.group(2))))
         return (min(a, b), max(a, b))
 
     # bounds
     m = re.search(rf'(?:up to|max(?:imum)?)\s+{NUM}\s*(?:{UNIT_LB})?', t)
-    if m:
-        return (None, int(round(_n(m.group(1)))))
-
+    if m: return (None, int(round(_n(m.group(1)))))
     m = re.search(rf'(?:at least|minimum|min)\s+{NUM}\s*(?:{UNIT_LB})?', t)
-    if m:
-        return (int(round(_n(m.group(1)))), None)
+    if m: return (int(round(_n(m.group(1)))), None)
+
+    # “payload/load/weight … 7k/5000”
+    m = re.search(rf'{LOAD_WORDS}[^0-9k\-]*{KNUM}', t)
+    if m: return (int(round(_n(m.group(1))*1000)), None)
+    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}', t)
+    if m: return (int(round(_n(m.group(1)))), None)
 
     # singles with units
-    m = re.search(rf'{KNUM}\s*(?:{UNIT_LB})?\b', t)  # “7k lb(s)”
-    if m:
-        return (int(round(_n(m.group(1)) * 1000)), None)
-
-    m = re.search(rf'{NUM}\s*{UNIT_LB}\b', t)        # “7000 pounds/lbs”
-    if m:
-        return (int(round(_n(m.group(1)))), None)
-
-    m = re.search(rf'{NUM}\s*{UNIT_TONNE}\b', t)     # “3.5 tonne / metric ton / 3.5t”
-    if m:
-        return (int(round(_n(m.group(1)) * 2204.62)), None)
-
-    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)       # “5 ton(s)” (US)
-    if m:
-        return (int(round(_n(m.group(1)) * 2000)), None)
-
-    # “payload/load/capacity … 7k/5000” (units omitted)
-    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{KNUM}', t)
-    if m:
-        return (int(round(_n(m.group(1)) * 1000)), None)
-    m = re.search(rf'{LOAD_WORDS}[^0-9\-]*{NUM}', t)
-    if m:
-        return (int(round(_n(m.group(1)))), None)
+    m = re.search(rf'{KNUM}\s*(?:{UNIT_LB})?\b', t)         # “7k (lb)”
+    if m: return (int(round(_n(m.group(1))*1000)), None)
+    m = re.search(rf'{NUM}\s*{UNIT_LB}\b', t)               # “7000 lb/lbs/lb.”
+    if m: return (int(round(_n(m.group(1)))), None)
+    m = re.search(rf'{NUM}\s*{UNIT_KG}\b', t)               # “2000 kg”
+    if m: return (int(round(_n(m.group(1))*2.20462)), None)
+    m = re.search(rf'{NUM}\s*{UNIT_TONNE}\b', t)            # “3.5 tonne / 3.5t”
+    if m: return (int(round(_n(m.group(1))*2204.62)), None)
+    m = re.search(rf'{NUM}\s*{UNIT_TON}\b', t)              # “5 ton(s)”
+    if m: return (int(round(_n(m.group(1))*2000)), None)
 
     # bare 4–5 digit number → assume lb
     m = re.search(r'\b(\d{4,5})\b', t)
-    if m:
-        return (int(m.group(1)), None)
+    if m: return (int(m.group(1)), None)
 
     return (None, None)
 
+# --- parse requirements (REPLACE) ----------------------------------------
 def _parse_requirements(q: str) -> Dict[str,Any]:
     ql = q.lower()
 
-    # capacity from robust intent parser
+    # capacity
     cap_min, cap_max = _parse_capacity_lbs_intent(ql)
-    cap_lbs = cap_min  # we use minimum-required capacity for filtering logic downstream
+    cap_lbs = cap_min
 
-    # height: ft/in + synonyms (reach/clearance/mast)
+    # height: avoid matching “90 in” from an aisle phrase
     height_in = None
-    m = re.findall(r"(\d[\d,\.]*)\s*(?:ft|feet|')\b", ql)
-    if m:
+    for m in re.finditer(r'(\d[\d,\.]*)\s*(ft|feet|\'|in|\"|inches)\b', ql):
+        raw, unit = m.group(1), m.group(2)
+        ctx = ql[max(0, m.start()-18): m.end()+18]
+        if re.search(r'\b(aisle|ra\s*aisle|right[-\s]?angle)\b', ctx):
+            continue
         try:
-            height_in = _to_inches(float(m[-1].replace(",","")), "ft")
-        except Exception:
-            height_in = None
+            height_in = _to_inches(float(raw.replace(",","")), "ft") if unit in ("ft","feet","'") \
+                        else float(raw.replace(",",""))
+            break
+        except:
+            pass
     if height_in is None:
-        m = re.findall(r"(\d[\d,\.]*)\s*(?:in|\"|inches)\b", ql)
-        if m:
-            try:
-                height_in = float(m[-1].replace(",",""))
-            except Exception:
-                height_in = None
-    if height_in is None:
-        m = re.search(r"(?:lift|raise|reach|height|clearance|mast)\D{0,12}(\d[\d,\.]*)\s*(ft|feet|'|in|\"|inches)", ql)
+        m = re.search(r'(?:lift|raise|reach|height|clearance|mast)\D{0,12}(\d[\d,\.]*)\s*(ft|feet|\'|in|\"|inches)', ql)
         if m:
             raw, unit = m.group(1), m.group(2)
             try:
                 height_in = _to_inches(float(raw.replace(",","")), "ft") if unit in ("ft","feet","'") \
                             else float(raw.replace(",",""))
-            except Exception:
+            except:
                 height_in = None
 
-    # aisle: include right-angle aisle / stacking variants
+    # aisle width (includes right-angle aisle variants)
     aisle_in = None
-    m = re.search(r"(?:aisle|aisles|aisle width)\D{0,12}(\d[\d,\.]*)\s*(?:in|\"|inches|ft|')", ql)
+    m = re.search(r'(?:aisle|aisles|aisle width)\D{0,12}(\d[\d,\.]*)\s*(?:in|\"|inches|ft|\')', ql)
     if m:
-        raw = m.group(1)
-        unit = m.group(0)
+        raw, unitblob = m.group(1), m.group(0)
         try:
-            if "ft" in unit or "'" in unit:
-                aisle_in = _to_inches(float(raw.replace(",","")), "ft")
-            else:
-                aisle_in = float(raw.replace(",",""))
-        except Exception:
-            aisle_in = None
+            aisle_in = _to_inches(float(raw.replace(",","")), "ft") if ("ft" in unitblob or "'" in unitblob) \
+                       else float(raw.replace(",",""))
+        except: pass
     if aisle_in is None:
-        m = re.search(r"(?:right[-\s]?angle(?:\s+aisle|\s+stack(?:ing)?)?|ra\s*aisle|ras)\D{0,12}(\d[\d,\.]*)\s*(in|\"|inches|ft|')", ql)
+        m = re.search(r'(?:right[-\s]?angle(?:\s+aisle|\s+stack(?:ing)?)?|ra\s*aisle|ras)\D{0,12}(\d[\d,\.]*)\s*(in|\"|inches|ft|\')', ql)
         if m:
             raw, unit = m.group(1), m.group(2)
             try:
                 aisle_in = _to_inches(float(raw.replace(",","")), "ft") if unit in ("ft","'") \
                            else float(raw.replace(",",""))
-            except Exception:
-                aisle_in = None
+            except: pass
 
-    # power preferences (li-ion / battery / EV; LP/LPG/propane; diesel)
+    # power preference (broad synonyms)
     power_pref = None
-    if re.search(r"\bli[\-\s]?ion\b|\bbattery\b|\bev\b", ql) or "lithium" in ql or "electric" in ql:
+    if any(w in ql for w in ["zero emission","zero-emission","emissions free","emissions-free","eco friendly",
+                             "eco-friendly","green","battery powered","battery-powered","battery","lithium",
+                             "li-ion","li ion","lead acid","lead-acid","electric"]):
         power_pref = "electric"
-    elif re.search(r"\blp\b|\blp[-\s]?gas\b|\blpg\b|\bpropane\b", ql):
-        power_pref = "lpg"
-    elif "diesel" in ql:
-        power_pref = "diesel"
+    if "diesel" in ql: power_pref = "diesel"
+    if any(w in ql for w in ["lpg","propane","lp gas","gas (lpg)","gas-powered","gas powered"]): power_pref = "lpg"
 
-    # environment hints
-    indoor = bool(re.search(r"\bindoor\b|\bwarehouse\b|\binside\b", ql))
-    outdoor = bool(re.search(r"\boutdoor\b|\brough\b|\bgravel\b|\bconstruction\b|\bunpaved\b|\bdirt\b|\tyard\b", ql))
-    narrow  = "narrow aisle" in ql or "very narrow" in ql or (aisle_in is not None and aisle_in <= 96)
+    # environment
+    indoor  = any(w in ql for w in ["indoor","warehouse","inside","factory floor","distribution center","dc"])
+    outdoor = any(w in ql for w in ["outdoor","yard","dock yard","construction","lumber yard","gravel","dirt",
+                                    "uneven","rough","pavement","parking lot","rough terrain","rough-terrain"])
+    narrow  = ("narrow aisle" in ql) or ("very narrow" in ql) or ("vna" in ql) or ("turret" in ql) \
+              or ("reach truck" in ql) or ("stand-up reach" in ql) \
+              or (aisle_in is not None and aisle_in <= 96)
 
-    # tires (+ synonyms)
+    # tires
     tire_pref = None
-    if "cushion" in ql:
-        tire_pref = "cushion"
-    elif "pneumatic" in ql:
-        tire_pref = "pneumatic"
-    if "non-marking" in ql or "nonmarking" in ql:
-        tire_pref = tire_pref or "cushion"
-    if "solid pneumatic" in ql or "foam filled" in ql or "foam-filled" in ql:
+    if any(w in ql for w in ["cushion","press-on","press on","non-marking","nonmarking"]): tire_pref = "cushion"
+    if any(w in ql for w in ["pneumatic","air filled","air-filled","rough terrain tires","rt tires","knobby",
+                             "off-road","outdoor tires","solid pneumatic","super elastic","foam filled","foam-filled"]):
         tire_pref = tire_pref or "pneumatic"
 
     return dict(
@@ -330,15 +306,19 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
             return str(m[k]).strip()
     return "N/A"
 
-# ── model filtering & ranking -------------------------------------------
+# --- model filtering & ranking (REPLACE the fallback) --------------------
 def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
     want = _parse_requirements(user_q)
-    cap_need = want["cap_lbs"]
+    cap_need   = want["cap_lbs"]
     aisle_need = want["aisle_in"]
     power_pref = want["power_pref"]
     narrow     = want["narrow"]
     tire_pref  = want["tire_pref"]
     height_need= want["height_in"]
+
+    # track if we parsed anything meaningful
+    parsed_any = any([cap_need, aisle_need, power_pref, tire_pref, height_need,
+                      want["indoor"], want["outdoor"], want["narrow"]])
 
     scored: List[Tuple[float, Dict[str,Any]]] = []
 
@@ -350,57 +330,29 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
         hgt  = _height_of(m)
         reach_like = _is_reach_or_vna(m)
 
-        # Hard filters
-        if cap_need and cap > 0 and cap < cap_need:
-            continue
-        if aisle_need and ais and ais > aisle_need:
-            continue
-        if narrow and not reach_like and aisle_need and not ais:
-            # if they need narrow and model isn't reach/VNA and lacks aisle spec → lightly penalize later
-            pass
+        # hard filters
+        if cap_need and cap > 0 and cap < cap_need: continue
+        if aisle_need and ais and ais > aisle_need: continue
 
-        # Score
         s = 0.0
-
-        # capacity closeness: modest overage OK, huge overkill penalized
         if cap_need and cap:
             over = (cap - cap_need) / cap_need
-            if over >= 0:
-                s += 2.0 - min(2.0, over)   # 0..2 → smaller overkill gets more points
-            else:
-                s -= 5.0                     # should've been filtered, but just in case
-
-        # power match
-        if power_pref:
-            s += 1.2 if power_pref in powr else -0.6
-
-        # tire preference
-        if tire_pref:
-            s += 0.6 if tire_pref in tire else -0.2
-
-        # aisle/narrow
+            s += (2.0 - min(2.0, max(0.0, over))) if over >= 0 else -5.0
+        if power_pref: s += 1.2 if power_pref in powr else -0.6
+        if tire_pref:  s += 0.6 if tire_pref in tire   else -0.2
         if aisle_need:
-            if ais:
-                # the smaller the required aisle, the better if model meets it
-                s += 0.8 if ais <= aisle_need else -1.0
-            else:
-                s += 0.6 if (narrow and reach_like) else 0.0
+            if ais: s += 0.8 if ais <= aisle_need else -1.0
+            else:   s += 0.6 if (narrow and reach_like) else 0.0
         elif narrow:
             s += 0.8 if reach_like else -0.2
+        if height_need and hgt: s += 0.4 if hgt >= height_need else -0.3
 
-        # lift height: bonus if model meets it
-        if height_need and hgt:
-            s += 0.4 if hgt >= height_need else -0.3
-
-        # small tie-breakers
-        s += 0.05  # prevent exact ties from dropping
-
+        s += 0.05
         scored.append((s, m))
 
-    if not scored:
-        # fall back: just pick by capacity (descending) to avoid empty list
-        fallback = sorted(models_raw, key=lambda r: (_capacity_of(r) or 0.0), reverse=True)
-        return fallback[:limit]
+    # If nothing matched OR nothing was parsed, return [] so UI prints “No exact match…”
+    if not scored or not parsed_any:
+        return []
 
     ranked = sorted(scored, key=lambda t: t[0], reverse=True)
     return [m for _, m in ranked[:limit]]
