@@ -325,20 +325,115 @@ def _tidy_formatting(text: str) -> str:
 
     return text
 
+# --- Helpers to ground "Comparison:" on competitor JSON -------------------
+import re
+from difflib import get_close_matches
+
+def _find_heli_model_by_code(code: str):
+    """
+    Locate the HELI model dict (from _load_models()) by its exact model code.
+    Falls back to a fuzzy match if exact not found.
+    """
+    code_norm = (code or "").strip().lower()
+    models = _load_models()
+    for m in models:
+        if str(m.get("model", "")).strip().lower() == code_norm:
+            return m
+    # fuzzy fallback
+    names = [m.get("model", "") for m in models]
+    guess = get_close_matches(code, names, n=1, cutoff=0.92)
+    if guess:
+        g = guess[0]
+        for m in models:
+            if m.get("model") == g:
+                return m
+    return None
+
+def _format_peer_row(p: dict) -> str:
+    """One competitor line: Brand Model — Capacity; turn; width; fuel."""
+    brand = (p.get("brand") or "").strip()
+    model = (p.get("model") or "").strip()
+    cap   = _as_lb(p.get("capacity_lb"))
+    turn  = _as_in(p.get("turning_in"))
+    width = _as_in(p.get("width_in"))
+    fuel  = (p.get("fuel") or "—").title()
+    parts = [f"{brand} {model}".strip()]
+    extras = []
+    if cap and cap != "—":   extras.append(cap)
+    if turn and turn != "—": extras.append(f"turn {turn}")
+    if width and width != "—":extras.append(f"width {width}")
+    if fuel and fuel != "—": extras.append(fuel)
+    if extras:
+        return f"{parts[0]} — " + "; ".join(extras)
+    return parts[0]
+
+def _build_peer_comparison_lines(top_model_code: str, K: int = 4) -> list[str]:
+    """
+    Use the chosen HELI top pick to fetch K closest peers and format stable comparison bullets.
+    If we can't resolve peers, we return a safe generic line.
+    """
+    heli_model = _find_heli_model_by_code(top_model_code)
+    if not heli_model:
+        return ["Similar capacity trucks from other brands are available; lithium cushion 5k class typically compares well on TCO."]
+
+    peers = find_best_competitors(heli_model, K=K) or []
+    if not peers:
+        return ["Compared with common 5k electric cushion trucks from other brands, lithium uptime/PM savings often lower TCO vs IC."]
+
+    lines = []
+    # 1) Lead line anchoring why HELI wins (tie to power/geometry if present)
+    power_txt = (heli_model.get("power") or "").lower()
+    drive_txt = (heli_model.get("drive_type") or "").lower()
+    why_bits = []
+    if "li-ion" in power_txt or "electric" in power_txt:
+        why_bits.append("lithium uptime & lower routine PM")
+    if "cushion" in drive_txt:
+        why_bits.append("indoor traction and floor protection")
+    if heli_model.get("_turning_in"):
+        why_bits.append(f"tight turning ({_as_in(heli_model['_turning_in'])})")
+    if heli_model.get("_overall_width_in"):
+        why_bits.append(f"compact width ({_as_in(heli_model['_overall_width_in'])})")
+    why = "; ".join(why_bits) if why_bits else "balanced maneuverability and total cost of ownership"
+    lines.append(f"Top pick vs peers: HELI advantages typically include {why}.")
+
+    # 2) One line per peer
+    for p in peers:
+        lines.append(_format_peer_row(p))
+
+    # 3) Close with a practical compare action
+    lines.append("We can demo against these peers on your dock to validate turning, lift, and cycle times.")
+    return lines
+
+def _inject_section(text: str, header: str, bullets: list[str]) -> str:
+    """
+    Replace the section 'header:' with our own bullet list.
+    Fits your app's formatting: each bullet starts '- ' and sections are 'Header:' on their own line.
+    """
+    if not isinstance(text, str):
+        return text
+    block = header + ":\n" + "\n".join(f"- {b}" for b in bullets) + "\n"
+
+    # Match the existing section: Header:\n- ... (until next Title: or end)
+    pattern = r'(?:^|\n)' + re.escape(header) + r':\n(?:- .*\n?)*'
+    if re.search(pattern, text, flags=re.MULTILINE):
+        return re.sub(pattern, "\n" + block, text, flags=re.MULTILINE)
+    else:
+        # Append at the end if not present
+        return text + ("\n" if not text.endswith("\n") else "") + block
+
 # ─── Recommendation flow helper ──────────────────────────────────────────
 def run_recommendation_flow(user_q: str) -> str:
     # Build context WITHOUT prepending account text into the parser input
     acct = find_account_by_name(user_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
 
-    # strict grounding list
+    # strict grounding list (helpmate picks)
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
     print(f"[recommendation] allowed models: {allowed}")
 
-    # NEW: competitor peer numbers for the Top Pick (from heli_comp_models.json)
-    # k=6 so more brands get a chance to appear if available
-    comp_block = _build_competitor_block_for_model(allowed[0], k=6) if allowed else "COMPETITOR PEERS:\n(none)"
+    # Pick the top HELI model code (if any)
+    top_pick_code = allowed[0] if allowed else None
 
     system_prompt = {
         "role": "system",
@@ -356,30 +451,20 @@ def run_recommendation_flow(user_q: str) -> str:
             "Common Objections:\n"
             "\n"
             "Formatting rules (do not echo):\n"
-            "- Each section header exactly as above, followed by lines that start with '- '. No bullet symbols other than '- '.\n"
-            "- No blank lines between a header and its bullet lines; keep spacing tight and consistent.\n"
+            "- Each section header exactly as above, followed by lines that start with '- '. No other bullet symbols.\n"
+            "- Keep spacing tight; no blank lines between a header and its bullets.\n"
             "- Use ONLY model codes from the ALLOWED MODELS block. Do not invent codes.\n"
             "- Under Model: ONE line '- Top Pick: <code> — brief why'; ONE line '- Alternates: <codes...>' (up to 4). If none allowed, output exactly '- No exact match from our lineup.'\n"
-            "- Capacity/Tires/Attachments: summarize from context/needs; if missing, say 'Not specified'. Keep to 1–2 bullets each.\n"
-            "- Sales Pitch Techniques (compact, a touch more detail):\n"
-            "  - Discovery: 3 bullets (load & center; aisle/turning & lift height; duty cycle & power).\n"
-            "  - Value & ROI: 2 bullets (uptime/maintenance; energy/fuel vs typical alternatives).\n"
-            "  - Risk Reversal: 2 bullets (demo/pilot; PM & operator training/inspection plan).\n"
-            "  - Talk Tracks: 2 short lines tied to the Top Pick (≤18 words each).\n"
-            "  - Upsell/Cross-sell: 2 bullets (attachments; PM/charger/telemetry or rentals for peaks).\n"
-            "- Common Objections: 6–8 items, one line each in this pattern and level of detail:\n"
-            "  '- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <grounded fact>; Next: <small action>'.\n"
+            "- Capacity/Tires/Attachments: summarize needs; if missing, say 'Not specified'.\n"
+            "- Sales Pitch Techniques: concise but specific as instructed in earlier rules.\n"
+            "- Common Objections: 6–8 items, one line each in the pattern: '- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <fact>; Next: <action>'.\n"
             "- Never invent pricing, availability, or specs not present in the context.\n"
-            "- For the Comparison section, USE ONLY the numbers from the COMPETITOR PEERS block "
-            "(capacity/turning/width/fuel). Write 2–4 concise bullets contrasting the Top Pick versus those peers. "
-            "Do not invent other specs; do not restate peers not listed.\n"
         )
     }
 
     messages = [
         system_prompt,
-        {"role": "system", "content": allowed_block},   # strict grounding list
-        {"role": "system", "content": comp_block},      # grounded competitor numbers
+        {"role": "system", "content": allowed_block},  # strict grounding list
         {"role": "user",   "content": prompt_ctx}
     ]
 
@@ -394,11 +479,18 @@ def run_recommendation_flow(user_q: str) -> str:
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
+    # Enforce model list & tidy
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    ai_reply = _unify_model_mentions(ai_reply, allowed)  # keep if you added earlier
-    ai_reply = _fix_labels_and_breaks(ai_reply)          # keep formatting fixes
-    ai_reply = _fix_common_objections(ai_reply)          # tidy objections
-    ai_reply = _tidy_formatting(ai_reply)                # final whitespace pass
+    ai_reply = _unify_model_mentions(ai_reply, allowed) if ' _unify_model_mentions' in globals() else ai_reply
+    ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
+    ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
+    ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply
+
+    # >>> NEW: compute grounded peer comparison and inject it
+    if top_pick_code:
+        peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
+        ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)
+
     return ai_reply
 
 # ─── Chat API (Recommendation + Inquiry) ─────────────────────────────────
