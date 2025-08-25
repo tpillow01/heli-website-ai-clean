@@ -1096,6 +1096,165 @@ Use short paragraphs and bullets, avoid fluff, and DO NOT output anything outsid
         return jsonify({"html": html})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+# ===================== Competitor Data (non-breaking add-on) =====================
+# This section only ADDS functionality. No existing functions are modified.
+
+from functools import lru_cache
+
+# Where the converted competitor sheet lives (see earlier converter script)
+COMPETITORS_PATH = os.path.join(BASE_DIR, "data", "heli_comp_models.json")
+
+@lru_cache(maxsize=1)
+def _load_competitors():
+    """Load pre-converted competitor data (list of dicts). Safe if file is missing."""
+    try:
+        with open(COMPETITORS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+def _heli_family(heli_model: dict) -> str:
+    """
+    Lightweight family inference for your HELI model (used for peer matching).
+    Adjust if you want finer grouping.
+    """
+    p = (heli_model.get("power") or "").lower()
+    d = (heli_model.get("drive_type") or "").lower()
+
+    # Electric
+    if "electric" in p:
+        if "cushion" in d: return "Electric Cushion"
+        # If drive_type doesn't include 'cushion', prefer pneumatic bucket by default
+        return "Electric Pneumatic"
+
+    # IC
+    if "diesel" in p or "lpg" in p or "ic" in p:
+        if "cushion" in d: return "IC Cushion"
+        return "IC Pneumatic"
+
+    return "Other/Unknown"
+
+def _abs(v): 
+    try: 
+        return abs(float(v))
+    except Exception:
+        return 0.0
+
+def _dist(a, b):
+    if a is None and b is None: 
+        return 0.0
+    if a is None or b is None:
+        # penalize missing values slightly
+        return 10.0
+    try:
+        return abs(float(a) - float(b))
+    except Exception:
+        return 10.0
+
+def _as_lb(v):
+    # Reuse your existing formatters if available
+    s = _fmt_lb(v)
+    return s or ("—")
+
+def _as_in(v):
+    s = _fmt_in(v)
+    return s or ("—")
+
+def find_best_competitors(heli_model: dict, K: int = 3):
+    """
+    Score competitors by (a) same family, (b) closest capacity, and
+    lightly consider turning radius and overall width if present.
+    Return top-K competitor dicts.
+    """
+    comp = _load_competitors()
+    if not comp:
+        return []
+
+    fam = _heli_family(heli_model)
+    cap = heli_model.get("_capacity_lb") or _num_from_text(heli_model.get("capacity"))
+    turn = heli_model.get("_turning_in") or _num_from_text(heli_model.get("turning_radius"))
+    width = heli_model.get("_overall_width_in") or _num_from_text(heli_model.get("overall_width"))
+
+    scored = []
+    for row in comp:
+        score = 0.0
+
+        # Family match is very important
+        score += 0 if (row.get("family") == fam) else 30
+
+        # Capacity closeness (per 100 lb)
+        score += _dist(cap, row.get("capacity_lb")) / 100.0
+
+        # Gentle nudges for geometry similarity
+        if turn and row.get("turning_in"):
+            score += _dist(turn, row.get("turning_in")) / 50.0
+        if width and row.get("width_in"):
+            score += _dist(width, row.get("width_in")) / 50.0
+
+        scored.append((score, row))
+
+    scored.sort(key=lambda x: x[0])
+    return [r for _, r in scored[:K]]
+
+def _peer_table_html(peers: list):
+    """Small, responsive table for the Competitive Edge tab."""
+    rows = []
+    for p in peers:
+        rows.append(
+            f"<tr>"
+            f"<td>{(p.get('brand') or '')}</td>"
+            f"<td>{(p.get('model') or '')}</td>"
+            f"<td>{(p.get('family') or '')}</td>"
+            f"<td class='num'>{_as_lb(p.get('capacity_lb'))}</td>"
+            f"<td class='num'>{_as_in(p.get('turning_in'))}</td>"
+            f"<td class='num'>{_as_in(p.get('width_in'))}</td>"
+            f"<td>{(p.get('fuel') or '—').title()}</td>"
+            f"</tr>"
+        )
+    if not rows:
+        rows = ["<tr><td colspan='7'>No close peers found.</td></tr>"]
+
+    return (
+        "<div class='peer-table-wrap'>"
+        "<table class='peer-table'>"
+        "<thead>"
+        "<tr>"
+        "<th>Brand</th><th>Model</th><th>Family</th>"
+        "<th class='num'>Capacity</th><th class='num'>Turning</th><th class='num'>Width</th><th>Fuel</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+        + "".join(rows) +
+        "</tbody></table></div>"
+    )
+
+@app.get("/api/competitor_peers")
+def api_competitor_peers():
+    """
+    Returns a small HTML table and raw JSON rows for the closest competitor matches.
+    Non-breaking: you can optionally fetch this in your edge tab and append the table.
+    Usage: /api/competitor_peers?model=<slug>&k=3
+    """
+    slug = (request.args.get("model") or "").strip()
+    k = request.args.get("k", "").strip()
+    try:
+        K = int(k) if k else 3
+    except Exception:
+        K = 3
+
+    heli_model = _find_model_by_slug(slug)
+    if not heli_model:
+        return jsonify({"error": "Model not found"}), 404
+
+    peers = find_best_competitors(heli_model, K=K)
+    html = _peer_table_html(peers)
+
+    # Also return the rows if you want to render in the client
+    return jsonify({"html": html, "rows": peers})
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
