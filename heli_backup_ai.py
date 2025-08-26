@@ -15,10 +15,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
 # Grounding helpers from your ai_logic.py
+# Grounding helpers from your ai_logic.py
 from ai_logic import (
     generate_forklift_context,
-    select_models_for_question,   # must exist in ai_logic.py
-    allowed_models_block          # must exist in ai_logic.py
+    select_models_for_question,
+    allowed_models_block,
+    debug_parse_and_rank,   # <<< add this
 )
 
 # ─── Flask & OpenAI client ───────────────────────────────────────────────
@@ -493,7 +495,7 @@ def run_recommendation_flow(user_q: str) -> str:
 
     return ai_reply
 
-# ─── Chat API (Recommendation + Inquiry) ─────────────────────────────────
+# ─── Chat API (Recommendation + Inquiry + Coach) ─────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
@@ -505,6 +507,11 @@ def chat():
         return jsonify({"response": "Please enter a description of the customer’s needs."}), 400
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
+
+    # ───────── Sales Coach mode ─────────
+    if mode == "coach":
+        ai_reply = run_sales_coach(user_q)   # helper can be defined later in this file
+        return jsonify({"response": ai_reply})
 
     # ───────── Inquiry mode ─────────
     if mode == "inquiry":
@@ -600,9 +607,6 @@ def chat():
     ai_reply = run_recommendation_flow(user_q)
     return jsonify({"response": ai_reply})
 
-# ─── Debug: parse & rank peek ────────────────────────────────────────────
-from ai_logic import debug_parse_and_rank
-
 @app.post("/api/debug_recommend")
 def api_debug_recommend():
     data = request.get_json(silent=True) or {}
@@ -619,7 +623,8 @@ def api_debug_recommend():
 def api_modes():
     return jsonify([
         {"id": "recommendation", "label": "Forklift Recommendation"},
-        {"id": "inquiry",        "label": "Customer Inquiry"}
+        {"id": "inquiry",        "label": "Customer Inquiry"},
+        {"id": "coach",          "label": "Sales Coach"},
     ])
 
 # ─── Map routes ───────────────────────────────────────────────────────────
@@ -1728,6 +1733,158 @@ def _build_competitor_block_for_model(heli_model_name: str, k: int = 4) -> str:
         model = (p.get("model") or "").strip()
         lines.append(f"- {brand} {model}: {cap}; turn {turn}; width {wid}; {fuel}")
     return "\n".join(lines)
+
+# --- Sales Coach helpers -------------------------------------------------
+
+def _coach_detect_submode(text: str) -> str:
+    t = (text or "").lower()
+    if any(k in t for k in ["roleplay", "role-play", "mock call", "practice", "simulate"]):
+        return "roleplay"
+    if any(k in t for k in ["critique", "rewrite", "tune", "improve", "score my pitch"]):
+        return "critique"
+    if any(k in t for k in ["objection", "objections", "handle objections", "pushback"]):
+        return "objections"
+    if any(k in t for k in ["discovery", "call plan", "meeting plan", "questions to ask"]):
+        return "discovery"
+    if any(k in t for k in ["email", "voicemail", "linkedin", "dm", "follow-up", "follow up"]):
+        return "messaging"
+    if any(k in t for k in ["roi", "tco", "total cost", "business case"]):
+        return "roi"
+    return "coach_general"
+
+
+def run_sales_coach(user_q: str) -> str:
+    mode = _coach_detect_submode(user_q)
+
+    # One system prompt, branching instructions per sub-mode
+    base_rules = (
+        "You are an expert forklift sales coach for a HELI dealership.\n"
+        "Constraints (do NOT echo):\n"
+        "- Use short headers exactly as requested for each sub-mode below.\n"
+        "- Bullets must start with '- ' (hyphen + space). No other bullet symbols.\n"
+        "- Keep spacing tight: no blank lines inside sections; one blank line between sections max.\n"
+        "- Never invent pricing, lead times, or competitor exact specs; keep competitor claims generic.\n"
+        "- If info is missing, include a short 'Questions to Clarify:' section with 2–3 bullets.\n"
+    )
+
+    # Per-submode formatting guides
+    if mode == "roleplay":
+        guide = (
+            "Output ONLY these sections:\n"
+            "Scenario:\n"
+            "Opening:\n"
+            "Roleplay:\n"
+            "Branching Responses:\n"
+            "Next Actions:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- 'Roleplay:' contains alternating lines like '- Rep: …' and '- Prospect: …' (6–10 lines total).\n"
+            "- 'Branching Responses:' include 2–3 likely forks ('price push', 'electric skepticism', etc.) with 1–2 lines each.\n"
+            "- 'Next Actions:' are 3 concrete steps the rep should take after the call.\n"
+        )
+    elif mode == "critique":
+        guide = (
+            "Output ONLY these sections:\n"
+            "Diagnosis:\n"
+            "Rewrite (≤120 words):\n"
+            "Talk Tracks:\n"
+            "Next Actions:\n"
+            "Questions to Clarify:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- 'Diagnosis:' 5–7 bullets (clarity, relevance to buyer, proof, value, CTA, structure).\n"
+            "- 'Rewrite (≤120 words):' one tight paragraph, conversational, outcome-led.\n"
+            "- 'Talk Tracks:' 3 bullets (short, customer-facing lines).\n"
+            "- 'Next Actions:' 3 bullets (immediately usable steps).\n"
+        )
+    elif mode == "objections":
+        guide = (
+            "Output ONLY these sections:\n"
+            "Objection Handling Pack:\n"
+            "Questions to Clarify:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- Produce 6–8 lines under 'Objection Handling Pack:' each formatted exactly as\n"
+            "  '- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <safe fact>; Next: <tiny step>'.\n"
+        )
+    elif mode == "discovery":
+        guide = (
+            "Output ONLY these sections:\n"
+            "Call Goals:\n"
+            "Discovery Questions:\n"
+            "Red Flags:\n"
+            "Commitment & Next Step:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- 'Call Goals:' 3 bullets (what success looks like).\n"
+            "- 'Discovery Questions:' 10 bullets grouped implicitly (loads, aisle/mast, duty cycle/power, surface/tires, safety/attachments, timeline/budget).\n"
+            "- 'Red Flags:' 3–4 bullets.\n"
+            "- 'Commitment & Next Step:' 2 bullets, very specific.\n"
+        )
+    elif mode == "messaging":
+        guide = (
+            "Output ONLY these sections:\n"
+            "Subject:\n"
+            "Email Body:\n"
+            "Voicemail (≤15 sec):\n"
+            "LinkedIn DM:\n"
+            "Next Actions:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- 'Subject:' 1 line, value-led.\n"
+            "- 'Email Body:' 5–7 bullets or 5–7 short lines (no long paragraphs).\n"
+            "- 'Voicemail (≤15 sec):' 2–3 lines the rep can read naturally.\n"
+            "- 'LinkedIn DM:' 3–4 short lines.\n"
+            "- 'Next Actions:' 2 bullets for follow-up cadence.\n"
+        )
+    elif mode == "roi":
+        guide = (
+            "Output ONLY these sections:\n"
+            "Business Case Angle:\n"
+            "Inputs to Collect:\n"
+            "Talk Track:\n"
+            "Risks & Mitigations:\n"
+            "Next Actions:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- No prices. Use variables (e.g., 'fuel_cost_per_hr', 'pm_cost_per_hr').\n"
+            "- 'Talk Track:' 4 bullets, outcomes > features.\n"
+        )
+    else:  # coach_general
+        guide = (
+            "Output ONLY these sections:\n"
+            "Quick Diagnosis:\n"
+            "Suggestions:\n"
+            "Talk Tracks:\n"
+            "Next Actions:\n"
+            "Questions to Clarify:\n"
+            "\n"
+            "Rules for this sub-mode (do NOT echo):\n"
+            "- 4–6 bullets under 'Quick Diagnosis:' and 'Suggestions:'.\n"
+            "- 'Talk Tracks:' 3 bullets.\n"
+            "- 'Next Actions:' 3 bullets.\n"
+        )
+
+    system_prompt = {"role": "system", "content": base_rules + guide}
+    messages = [system_prompt, {"role": "user", "content": user_q}]
+
+    try:
+        resp = client.chat.completions.create(
+            model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
+            messages=messages,
+            max_tokens=700,
+            temperature=0.5
+        )
+        out = resp.choices[0].message.content.strip()
+    except Exception as e:
+        out = f"❌ Internal error: {e}"
+
+    # Optional: reuse your tidy helper if you have it
+    try:
+        out = _tidy_formatting(out)  # if defined elsewhere in your app
+    except Exception:
+        pass
+    return out
 
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────
