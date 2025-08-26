@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Login — Usage</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#cc0000">
+  <style>
+    body{margin:0;background:#0e0e0f;color:#eee;font-family:Inter,system-ui,Arial}
+    .box{max-width:420px;margin:10vh auto;padding:32px;background:#141416;border:1px solid #2a2a2c;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    h1{margin:0 0 18px;font-size:22px;letter-spacing:.3px}
+    label{display:block;margin:14px 0 6px;color:#cfcfcf;font-size:13px}
+    input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1d;color:#fff}
+    button{width:100%;margin-top:18px;padding:12px 14px;border:0;border-radius:12px;background:#cc0000;color:#fff;font-weight:600;cursor:pointer}
+    .brand{display:flex;align-items:center;gap:10px;margin-bottom:16px;color:#cc0000}
+    .brand .dot{width:10px;height:10px;border-radius:50%;background:#cc0000;box-shadow:0 0 18px #cc0000}
+    .flash{margin-top:10px;color:#ff9b9b}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="brand"><span class="dot"></span><div>Admin — Usage</div></div>
+    <h1>Sign in</h1>
+    <form method="post">
+      <label>Username</label>
+      <input name="username" autocomplete="username" required />
+      <label>Password</label>
+      <input name="password" type="password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+    </form>
+    {% with msgs = get_flashed_messages(category_filter=['error']) %}
+      {% if msgs %}<div class="flash">{{ msgs[0] }}</div>{% endif %}
+    {% endwith %}
+  </div>
+</body>
+</html>

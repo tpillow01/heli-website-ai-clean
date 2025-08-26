@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Usage Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#cc0000">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root{--bg:#0e0e10;--card:#141416;--muted:#a7a7ab;--brand:#cc0000;--br:#232326}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:#eee;font-family:Inter,system-ui,Arial}
+    header{position:sticky;top:0;z-index:3;background:linear-gradient(0deg,transparent,rgba(0,0,0,.35)),var(--card);border-bottom:1px solid var(--br)}
+    .wrap{max-width:1150px;margin:0 auto;padding:18px 18px}
+    h1{margin:0;font-size:22px;letter-spacing:.3px}
+    .brand{display:flex;gap:10px;align-items:center;color:var(--brand)}
+    .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--brand);box-shadow:0 0 18px var(--brand)}
+    .bar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px}
+    .filters{display:flex;gap:8px;flex-wrap:wrap}
+    .filters input,.filters select{background:#1a1a1d;border:1px solid var(--br);color:#fff;border-radius:10px;padding:10px 12px}
+    .btn{background:var(--brand);border:0;border-radius:10px;color:#fff;padding:10px 14px;font-weight:600;cursor:pointer}
+    main{padding:18px}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+    .tile{grid-column:span 3;background:var(--card);border:1px solid var(--br);border-radius:16px;padding:16px}
+    .tile h3{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+    .tile .big{font-size:28px;font-weight:700}
+    .card{grid-column:span 12;background:var(--card);border:1px solid var(--br);border-radius:16px;padding:16px}
+    canvas{width:100%;height:320px}
+    table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    th,td{text-align:left;padding:10px 12px}
+    th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+    tr{background:#16161a;border:1px solid var(--br)}
+    tr:hover{background:#1a1a20}
+    tr td:first-child, tr th:first-child{border-top-left-radius:10px;border-bottom-left-radius:10px}
+    tr td:last-child, tr th:last-child{border-top-right-radius:10px;border-bottom-right-radius:10px}
+    .badge{display:inline-block;background:#2a2a2e;border:1px solid var(--br);padding:2px 8px;border-radius:999px;font-size:12px}
+    .logout{color:#fff;text-decoration:none;border:1px solid var(--br);padding:10px 12px;border-radius:10px}
+    .logout:hover{background:#1a1a1d}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="brand"><span class="dot"></span><div>Admin — Usage</div></div>
+      <div class="bar">
+        <h1>Usage Dashboard</h1>
+        <a class="logout" href="{{ url_for('admin_usage.logout') }}">Logout</a>
+      </div>
+      <div class="filters">
+        <label>Start <input type="date" id="fStart" value="{{ default_start }}"></label>
+        <label>End <input type="date" id="fEnd" value="{{ default_end }}"></label>
+        <select id="fUser"><option value="">All users</option></select>
+        <select id="fEndpoint"><option value="">All endpoints</option></select>
+        <button class="btn" id="btnApply">Apply</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="grid" id="tiles">
+      <div class="tile"><h3>Total Events</h3><div class="big" id="tEvents">0</div></div>
+      <div class="tile"><h3>Prompt Tokens</h3><div class="big" id="tPrompt">0</div></div>
+      <div class="tile"><h3>Completion Tokens</h3><div class="big" id="tCompletion">0</div></div>
+      <div class="tile"><h3>Active Users</h3><div class="big" id="tUsers">0</div></div>
+    </section>
+
+    <section class="card">
+      <h2 style="margin:0 0 8px;font-size:16px">Daily Activity</h2>
+      <canvas id="dailyChart"></canvas>
+    </section>
+
+    <section class="card">
+      <h2 style="margin:0 0 8px;font-size:16px">Event Log</h2>
+      <div style="overflow:auto">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th>Date (UTC)</th>
+              <th>User</th>
+              <th>Endpoint</th>
+              <th>Action</th>
+              <th>Prompt</th>
+              <th>Completion</th>
+              <th>Duration (ms)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const el = (id)=>document.getElementById(id);
+    let chart;
+
+    async function load() {
+      const qs = buildQuery();
+      const res = await fetch(`/admin/usage.json?${qs}`);
+      const data = await res.json();
+
+      // Header tiles
+      el('tEvents').textContent = data.summary.total_events.toLocaleString();
+      el('tPrompt').textContent = data.summary.total_prompt_tokens.toLocaleString();
+      el('tCompletion').textContent = data.summary.total_completion_tokens.toLocaleString();
+      el('tUsers').textContent = data.summary.unique_users.toLocaleString();
+
+      // Filters (populate once)
+      fillSelect('fUser', data.users);
+      fillSelect('fEndpoint', data.endpoints);
+
+      // Chart
+      const labels = data.daily.map(d => d.date);
+      const events = data.daily.map(d => d.events);
+      const prompt = data.daily.map(d => d.prompt);
+      const completion = data.daily.map(d => d.completion);
+
+      const cfg = {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Events', data: events },
+            { label: 'Prompt Tokens', data: prompt },
+            { label: 'Completion Tokens', data: completion },
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: '#ddd' } } },
+          scales: {
+            x: { ticks: { color: '#bbb' }, grid: { color: '#222' } },
+            y: { ticks: { color: '#bbb' }, grid: { color: '#222' } }
+          }
+        }
+      };
+      if (chart) chart.destroy();
+      chart = new Chart(document.getElementById('dailyChart'), cfg);
+
+      // Table
+      const tb = document.querySelector('#tbl tbody');
+      tb.innerHTML = '';
+      for (const r of data.rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.when_utc}</td>
+          <td>${r.username || ''}</td>
+          <td><span class="badge">${r.endpoint}</span></td>
+          <td>${r.action}</td>
+          <td>${r.tokens_prompt}</td>
+          <td>${r.tokens_completion}</td>
+          <td>${r.duration_ms}</td>
+        `;
+        tb.appendChild(tr);
+      }
+    }
+
+    function buildQuery() {
+      const p = new URLSearchParams();
+      const s = el('fStart').value;
+      const e = el('fEnd').value;
+      const u = el('fUser').value;
+      const ep = el('fEndpoint').value;
+      if (s) p.set('start', s);
+      if (e) p.set('end', e);
+      if (u) p.set('username', u);
+      if (ep) p.set('endpoint', ep);
+      return p.toString();
+    }
+    function fillSelect(id, arr) {
+      const sel = el(id);
+      const seen = new Set(Array.from(sel.options).map(o => o.value));
+      for (const v of arr) {
+        if (!seen.has(v)) {
+          const o = document.createElement('option');
+          o.value = v; o.textContent = v;
+          sel.appendChild(o);
+        }
+      }
+    }
+    document.getElementById('btnApply').addEventListener('click', load);
+
+    load();
+  </script>
+</body>
+</html>

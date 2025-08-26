@@ -1,29 +1,37 @@
 # app.py  — no "Rules:" section in AI responses
-import os, json, difflib, sqlite3, re
+import os, json, difflib, sqlite3, re, time
 from datetime import timedelta
 from functools import wraps
 
 from flask import (
     Flask, render_template, request, jsonify, redirect, url_for, session, Response
 )
+
 # add near the top with other imports
 from csv_locations import load_csv_locations, to_geojson
-# after you print accounts/models loaded:
-locations_index = load_csv_locations()
-print(f"✅ Loaded {len(locations_index)} locations from customer_location.csv")
+
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
-# Grounding helpers from your ai_logic.py
 # Grounding helpers from your ai_logic.py
 from ai_logic import (
     generate_forklift_context,
     select_models_for_question,
     allowed_models_block,
-    debug_parse_and_rank,   # <<< add this
+    debug_parse_and_rank,   # <<< keep this
 )
 
-# ─── Flask & OpenAI client ───────────────────────────────────────────────
+# Admin usage tracking
+from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+
+# -------------------------------------------------------------------------
+# Data boot
+# (If you load accounts/models earlier, keep that; then load locations.)
+locations_index = load_csv_locations()
+print(f"✅ Loaded {len(locations_index)} locations from customer_location.csv")
+
+# -------------------------------------------------------------------------
+# Flask & OpenAI client
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-insecure")
 app.permanent_session_lifetime = timedelta(days=7)
@@ -34,6 +42,14 @@ app.config.update(
 )
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# -------------------------------------------------------------------------
+# Admin usage tracking bootstrap (creates DB + coarse per-request logging)
+init_admin_usage(app)
+app.register_blueprint(admin_bp)  # /admin/login, /admin, /admin/usage.json
+
+# (Your routes continue below…)
+
 
 # ─── USERS DB (simple SQLite) ────────────────────────────────────────────
 USERS_DB_PATH = os.getenv("USERS_DB_PATH", "heli_users.db")
