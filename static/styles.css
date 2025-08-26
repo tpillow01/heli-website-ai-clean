@@ -312,3 +312,16 @@ body{
 .peer-table th, .peer-table td { padding:10px 12px; border-bottom:1px solid #e7dac6; white-space:nowrap; }
 .peer-table th.num, .peer-table td.num { text-align:right; }
 .peer-table thead th { font-weight:800; background:#fff; border-bottom:2px solid #e7dac6; }
+
+.logout-link {
+  color: #fff;
+  text-decoration: none;
+  border: 1px solid #333;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-left: 10px;
+}
+.logout-link:hover {
+  background: #cc0000;
+  border-color: #cc0000;
+}
