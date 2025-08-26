@@ -5,9 +5,82 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sign up • Heli AI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  <!-- re-use the same inline styles as login (keep in one place if you prefer a base template) -->
   <style>
-    /* copy the same :root, body.auth, .auth-card, etc. from login.html */
+    :root{
+      --brand:#d92323;
+      --bg:#0f1115;
+      --card:#171a21;
+      --muted:#9097a5;
+      --text:#e8ecf1;
+      --ring:rgba(217,35,35,.45);
+    }
+    body.auth {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(1200px 600px at 110% -10%, rgba(217,35,35,.09), transparent 40%),
+        radial-gradient(800px 400px at -10% 110%, rgba(217,35,35,.08), transparent 40%),
+        linear-gradient(180deg, #0e0f14 0%, #10131a 100%);
+      color: var(--text);
+    }
+    .auth-card {
+      width: min(440px, 92vw);
+      background: color-mix(in hsl, var(--card), transparent 0%);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.02) inset;
+      overflow: hidden;
+      animation: pop .25s ease-out;
+    }
+    @keyframes pop { from { transform: translateY(6px); opacity:.7 } to { transform:none; opacity:1 } }
+    .auth-head {
+      display:flex; align-items:center; gap:.75rem;
+      padding:1.25rem 1.25rem 0 1.25rem;
+    }
+    .auth-head img { width:36px; height:36px; object-fit:contain }
+    .auth-title { font-weight:700; font-size:1.15rem; letter-spacing:.2px }
+    .auth-body { padding: 1.25rem; }
+    .muted { color: var(--muted); font-size:.9rem }
+    .field { margin-top: .9rem }
+    label { display:block; font-size:.9rem; margin:0 0 .4rem; color: var(--muted) }
+    .control {
+      display:flex; align-items:center; gap:.5rem;
+      background:#0f1218; border:1px solid rgba(255,255,255,.08);
+      border-radius:12px; padding:.9rem .95rem;
+      transition:border-color .15s, box-shadow .15s;
+    }
+    .control:focus-within {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
+    .control input {
+      border:0; outline:0; background:transparent; color:var(--text);
+      width:100%; font-size:1rem;
+    }
+    .toggle {
+      cursor:pointer; user-select:none; font-size:.85rem; color:var(--muted);
+    }
+    .actions { margin-top: 1.1rem; display:flex; gap:.6rem; align-items:center; justify-content:space-between }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+      border-radius:12px; padding:.85rem 1rem; border:1px solid transparent;
+      background:var(--brand); color:white; font-weight:600; width:100%;
+      transition: transform .06s ease, filter .2s ease;
+    }
+    .btn:hover{ filter:brightness(1.05) }
+    .btn:active{ transform: translateY(1px) }
+    .ghost { background:transparent; border-color:rgba(255,255,255,.12); color:var(--text) }
+    .error {
+      margin: .9rem 1.25rem 0; padding:.75rem .9rem;
+      background: rgba(217,35,35,.12);
+      border:1px solid rgba(217,35,35,.35);
+      color:#ffd8d8; border-radius:12px; font-size:.92rem;
+    }
+    .footer {
+      padding: 0 1.25rem 1.25rem; display:flex; justify-content:center; gap:.4rem; color: var(--muted); font-size:.92rem;
+    }
+    a.link { color:#ffd1d1; text-underline-offset:3px }
   </style>
 </head>
 <body class="auth">

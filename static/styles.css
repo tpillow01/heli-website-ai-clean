@@ -325,3 +325,4 @@ body{
   background: #cc0000;
   border-color: #cc0000;
 }
+.footer .muted[aria-hidden="true"] { margin: 0 .35rem; }

@@ -118,10 +118,11 @@
     </form>
 
     <div class="footer">
-      <span class="muted">No account?</span>
-      <a class="link" href="{{ url_for('signup') }}">Create one</a>
-    </div>
-  </div>
+  <span class="muted">No account?</span>
+  <a class="link" href="{{ url_for('signup') }}">Create one</a>
+  <span class="muted" aria-hidden="true">•</span>
+  <a class="link" href="{{ url_for('admin_usage.login') }}">Admin</a>
+</div>
 
   <script>
     const btn = document.getElementById('toggle-pass');
