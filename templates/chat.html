@@ -41,6 +41,7 @@
         <a href="{{ url_for('map_page') }}" class="tab">Map</a>
         <a href="/battlecards" class="nav-link {{ 'active' if request.path.startswith('/battlecards') else '' }}">
         Battle Cards
+        <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
         </a>
       </nav>
 
