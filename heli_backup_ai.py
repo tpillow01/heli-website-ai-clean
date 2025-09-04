@@ -19,10 +19,15 @@ from ai_logic import (
     select_models_for_question,
     allowed_models_block,
     debug_parse_and_rank,   # <<< keep this
+    top_pick_meta           # <<< NEW: promo helper
 )
 
 # Admin usage tracking
 from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+
+# Promotions
+from promotions import promos_for_context, render_promo_lines
+
 
 # -------------------------------------------------------------------------
 # Data boot
@@ -487,19 +492,34 @@ def run_recommendation_flow(user_q: str) -> str:
     ]
 
     try:
+        # Start timer for fine-grained usage logging
+        t0 = time.perf_counter()
+
         resp = client.chat.completions.create(
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             messages=messages,
             max_tokens=650,
             temperature=0.4
         )
+
+        # Compute duration and log token usage
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        log_model_usage(
+            resp,
+            endpoint="/chat",
+            action="chat_reply",
+            duration_ms=duration_ms,
+            extra={"who": session.get("username")}
+        )
+
         ai_reply = resp.choices[0].message.content.strip()
+
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
     # Enforce model list & tidy
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    ai_reply = _unify_model_mentions(ai_reply, allowed) if ' _unify_model_mentions' in globals() else ai_reply
+    ai_reply = _unify_model_mentions(ai_reply, allowed) if '_unify_model_mentions' in globals() else ai_reply
     ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
     ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
     ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply

@@ -533,6 +533,35 @@ def allowed_models_block(allowed: List[str]) -> str:
         return "ALLOWED MODELS:\n(none – say 'No exact match from our lineup.')"
     return "ALLOWED MODELS:\n" + "\n".join(f"- {x}" for x in allowed)
 
+# --- promo helpers: expose top-pick code / class / power -----------------
+def _class_of(row: Dict[str, Any]) -> str:
+    t = _text_from_keys(row, TYPE_KEYS)
+    # Try to extract a forklift class like "I", "II", "III" from text
+    m = re.search(r'\bclass\s*([ivx]+)\b', (t or ""), re.I)
+    if m:
+        roman = m.group(1).upper()
+        # Map common roman numerals to I…V
+        roman = roman.replace("V","V").replace("X","X")
+        return roman
+    # Fallback: sometimes stored directly as "I"/"II"/"III"
+    t = (t or "").strip().upper()
+    if t in {"I","II","III","IV","V"}:
+        return t
+    return ""
+
+def model_meta_for(row: Dict[str, Any]) -> tuple[str, str, str]:
+    """Return (model_code, class, power) for a models.json row."""
+    code = _safe_model_name(row)  # already prefers Model/Code/Name fields
+    cls = _class_of(row)
+    pwr = _power_of(row) or ""
+    return (code, cls, pwr)
+
+def top_pick_meta(user_q: str) -> Optional[tuple[str, str, str]]:
+    hits = filter_models(user_q, limit=1)
+    if not hits:
+        return None
+    return model_meta_for(hits[0])
+
 # --- debug helper --------------------------------------------------------
 def debug_parse_and_rank(user_q: str, limit: int = 10):
     want = _parse_requirements(user_q)
