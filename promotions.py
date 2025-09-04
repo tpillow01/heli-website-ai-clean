@@ -125,39 +125,71 @@ def active_promos(today: Optional[date] = None) -> List[Promo]:
     d = today or date.today()
     return [p for p in PROMOS if p.window_start <= d <= p.window_end]
 
+# promotions.py
+
+def _family_from_code(code: str) -> str:
+    """
+    Map HELI model codes to a promo family.
+    CBD…   -> warehouse (pallet jacks / warehouse equip)
+    CPD…   -> li-ion electric counterbalance (Class I)
+    CPCD…  -> IC diesel counterbalance
+    CPYD…  -> IC LPG counterbalance
+    Rough terrain families can still be treated as IC.
+    """
+    c = (code or "").upper().strip()
+    if c.startswith("CBD"):
+        return "warehouse"
+    if c.startswith("CPD"):         # e.g., CPD18SQ, CPD30
+        return "li-ion"
+    if c.startswith("CPCD"):        # diesel
+        return "ic"
+    if c.startswith("CPYD"):        # LPG / dual-fuel
+        return "ic"
+    # fallback
+    return ""
+
 def promos_for_context(model_code: str, cls: str, power: str) -> List[Promo]:
     """
-    model_code: e.g., CPD18SQ-..., CBD20J-Li3, etc.
-    cls:       "I", "II", "III", "RT", etc. (from your models.json if available)
-    power:     "Lithium", "Diesel", "LPG", "Dual Fuel", etc.
+    Return ONLY applicable promos for the chosen model.
+    Logic is conservative: match by explicit model family, class, and power.
     """
-    m = model_code.upper()
-    candidates = active_promos()
-    out: List[Promo] = []
+    targets: set[str] = set()
 
-    # Pallet jacks
-    if m.startswith("CBD"):
-        out += [p for p in candidates if p.applies_to == "warehouse"]
+    # 1) Model family by code
+    fam = _family_from_code(model_code)
+    if fam:
+        targets.add(fam)
 
-    # Li-ion counterbalance (Class I) by code CPD… or power flag
-    if m.startswith("CPD") or power.lower().startswith("lith"):
-        out += [p for p in candidates if p.applies_to in ("li-ion",)]
+    # 2) Forklift class (e.g., "II" -> Class II electrics)
+    cl = (cls or "").strip().upper()
+    if cl == "II":
+        targets.add("classII")
 
-    # Class II electrics
-    if cls == "II":
-        out += [p for p in candidates if p.applies_to in ("classII",)]
+    # 3) Power hint (tighten, not broaden)
+    pw = (power or "").lower()
+    if any(x in pw for x in ("lpg", "propane", "dual fuel", "dual-fuel", "lp gas", "gas")):
+        targets.add("ic")
+    elif "diesel" in pw:
+        targets.add("ic")
+    elif any(x in pw for x in ("lithium", "li-ion", "li ion", "electric", "battery")):
+        targets.add("li-ion")
 
-    # IC families (Diesel/LPG/Dual Fuel)
-    if power.lower() in ("diesel", "lpg", "dual fuel"):
-        out += [p for p in candidates if p.applies_to == "ic"]
+    # If we detected a class II, prefer that specifically
+    if "classII" in targets:
+        desired = {"classII"}
+    # Else use explicit family/power
+    elif targets:
+        desired = targets
+    else:
+        # No signals -> return nothing (avoid dumping all promos)
+        return []
 
-    # Deduplicate by id
-    seen = set()
-    unique: List[Promo] = []
-    for p in out:
-        if p.id not in seen:
-            unique.append(p); seen.add(p.id)
-    return unique
+    # Only active and only in desired families
+    cand = [p for p in active_promos() if p.applies_to in desired]
+
+    # Optional: keep it tidy — at most 2 items
+    return cand[:2]
+
 
 def render_promo_lines(promos: Iterable[Promo]) -> List[str]:
     lines = []
