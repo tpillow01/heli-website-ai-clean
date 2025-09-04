@@ -800,7 +800,8 @@ def api_locations():
         if n in rep_idx_norm:
             return rep_idx_norm[n]
         if rep_norm_keys:
-            guess = difflib.get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
+            # use the function we imported directly
+            guess = get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
             if guess:
                 return rep_idx_norm.get(guess[0])
         return None
@@ -827,6 +828,14 @@ def api_locations():
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                     continue
 
+                # NEW: optional contact columns (safe if columns are missing)
+                first  = (row.get("First Name", "") or "").strip()
+                last   = (row.get("Last Name", "") or "").strip()
+                title  = (row.get("Job Title", "") or "").strip()
+                phone  = (row.get("Phone", "") or "").strip()
+                mobile = (row.get("Mobile", "") or "").strip()
+                email  = (row.get("Email", "") or "").strip()
+
                 rep = lookup_rep(name, city, state, zipc) or "Unassigned"
 
                 items.append({
@@ -839,7 +848,15 @@ def api_locations():
                     "sales_rep": rep,
                     "lat": lat,
                     "lon": lon,
-                    "County State": cs_raw
+                    "County State": cs_raw,
+
+                    # NEW: contact fields for popups
+                    "first_name": first,
+                    "last_name": last,
+                    "job_title": title,
+                    "phone": phone,
+                    "mobile": mobile,
+                    "email": email,
                 })
     except FileNotFoundError:
         return _Response(_json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")

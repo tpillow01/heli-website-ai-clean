@@ -14,8 +14,20 @@ HEADERS = {
     "lng": "Min of Longitude",
 }
 
+# NEW: contact columns in your CSV
+CONTACT_HEADERS = {
+    "first_name": "First Name",
+    "last_name":  "Last Name",
+    "job_title":  "Job Title",
+    "phone":      "Phone",
+    "mobile":     "Mobile",
+    "email":      "Email",
+}
+
+
 def _norm_key(s: str) -> str:
     return (s or "").strip().lower().replace(" ", "_")
+
 
 def _split_county_state(val: str) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -34,6 +46,7 @@ def _split_county_state(val: str) -> Tuple[Optional[str], Optional[str]]:
     # fallback: treat entire thing as county, state unknown
     return val, None
 
+
 def load_csv_locations(csv_path: str = CSV_PATH) -> Dict[str, Any]:
     """
     Returns: dict keyed by normalized account name, with:
@@ -46,7 +59,13 @@ def load_csv_locations(csv_path: str = CSV_PATH) -> Dict[str, Any]:
         "Zip": str,
         "Latitude": float|None,
         "Longitude": float|None,
-        "FormattedAddress": str
+        "FormattedAddress": str,
+        "FirstName": str,
+        "LastName": str,
+        "JobTitle": str,
+        "Phone": str,
+        "Mobile": str,
+        "Email": str
       }
     """
     index: Dict[str, Any] = {}
@@ -79,6 +98,14 @@ def load_csv_locations(csv_path: str = CSV_PATH) -> Dict[str, Any]:
                     [p for p in [addr, city, state, zipc] if p]
                 ) or name
 
+                # NEW: contact fields (trimmed)
+                first = (row.get(CONTACT_HEADERS["first_name"]) or "").strip()
+                last  = (row.get(CONTACT_HEADERS["last_name"])  or "").strip()
+                title = (row.get(CONTACT_HEADERS["job_title"])  or "").strip()
+                phone = (row.get(CONTACT_HEADERS["phone"])      or "").strip()
+                mobile= (row.get(CONTACT_HEADERS["mobile"])     or "").strip()
+                email = (row.get(CONTACT_HEADERS["email"])      or "").strip()
+
                 index[_norm_key(name)] = {
                     "Account Name": name,
                     "Address": addr,
@@ -89,12 +116,21 @@ def load_csv_locations(csv_path: str = CSV_PATH) -> Dict[str, Any]:
                     "Latitude": lat,
                     "Longitude": lng,
                     "FormattedAddress": formatted,
+
+                    # NEW: contact data
+                    "FirstName": first,
+                    "LastName": last,
+                    "JobTitle": title,
+                    "Phone": phone,
+                    "Mobile": mobile,
+                    "Email": email,
                 }
     except FileNotFoundError:
         # If CSV missing, return empty index; app should still run
         return {}
 
     return index
+
 
 def to_geojson(locations_index: Dict[str, Any]) -> Dict[str, Any]:
     """Turn the loaded locations into a GeoJSON FeatureCollection."""
@@ -103,13 +139,23 @@ def to_geojson(locations_index: Dict[str, Any]) -> Dict[str, Any]:
         lat, lng = v.get("Latitude"), v.get("Longitude")
         if lat is None or lng is None:
             continue
+
         props = {
-            "name": v.get("Account Name"),
+            "name":    v.get("Account Name"),
             "address": v.get("FormattedAddress"),
-            "city": v.get("City"),
-            "state": v.get("State"),
-            "zip": v.get("Zip"),
+            "city":    v.get("City"),
+            "state":   v.get("State"),
+            "zip":     v.get("Zip"),
         }
+
+        # NEW: add contact props only if they have values
+        if v.get("FirstName"): props["first_name"] = v["FirstName"]
+        if v.get("LastName"):  props["last_name"]  = v["LastName"]
+        if v.get("JobTitle"):  props["job_title"]  = v["JobTitle"]
+        if v.get("Phone"):     props["phone"]      = v["Phone"]
+        if v.get("Mobile"):    props["mobile"]     = v["Mobile"]
+        if v.get("Email"):     props["email"]      = v["Email"]
+
         features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [lng, lat]},

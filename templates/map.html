@@ -208,45 +208,57 @@
       return p.segment || '';
     }
 
-    // --- helpers to clean/derive fields client-side ---
-    function deriveFields(p) {
-      const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
+function deriveFields(p) {
+  const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
 
-      // County/State like "Greene IN"
-      let state = p.state || p.State || '';
-      let county = p.county || p.County || '';
-      const countyStateRaw = p['County State'] || p.county_state || '';
-      if ((!county || !state) && countyStateRaw) {
-        const parts = String(countyStateRaw).trim().split(/\s+/);
-        if (parts.length >= 2) {
-          state = state || parts[parts.length - 1];
-          county = county || parts.slice(0, -1).join(' ');
-        }
-      }
-
-      const address = p.Address || p.address || '';
-      const city = p.City || p.city || '';
-      const zip = String(p['Zip Code'] || p.zip || '').trim();
-
-      const full_address = [
-        address,
-        [city, state].filter(Boolean).join(', '),
-        zip,
-        'USA'
-      ].filter(Boolean).join(', ');
-
-      const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
-
-      // coords sanity
-      let lat = p.lat, lon = p.lon;
-      lat = lat == null ? null : parseFloat(lat);
-      lon = lon == null ? null : parseFloat(lon);
-      if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
-        lat = null; lon = null;
-      }
-
-      return { label, full_address, address, city, state, county, zip, sales_rep, segment: '', lat, lon };
+  // County/State like "Greene IN"
+  let state = p.state || p.State || '';
+  let county = p.county || p.County || '';
+  const countyStateRaw = p['County State'] || p.county_state || '';
+  if ((!county || !state) && countyStateRaw) {
+    const parts = String(countyStateRaw).trim().split(/\s+/);
+    if (parts.length >= 2) {
+      state = state || parts[parts.length - 1];
+      county = county || parts.slice(0, -1).join(' ');
     }
+  }
+
+  const address = p.Address || p.address || '';
+  const city = p.City || p.city || '';
+  const zip = String(p['Zip Code'] || p.zip || '').trim();
+
+  const full_address = [
+    address,
+    [city, state].filter(Boolean).join(', '),
+    zip,
+    'USA'
+  ].filter(Boolean).join(', ');
+
+  const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
+
+  // --- NEW: contact fields from API (/api/locations) or CSV header fallbacks
+  const first_name = p.first_name || p['First Name'] || '';
+  const last_name  = p.last_name  || p['Last Name']  || '';
+  const job_title  = p.job_title  || p['Job Title']  || '';
+  const phone      = p.phone      || p['Phone']      || '';
+  const mobile     = p.mobile     || p['Mobile']     || '';
+  const email      = p.email      || p['Email']      || '';
+
+  // coords sanity
+  let lat = p.lat, lon = p.lon;
+  lat = lat == null ? null : parseFloat(lat);
+  lon = lon == null ? null : parseFloat(lon);
+  if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
+    lat = null; lon = null;
+  }
+
+  return {
+    label, full_address, address, city, state, county, zip, sales_rep, segment: '',
+    lat, lon,
+    // NEW: pass through contact fields for popup use
+    first_name, last_name, job_title, phone, mobile, email
+  };
+}
 
     function withinRepFilter(pt) {
       const want = repFilter.value;
@@ -328,22 +340,41 @@
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-          const segFull = lookupSegmentForPoint(p) || '-';
-          const popupHtml = `
-            <div style="font:14px/1.35 system-ui, sans-serif;">
-              <div style="font-weight:700;">${p.label}</div>
-              <div>${p.full_address}</div>
-              <div>${p.sales_rep || 'Unassigned'}</div>
-              <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
-              <div>Segment: ${segFull}</div>
-              <div style="margin-top:6px;">
-                <button style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
-                        onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')">
-                  Run AI Analysis
-                </button>
-              </div>
+        const segFull = lookupSegmentForPoint(p) || '-';
+
+        // NEW: build contact block only if any contact data is present
+        const contactBits = [];
+        const nameLine = [p.first_name, p.last_name].filter(Boolean).join(' ');
+        if (nameLine) contactBits.push(nameLine);
+        if (p.job_title) contactBits.push(p.job_title);
+        if (p.phone) contactBits.push(`Phone: ${p.phone}`);
+        if (p.mobile) contactBits.push(`Mobile: ${p.mobile}`);
+        if (p.email) contactBits.push(`<a href="mailto:${p.email}">${p.email}</a>`);
+
+        const contactBlock = contactBits.length
+          ? `<div style="margin-top:6px;">
+              <div style="font-weight:700;color:#7b4f1b;">Primary Contact:</div>
+              <div>${contactBits.join('<br>')}</div>
+            </div>`
+          : '';
+
+        const popupHtml = `
+          <div style="font:14px/1.35 system-ui, sans-serif;">
+            <div style="font-weight:700;">${p.label}</div>
+            <div>${p.full_address}</div>
+            <div>${p.sales_rep || 'Unassigned'}</div>
+            <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
+            <div>Segment: ${segFull}</div>
+            ${contactBlock}
+            <div style="margin-top:6px;">
+              <button style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
+                      onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')">
+                Run AI Analysis
+              </button>
             </div>
-          `;
+          </div>
+        `;
+
           L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);
         });
         group.addTo(layerGroup);

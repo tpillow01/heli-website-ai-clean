@@ -404,3 +404,6 @@ body{
   color:var(--brand-red);
 }
 .logout-link:active{ transform:translateY(1px); }
+
+.popup .section-label{ font-weight:800; margin-top:8px; color:#7b4f1b; }
+.popup a { text-decoration:none; }
