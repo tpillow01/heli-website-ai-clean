@@ -639,7 +639,26 @@ def chat():
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
     # ───────── Recommendation mode (default) ─────────
+    user_q = user_q if 'user_q' in locals() else request.form.get('message') or request.args.get('q') or ''
     ai_reply = run_recommendation_flow(user_q)
+
+    # >>> Inject Current Promotions (no top_pick_code needed)
+    from ai_logic import top_pick_meta
+    from promotions import promos_for_context, render_promo_lines
+
+    meta = top_pick_meta(user_q)  # (model_code, class, power) inferred from your models
+    if meta:
+        top_code, top_class, top_power = meta
+        # if power preference was in the user's text, it will already be reflected in meta; this is just a gentle override
+        if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
+        elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
+        elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
+
+        promo_list = promos_for_context(top_code, top_class, top_power or "")
+        promo_lines = render_promo_lines(promo_list)
+        if promo_lines:
+            ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
+
     return jsonify({"response": ai_reply})
 
 @app.post("/api/debug_recommend")
