@@ -19,7 +19,7 @@ from ai_logic import (
     select_models_for_question,
     allowed_models_block,
     debug_parse_and_rank,   # <<< keep this
-    top_pick_meta           # <<< NEW: promo helper
+    top_pick_meta           # <<< NEW: promotions helper
 )
 
 # Admin usage tracking
@@ -27,7 +27,6 @@ from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usag
 
 # Promotions
 from promotions import promos_for_context, render_promo_lines
-
 
 # -------------------------------------------------------------------------
 # Data boot
