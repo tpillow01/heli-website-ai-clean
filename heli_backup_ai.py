@@ -691,261 +691,162 @@ def map_page():
 @login_required
 def api_locations():
     """
-    Build map points from a tolerant customer locations CSV and enrich with:
-      - Sales Rep (territory) from customer_report.csv
-      - Segment (R12...) from customer_report.csv
-      - Contact fields (if present) for popup
-    Also logs column names + row counts so Render logs are useful.
+    Build map points from customer_location.csv (with headers:
+      Address, County State, Zip Code, Min of Latitude, Min of Longitude,
+      First Name, Last Name, Job Title, Phone, Mobile, Email
+    )
+    Also enrich each point with Sales Rep and Segment using ZIP-only fallback
+    from customer_report.csv (mode/most common per ZIP).
     """
-    import csv, os, json as _json, re as _re
+    import csv, json as _json, re as _re
     import pandas as _pd
-    from difflib import get_close_matches
     from flask import Response as _Response
 
-    # ---------- helpers ----------
-    def strip_suffixes(s: str) -> str:
-        return _re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                       "", s or "", flags=_re.IGNORECASE)
-    def norm_name(s: str) -> str:
-        s = strip_suffixes(s or "")
-        s = s.lower()
-        s = _re.sub(r"[^a-z0-9]+", " ", s)
-        return _re.sub(r"\s+", " ", s).strip()
-    def norm_city(s: str) -> str:
-        s = (s or "").lower()
-        s = _re.sub(r"[^a-z0-9]+", " ", s)
-        return _re.sub(r"\s+", " ", s).strip()
-    def zip5(z: str) -> str:
+    def zip5(z):
         m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
-    def to_float(x):
+
+    def parse_latlon(v):
         try:
-            v = float(str(x).strip())
-            if v != v:  # NaN
+            s = str(v or "").strip()
+            if not s:
                 return None
-            return v
+            # allow comma decimals "40,1234"
+            s = s.replace(",", ".")
+            val = float(s)
+            return val
         except Exception:
             return None
 
-    def pick_col(row, *opts):
-        """Return first non-empty among possible header names."""
-        for k in opts:
-            if k in row and str(row[k]).strip() != "":
-                return row[k]
-        return ""
+    def split_county_state(val: str):
+        """
+        'Somerset PA' -> ('Somerset', 'PA')
+        """
+        if not val:
+            return None, None
+        parts = str(val).strip().split()
+        if not parts:
+            return None, None
+        if len(parts[-1]) == 2:  # looks like state code
+            state = parts[-1].upper()
+            county = " ".join(parts[:-1]) if len(parts) > 1 else None
+            return county or None, state
+        return val, None
 
-    # ---------- build rep + segment indexes from customer_report.csv ----------
-    rep_idx_exact = {}
-    rep_idx_norm = {}
-    rep_idx_norm_zip = {}
-    rep_idx_norm_city_state = {}
-
-    seg_idx_exact = {}
-    seg_idx_norm = {}
-    seg_idx_norm_zip = {}
-    seg_idx_norm_city_state = {}
-
+    # --- Build ZIP → (most common Rep, Segment) from customer_report.csv ---
+    rep_by_zip = {}
+    seg_by_zip = {}
     try:
-        rep_df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
-        HAVE_REP = "Sales Rep Name" in rep_df.columns
-        SOLD_COL = "Sold to Name"
-        SHIP_COL = "Ship to Name"
-        CITY_COL = "City"
-        ZIP_COL  = "Zip Code"
-        CST_COL  = "County State"
-        SEG_COL  = "R12 Segment (Sold to ID)"
+        df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        df["_zip5"] = df.get("Zip Code", "").apply(zip5)
 
-        rep_df["_sold_norm"] = rep_df.get(SOLD_COL, "").apply(norm_name)
-        rep_df["_ship_norm"] = rep_df.get(SHIP_COL, "").apply(norm_name)
-        rep_df["_zip5"]      = rep_df.get(ZIP_COL, "").apply(zip5)
-        rep_df["_city_norm"] = rep_df.get(CITY_COL, "").str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True)\
-                                                     .str.replace(r"\s+", " ", regex=True).str.strip()
-        # state: take last token of "County State"
-        rep_df["_state"]     = rep_df.get(CST_COL, "").apply(lambda v: (str(v).strip().split() or [""])[-1].upper())
+        # Territory (Sales Rep)
+        if "Sales Rep Name" in df.columns:
+            gb_rep = df[df["_zip5"] != ""].groupby("_zip5")["Sales Rep Name"] \
+                      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "") \
+                      .to_dict()
+            rep_by_zip.update(gb_rep)
 
-        for _, r in rep_df.iterrows():
-            seg = (r.get(SEG_COL, "") or "").strip()
-            rep = (r.get("Sales Rep Name", "") or "").strip() if HAVE_REP else ""
+        # Segment (R12 Segment (Sold to ID))
+        seg_col = "R12 Segment (Sold to ID)"
+        if seg_col in df.columns:
+            gb_seg = df[df["_zip5"] != ""].groupby("_zip5")[seg_col] \
+                      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "") \
+                      .to_dict()
+            seg_by_zip.update(gb_seg)
 
-            for col in (SOLD_COL, SHIP_COL):
-                nm = (r.get(col, "") or "").strip()
-                if not nm:
-                    continue
-                if HAVE_REP and rep:
-                    rep_idx_exact.setdefault(nm, rep)
-                if seg:
-                    seg_idx_exact.setdefault(nm, seg)
-
-            for nval in (r.get("_sold_norm", ""), r.get("_ship_norm", "")):
-                nval = (nval or "").strip()
-                if not nval:
-                    continue
-                if HAVE_REP and rep:
-                    rep_idx_norm.setdefault(nval, rep)
-                if seg:
-                    seg_idx_norm.setdefault(nval, seg)
-
-                z = r.get("_zip5", "")
-                if z:
-                    if HAVE_REP and rep:
-                        rep_idx_norm_zip.setdefault(f"{nval}|{z}", rep)
-                    if seg:
-                        seg_idx_norm_zip.setdefault(f"{nval}|{z}", seg)
-
-                cn = r.get("_city_norm", "")
-                st = r.get("_state", "")
-                if cn and st:
-                    key = f"{nval}|{cn}|{st}"
-                    if HAVE_REP and rep:
-                        rep_idx_norm_city_state.setdefault(key, rep)
-                    if seg:
-                        seg_idx_norm_city_state.setdefault(key, seg)
-
-        rep_norm_keys = list(rep_idx_norm.keys())
-        seg_norm_keys = list(seg_idx_norm.keys())
-        print(f"ℹ️ customer_report.csv loaded: rows={len(rep_df)}, rep_col={HAVE_REP}, seg_col={'R12 Segment (Sold to ID)' in rep_df.columns}")
+        print(f"ℹ️ customer_report.csv loaded: rows={len(df)}, rep_col={'Sales Rep Name' in df.columns}, seg_col={seg_col in df.columns}")
     except Exception as e:
-        print("⚠️ customer_report.csv not available for rep/segment enrichment:", e)
-        rep_norm_keys = []
-        seg_norm_keys = []
+        print("⚠️ customer_report.csv not available for territory/segment ZIP fallback:", e)
 
-    def lookup_rep(name: str, city: str, state: str, zipc: str) -> str | None:
-        if not name:
-            return None
-        if name in rep_idx_exact:
-            return rep_idx_exact[name]
-        n = norm_name(name)
-        if not n:
-            return None
-        z5 = zip5(zipc)
-        if z5 and f"{n}|{z5}" in rep_idx_norm_zip:
-            return rep_idx_norm_zip[f"{n}|{z5}"]
-        cn = norm_city(city)
-        st = (state or "").upper()
-        key_cs = f"{n}|{cn}|{st}" if cn and st else None
-        if key_cs and key_cs in rep_idx_norm_city_state:
-            return rep_idx_norm_city_state[key_cs]
-        if n in rep_idx_norm:
-            return rep_idx_norm[n]
-        if rep_norm_keys:
-            guess = get_close_matches(n, rep_norm_keys, n=1, cutoff=0.88)
-            if guess:
-                return rep_idx_norm.get(guess[0])
-        return None
-
-    def lookup_seg(name: str, city: str, state: str, zipc: str) -> str | None:
-        if not name:
-            return None
-        if name in seg_idx_exact:
-            return seg_idx_exact[name]
-        n = norm_name(name)
-        if not n:
-            return None
-        z5 = zip5(zipc)
-        if z5 and f"{n}|{z5}" in seg_idx_norm_zip:
-            return seg_idx_norm_zip[f"{n}|{z5}"]
-        cn = norm_city(city)
-        st = (state or "").upper()
-        key_cs = f"{n}|{cn}|{st}" if cn and st else None
-        if key_cs and key_cs in seg_idx_norm_city_state:
-            return seg_idx_norm_city_state[key_cs]
-        if n in seg_idx_norm:
-            return seg_idx_norm[n]
-        if seg_norm_keys:
-            guess = get_close_matches(n, seg_norm_keys, n=1, cutoff=0.88)
-            if guess:
-                return seg_idx_norm.get(guess[0])
-        return None
-
-    # ---------- find a locations file & read it ----------
-    candidates = [
-        os.getenv("CUSTOMER_LOCATIONS_PATH", "").strip() or "",  # allow override
-        "customer_location.csv",
-        "customer_locations.csv",
-        "data/customer_location.csv",
-        "data/customer_locations.csv",
-    ]
-    loc_path = next((p for p in candidates if p and os.path.exists(p)), None)
-
-    if not loc_path:
-        print("❌ No customer locations CSV found. Checked:", [p for p in candidates if p])
-        return _Response(_json.dumps({"error": "customer_location(s).csv not found"}), status=500, mimetype="application/json")
-
+    # --- Read locations CSV and build points ---
     items = []
     try:
-        with open(loc_path, "r", encoding="utf-8-sig", newline="") as f:
+        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             cols = reader.fieldnames or []
-            print(f"ℹ️ Reading locations from {loc_path} with columns: {cols}")
+            print(f"ℹ️ Reading locations from customer_location.csv with columns: {cols}")
 
-            # tolerate alternative header names
             for row in reader:
-                # name
-                name = (pick_col(row, "Account Name", "Name", "Customer", "Account") or "").strip()
-                if not name:
-                    continue
-
-                # city/address/state/zip: allow variants
-                address = (pick_col(row, "Address", "Street", "Street Address") or "").strip()
-                city    = (pick_col(row, "City", "Town") or "").strip()
-
-                # "County State" or split columns
-                cs_raw  = (pick_col(row, "County State", "County/State", "CountyState") or "").strip()
-                if cs_raw:
-                    parts = cs_raw.split()
-                    state  = parts[-1].upper() if len(parts) >= 2 else ""
-                    county = " ".join(parts[:-1]) if len(parts) >= 2 else ""
-                else:
-                    county = (pick_col(row, "County") or "").strip()
-                    state  = (pick_col(row, "State", "State Code") or "").strip().upper()
-
-                zipc    = zip5(pick_col(row, "Zip Code", "ZIP", "Zip", "Postal Code"))
-
-                # latitude/longitude tolerant headers
-                lat = to_float(pick_col(row, "Min of Latitude", "Latitude", "Lat", "lat", "LAT"))
-                lon = to_float(pick_col(row, "Min of Longitude", "Longitude", "Lon", "lng", "LON"))
-
-                # contacts (optional)
-                first = (pick_col(row, "First Name", "First") or "").strip()
-                last  = (pick_col(row, "Last Name", "Last") or "").strip()
-                title = (pick_col(row, "Job Title", "Title") or "").strip()
-                phone = (pick_col(row, "Phone", "Office Phone") or "").strip()
-                mobile= (pick_col(row, "Mobile", "Cell") or "").strip()
-                email = (pick_col(row, "Email", "E-mail") or "").strip()
-
+                # Coordinates (required)
+                lat = parse_latlon(row.get("Min of Latitude"))
+                lon = parse_latlon(row.get("Min of Longitude"))
                 if lat is None or lon is None:
                     continue
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                     continue
 
-                rep = lookup_rep(name, city, state, zipc) or "Unassigned"
-                seg = lookup_seg(name, city, state, zipc) or ""
+                # Address bits
+                address = (row.get("Address") or "").strip()
+                cs_raw  = (row.get("County State") or "").strip()
+                county, state = split_county_state(cs_raw)
+                zipc = zip5(row.get("Zip Code"))
+
+                # Contact bits
+                first = (row.get("First Name") or "").strip()
+                last  = (row.get("Last Name") or "").strip()
+                title = (row.get("Job Title") or "").strip()
+                phone = (row.get("Phone") or "").strip()
+                mobile= (row.get("Mobile") or "").strip()
+                email = (row.get("Email") or "").strip()
+
+                # Make a sensible label for the pin
+                label_candidates = []
+                if first or last:
+                    label_candidates.append(" ".join([first, last]).strip())
+                if email:
+                    label_candidates.append(email)
+                if address:
+                    label_candidates.append(address)
+
+                label = next((c for c in label_candidates if c), "Unknown")
+
+                # Territory/segment via ZIP fallback (best we can do without company name)
+                rep = (rep_by_zip.get(zipc) or "").strip() or "Unassigned"
+                seg = (seg_by_zip.get(zipc) or "").strip()
+
+                # Full single-line display address
+                full_address = ", ".join(
+                    [bit for bit in [address, state, zipc] if bit]
+                ) or (address or "")
 
                 items.append({
-                    "label": name,
+                    # map essentials
+                    "label": label,
                     "address": address,
-                    "city": city,
-                    "state": state,
-                    "county": county,
+                    "full_address": full_address,
+                    "city": "",                 # not present in this CSV
+                    "state": state or "",
+                    "county": county or "",
                     "zip": zipc,
-                    "sales_rep": rep,
-                    "Sales Rep Name": rep,
-                    "segment": seg,
                     "lat": lat,
                     "lon": lon,
-                    # contacts
-                    "first_name": first,
-                    "last_name": last,
-                    "job_title": title,
-                    "phone": phone,
-                    "mobile": mobile,
-                    "email": email,
+
+                    # coloring + filtering
+                    "sales_rep": rep,
+                    "segment": seg,
+
+                    # keep raw "County State" for any client parsing
+                    "County State": cs_raw,
+
+                    # contact block (frontend will only render non-empty fields)
+                    "contact": {
+                        "first_name": first,
+                        "last_name": last,
+                        "job_title": title,
+                        "phone": phone,
+                        "mobile": mobile,
+                        "email": email
+                    }
                 })
+
+        print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
+    except FileNotFoundError:
+        return _Response(_json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
     except Exception as e:
         print("❌ /api/locations error:", e)
-        return _Response(_json.dumps({"error": "Failed to read locations CSV"}), status=500, mimetype="application/json")
+        return _Response(_json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
 
-    print(f"✅ /api/locations built {len(items)} points from {loc_path}")
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
 @app.route('/service-worker.js')
