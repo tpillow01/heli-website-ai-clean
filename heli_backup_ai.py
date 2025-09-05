@@ -690,160 +690,131 @@ def map_page():
 @app.route("/api/locations")
 @login_required
 def api_locations():
+    """
+    Build map points from customer_location.csv and enrich with Sales Rep,
+    Segment, and Company by matching customer_report.csv via street+ZIP first,
+    then ZIP fallback.
+    """
     import csv, json as _json, re as _re
     import pandas as _pd
     from flask import Response as _Response
 
-    LOC_PATH = "customer_location.csv"
-    REP_PATH = "customer_report.csv"
-
-    # ---------- small helpers ----------
     def zip5(z):
         m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
 
     def parse_latlon(v):
         try:
-            s = str(v or "").strip()
-            if not s:
-                return None
-            s = s.replace(",", ".")
-            val = float(s)
-            return val if -100000 < val < 100000 else None
+            s = str(v or "").strip().replace(",", ".")
+            return float(s) if s else None
         except Exception:
             return None
 
     def split_county_state(val: str):
-        """
-        'Marion IN' -> ('Marion','IN')
-        """
-        if not val:
-            return None, None
+        if not val: return None, None
         parts = str(val).strip().split()
-        if len(parts) >= 2 and len(parts[-1]) == 2:
-            return (" ".join(parts[:-1]).strip() or None), parts[-1].upper()
+        if parts and len(parts[-1]) == 2:
+            return (" ".join(parts[:-1]) or None), parts[-1].upper()
         return val, None
 
-    _abbr_map = {
-        "ROAD": "RD", "RD.": "RD", "RD": "RD",
-        "STREET": "ST", "ST.": "ST", "ST": "ST",
-        "AVENUE": "AVE", "AV.": "AVE", "AVE": "AVE",
-        "BOULEVARD": "BLVD", "BLVD.": "BLVD", "BLVD": "BLVD",
-        "DRIVE": "DR", "DR.": "DR", "DR": "DR",
-        "COURT": "CT", "CT.": "CT", "CT": "CT",
-        "LANE": "LN", "LN.": "LN", "LN": "LN",
-        "HIGHWAY": "HWY", "HWY.": "HWY", "HWY": "HWY",
-        "SUITE": "STE", "STE.": "STE", "STE": "STE",
-        "UNIT": "UNIT",
-    }
-
-    def _norm_street(s: str) -> str:
-        """
-        Normalize a street line for matching: uppercase, collapse spaces, standardize suffixes,
-        drop punctuation. Keeps numbers.
-        """
+    # --- shared street normalizer (same logic as /api/ai_map_analysis) ----
+    def norm_street(s: str) -> str:
+        ABR = {
+            "ROAD":"RD","RD.":"RD","RD":"RD","STREET":"ST","ST.":"ST","ST":"ST",
+            "AVENUE":"AVE","AV.":"AVE","AVE":"AVE","BOULEVARD":"BLVD","BLVD.":"BLVD","BLVD":"BLVD",
+            "DRIVE":"DR","DR.":"DR","DR":"DR","COURT":"CT","CT.":"CT","CT":"CT",
+            "LANE":"LN","LN.":"LN","LN":"LN","HIGHWAY":"HWY","HWY.":"HWY","HWY":"HWY",
+            "SUITE":"STE","STE.":"STE","STE":"STE","UNIT":"UNIT"
+        }
         t = _re.sub(r"[\.,#]", " ", str(s or "").upper())
         t = _re.sub(r"\s+", " ", t).strip()
-        parts = []
-        for w in t.split(" "):
-            parts.append(_abbr_map.get(w, w))
-        t = " ".join(parts)
-        t = _re.sub(r"\s+", " ", t).strip()
-        return t
+        return " ".join(ABR.get(w, w) for w in t.split())
 
-    # ---------- build report lookups (company / segment / rep / city) ----------
-    rep_by_zip = {}
-    seg_by_zip = {}
-    city_by_zip = {}
-    company_by_zip = {}
-    # Exact street+zip lookup → (company, segment, rep, city, state_from_report)
-    exact_by_addrzip = {}
-
-    seg_cols = ["R12 Segment (Sold to ID)", "R12 Segment (Ship to ID)"]
+    # --- Preload report for fast enrichment --------------------------------
+    rep_by_zip, seg_by_zip = {}, {}
+    addrzip_to_info = {}  # key: "<STREET_NORM>|<ZIP5>" -> (company, city, seg, rep)
 
     try:
-        df = _pd.read_csv(REP_PATH, dtype=str).fillna("")
-        df["_zip5"] = df["Zip Code"].apply(zip5)
-        df["_street_norm"] = df["Address"].apply(_norm_street)
+        df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        df["_zip5"] = df.get("Zip Code", "").apply(zip5)
+        df["_street_norm"] = df.get("Address", "").apply(norm_street)
 
-        # choose first present segment col
-        seg_col = None
-        for c in seg_cols:
-            if c in df.columns:
-                seg_col = c
-                break
-
-        # mode by ZIP for rep, segment, company, and city
-        def _mode(series):
-            m = series.mode()
-            return m.iat[0] if not m.empty else ""
-
+        # ZIP majority fallbacks (kept from your original)
         if "Sales Rep Name" in df.columns:
-            rep_by_zip.update(
-                df[df["_zip5"] != ""].groupby("_zip5")["Sales Rep Name"].agg(_mode).to_dict()
-            )
+            gb_rep = df[df["_zip5"] != ""].groupby("_zip5")["Sales Rep Name"] \
+                      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "") \
+                      .to_dict()
+            rep_by_zip.update(gb_rep)
+
+        seg_col = "R12 Segment (Sold to ID)" if "R12 Segment (Sold to ID)" in df.columns else \
+                  ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
         if seg_col:
-            seg_by_zip.update(
-                df[df["_zip5"] != ""].groupby("_zip5")[seg_col].agg(_mode).to_dict()
-            )
-        if "City" in df.columns:
-            city_by_zip.update(
-                df[df["_zip5"] != ""].groupby("_zip5")["City"].agg(_mode).to_dict()
-            )
-        # company name by ZIP (prefer Sold to Name; fall back to Ship to Name)
-        name_series = df["Sold to Name"]
-        if name_series.str.strip().eq("").all() and "Ship to Name" in df.columns:
-            name_series = df["Ship to Name"]
-        tmp = df.assign(_chosen_name=name_series)
-        company_by_zip.update(
-            tmp[tmp["_zip5"] != ""].groupby("_zip5")["_chosen_name"].agg(_mode).to_dict()
-        )
+            gb_seg = df[df["_zip5"] != ""].groupby("_zip5")[seg_col] \
+                      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "") \
+                      .to_dict()
+            seg_by_zip.update(gb_seg)
 
-        # exact address+zip lookup (street norm + zip) → first matching row
+        # Exact address+ZIP map → prefer a Sold-to/Ship-to name
+        sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
+        ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
+
         for _, r in df.iterrows():
-            z = r["_zip5"]
-            a = r["_street_norm"]
-            if not z or not a:
+            z = r.get("_zip5", "")
+            stn = r.get("_street_norm", "")
+            if not (z and stn): 
                 continue
-            key = f"{a}|{z}"
-            if key not in exact_by_addrzip:
-                exact_by_addrzip[key] = {
-                    "company": r.get("Sold to Name") or r.get("Ship to Name") or "",
-                    "segment": (r.get(seg_col) or "") if seg_col else "",
-                    "rep": r.get("Sales Rep Name") or "",
-                    "city": r.get("City") or "",
-                    # pull state from County State if possible
-                    "state": (r.get("County State") or "").strip().split()[-1].upper() if r.get("County State") else "",
-                }
-        print(f"ℹ️ customer_report.csv loaded for map enrichment: rows={len(df)} seg_col={seg_col or 'none'}")
-    except Exception as e:
-        print("⚠️ customer_report.csv not available or unreadable:", e)
+            company = (r.get(sold_col) or r.get(ship_col) or "").strip() if (sold_col or ship_col) else ""
+            city = (r.get("City") or "").strip()
+            seg  = (r.get(seg_col) or "").strip() if seg_col else ""
+            rep  = (r.get("Sales Rep Name") or "").strip()
+            addrzip_to_info[f"{stn}|{z}"] = (company, city, seg, rep)
 
-    # ---------- read locations and build items ----------
+        print(f"ℹ️ customer_report.csv loaded: rows={len(df)}; addr keys={len(addrzip_to_info)}")
+
+    except Exception as e:
+        print("⚠️ customer_report.csv not available for enrichment:", e)
+
+    # --- Read locations CSV and build points --------------------------------
     items = []
     try:
-        with open(LOC_PATH, "r", encoding="utf-8-sig", newline="") as f:
+        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             cols = reader.fieldnames or []
-            print(f"ℹ️ Reading {LOC_PATH} with columns: {cols}")
+            print(f"ℹ️ Reading locations from customer_location.csv with columns: {cols}")
 
             for row in reader:
-                # Coordinates required
+                # Coordinates
                 lat = parse_latlon(row.get("Min of Latitude"))
                 lon = parse_latlon(row.get("Min of Longitude"))
-                if lat is None or lon is None:
+                if lat is None or lon is None: 
                     continue
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                     continue
 
-                # Address bits from locations file
-                street = (row.get("Address") or "").strip()
-                cst    = (row.get("County State") or "").strip()
-                county, state_from_loc = split_county_state(cst)
-                zipc   = zip5(row.get("Zip Code"))
-                street_norm = _norm_street(street)
+                # Address + geography
+                address = (row.get("Address") or "").strip()
+                cs_raw  = (row.get("County State") or "").strip()
+                county, state = split_county_state(cs_raw)
+                zipc = zip5(row.get("Zip Code"))
 
-                # Contact bits
+                # Try exact street+ZIP enrichment
+                company = ""
+                city = ""
+                seg = ""
+                rep = ""
+
+                if address and zipc:
+                    key = f"{norm_street(address)}|{zipc}"
+                    if key in addrzip_to_info:
+                        company, city, seg, rep = addrzip_to_info[key]
+
+                # If still missing, fall back to ZIP aggregates
+                if not rep:
+                    rep = (rep_by_zip.get(zipc) or "").strip() or "Unassigned"
+                if not seg:
+                    seg = (seg_by_zip.get(zipc) or "").strip()
+
+                # Contact bits from locations CSV
                 first = (row.get("First Name") or "").strip()
                 last  = (row.get("Last Name") or "").strip()
                 title = (row.get("Job Title") or "").strip()
@@ -851,47 +822,20 @@ def api_locations():
                 mobile= (row.get("Mobile") or "").strip()
                 email = (row.get("Email") or "").strip()
 
-                # Enrichment: try exact address+zip from customer_report, else ZIP mode
-                company = ""
-                segment = ""
-                rep     = ""
-                city    = ""
-                state   = state_from_loc or ""
+                # Label preference: Company > contact name > email > street
+                label_candidates = [company, " ".join([first, last]).strip(), email, address]
+                label = next((c for c in label_candidates if c), "Unknown")
 
-                if zipc and street_norm and exact_by_addrzip:
-                    k = f"{street_norm}|{zipc}"
-                    hit = exact_by_addrzip.get(k)
-                    if hit:
-                        company = hit.get("company") or company
-                        segment = hit.get("segment") or segment
-                        rep     = hit.get("rep") or rep
-                        city    = hit.get("city") or city
-                        state   = hit.get("state") or state
-
-                # ZIP-level fallback if still missing
-                if not company and zipc:
-                    company = company_by_zip.get(zipc, company)
-                if not segment and zipc:
-                    segment = seg_by_zip.get(zipc, segment)
-                if not rep and zipc:
-                    rep = rep_by_zip.get(zipc, rep)
-                if not city and zipc:
-                    city = city_by_zip.get(zipc, city)
-
-                # Label preference: Company > Contact > Street
-                contact_name = " ".join(p for p in [first, last] if p).strip()
-                label = company or contact_name or street or "Unknown"
-
-                # Full display address
-                full_address = ", ".join([bit for bit in [street, city, state, zipc] if bit])
+                # One-line address for popups
+                full_address = ", ".join([bit for bit in [address, city, state, zipc, "USA"] if bit])
 
                 items.append({
                     # map essentials
-                    "label": label,
                     "company": company,
-                    "address": street,
-                    "full_address": full_address,
-                    "city": city,
+                    "label": label,
+                    "address": address,
+                    "full_address": full_address or (address or ""),
+                    "city": city or "",         # may come from report
                     "state": state or "",
                     "county": county or "",
                     "zip": zipc,
@@ -900,12 +844,12 @@ def api_locations():
 
                     # coloring + filtering
                     "sales_rep": rep or "Unassigned",
-                    "segment": segment or "",
+                    "segment": seg,
 
-                    # raw county/state combo (optional)
-                    "County State": cst,
+                    # raw "County State"
+                    "County State": cs_raw,
 
-                    # contact block
+                    # contact (from locations CSV)
                     "contact": {
                         "first_name": first,
                         "last_name": last,
@@ -913,15 +857,23 @@ def api_locations():
                         "phone": phone,
                         "mobile": mobile,
                         "email": email
-                    }
+                    },
+
+                    # also pass through top-level fallbacks (your frontend reads both)
+                    "first_name": first,
+                    "last_name": last,
+                    "job_title": title,
+                    "phone": phone,
+                    "mobile": mobile,
+                    "email": email
                 })
 
-        print(f"✅ /api/locations built {len(items)} points from {LOC_PATH}")
+        print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
     except FileNotFoundError:
-        return _Response(_json.dumps({"error": f"{LOC_PATH} not found"}), status=500, mimetype="application/json")
+        return _Response(_json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
     except Exception as e:
         print("❌ /api/locations error:", e)
-        return _Response(_json.dumps({"error": "Failed to read locations"}), status=500, mimetype="application/json")
+        return _Response(_json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
 
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
@@ -932,7 +884,7 @@ def service_worker():
 # ─── AI Map Analysis Endpoint ────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
-    import pandas as pd, re
+    import pandas as pd, re, os
     from difflib import get_close_matches
 
     # ---------- helpers ----------
@@ -959,7 +911,7 @@ def ai_map_analysis():
         return parts[-1].upper() if len(parts) >= 2 else ""
 
     def norm_street(s: str) -> str:
-        # Uppercase, collapse spaces, standardize a few suffixes, drop punctuation (keeps numbers)
+        # Uppercase, collapse spaces, standardize common suffixes, drop punctuation (keeps numbers)
         _abbr = {
             "ROAD": "RD", "RD.": "RD", "RD": "RD",
             "STREET": "ST", "ST.": "ST", "ST": "ST",
@@ -974,11 +926,8 @@ def ai_map_analysis():
         }
         t = re.sub(r"[\.,#]", " ", str(s or "").upper())
         t = re.sub(r"\s+", " ", t).strip()
-        parts = []
-        for w in t.split(" "):
-            parts.append(_abbr.get(w, w))
-        t = " ".join(parts)
-        return re.sub(r"\s+", " ", t).strip()
+        parts = [_abbr.get(w, w) for w in t.split(" ")]
+        return re.sub(r"\s+", " ", " ".join(parts)).strip()
 
     def money_to_float(v) -> float:
         s = str(v or "").strip().replace("$","").replace(",","")
@@ -1010,7 +959,7 @@ def ai_map_analysis():
         return jsonify({"error": "Could not read customer_report.csv"}), 500
 
     # required columns (guard if missing)
-    for col in ["Sold to Name", "Ship to Name", "Address", "City", "Zip Code", "County State"]:
+    for col in ["Sold to Name", "Ship to Name", "Address", "City", "Zip Code", "County State", "Sold to ID"]:
         if col not in df.columns:
             df[col] = ""
 
@@ -1019,11 +968,11 @@ def ai_map_analysis():
               else ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
 
     # precompute normals
-    df["_sold_norm"] = df["Sold to Name"].apply(norm_name)
-    df["_ship_norm"] = df["Ship to Name"].apply(norm_name)
-    df["_zip5"]      = df["Zip Code"].apply(zip5)
-    df["_city_norm"] = df["City"].apply(norm_city)
-    df["_state"]     = df["County State"].apply(state_from_cst)
+    df["_sold_norm"]   = df["Sold to Name"].apply(norm_name)
+    df["_ship_norm"]   = df["Ship to Name"].apply(norm_name)
+    df["_zip5"]        = df["Zip Code"].apply(zip5)
+    df["_city_norm"]   = df["City"].apply(norm_city)
+    df["_state"]       = df["County State"].apply(state_from_cst)
     df["_street_norm"] = df["Address"].apply(norm_street)
 
     cust_norm = norm_name(customer_raw) if customer_raw else ""
@@ -1058,13 +1007,12 @@ def ai_map_analysis():
     # ---------- fuzzy (last resort) ----------
     if (hit is None or hit.empty) and cust_norm:
         all_norms = list(set(df["_sold_norm"].tolist() + df["_ship_norm"].tolist()))
-        guess = get_close_matches(cust_norm, all_norms, n=1, cutoff=0.88)  # a bit more forgiving
+        guess = get_close_matches(cust_norm, all_norms, n=1, cutoff=0.88)  # forgiving, but not too loose
         if guess:
             g = guess[0]
             hit = df[(df["_sold_norm"] == g) | (df["_ship_norm"] == g)]
 
     if hit is None or hit.empty:
-        # Still return a helpful response
         msg = "No matching customer found."
         if street_norm and zip_hint:
             msg += " Tried street+ZIP lookup."
@@ -1074,11 +1022,13 @@ def ai_map_analysis():
 
     # ---------- aggregate by Sold to ID if available ----------
     use_df = hit
+    aggregated_flag = False
     if "Sold to ID" in df.columns:
         sold_id_vals = hit["Sold to ID"].astype(str).str.strip()
         if (sold_id_vals != "").any():
             chosen_id = sold_id_vals.iloc[0]
             use_df = df[df["Sold to ID"].astype(str).str.strip() == chosen_id]
+            aggregated_flag = True
 
     # revenue columns to summarize (only sum the ones that exist)
     REV_COLS = [
@@ -1093,10 +1043,7 @@ def ai_map_analysis():
     ]
     totals = {}
     for col in REV_COLS:
-        if col in use_df.columns:
-            totals[col] = use_df[col].map(money_to_float).sum()
-        else:
-            totals[col] = 0.0
+        totals[col] = use_df[col].map(money_to_float).sum() if col in use_df.columns else 0.0
 
     # pick display name & segment
     display_name = (customer_raw or hit["Sold to Name"].iloc[0] or hit["Ship to Name"].iloc[0]).strip()
@@ -1106,19 +1053,24 @@ def ai_map_analysis():
         if not mode_series.empty:
             seg_val = str(mode_series.iat[0])
 
-    # build metrics block (always available)
-    lines = [f"Customer: {display_name}"]
-    if seg_val:
-        lines.append(f"Segment: {seg_val}")
-    lines.append("Key financial metrics:")
-    for k in REV_COLS:
-        lines.append(f"- {k}: ${totals[k]:,.2f}")
-    metrics_block = "\n".join(lines)
+    # ---------- build a concise metrics-first block ----------
+    def top_n_metrics(n=3):
+        pairs = [(k, v) for k, v in totals.items() if v and v > 0]
+        pairs.sort(key=lambda kv: kv[1], reverse=True)
+        return pairs[:n]
 
-    # ---------- ask OpenAI, but fall back gracefully ----------
-    analysis = None
+    metrics_lines = [f"Customer: {display_name}"]
+    if seg_val:
+        metrics_lines.append(f"Segment: {seg_val}")
+    metrics_lines.append("Key financial metrics:")
+    for k in REV_COLS:
+        metrics_lines.append(f"- {k}: ${totals[k]:,.2f}")
+    metrics_block = "\n".join(metrics_lines)
+
+    # ---------- try OpenAI for narrative; fall back to a hand-written one ----------
+    narrative = None
     try:
-        oai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # reuse the global OpenAI client you already created at startup
         prompt = f"""{metrics_block}
 
 Write a concise analysis that USES the dollar figures above in your sentences.
@@ -1126,9 +1078,8 @@ Requirements:
 - Reference at least the three largest figures by name and amount.
 - 2–4 bullet points on what's driving results (with numbers inline).
 - 1–3 bullets for next actions (upsell forklifts, service, rentals, parts), referencing numbers where relevant.
-Keep it crisp and sales-focused.
-"""
-        resp = oai.chat.completions.create(
+Keep it crisp and sales-focused."""
+        resp = client.chat.completions.create(
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             temperature=0.3,
             messages=[
@@ -1137,17 +1088,40 @@ Keep it crisp and sales-focused.
             ],
             max_tokens=400
         )
-        analysis = (resp.choices[0].message.content or "").strip()
+        narrative = (resp.choices[0].message.content or "").strip()
     except Exception as e:
         print("❌ OpenAI error:", e)
-        # fall back to numeric summary only
 
+    if not narrative:
+        # Simple deterministic fallback using the top 3 metrics
+        tops = top_n_metrics(3)
+        bullets = []
+        if tops:
+            first = ", ".join([f"{k} ${v:,.0f}" for k, v in tops])
+            bullets.append(f"- Biggest drivers: {first}.")
+        if totals.get("Parts & Service Revenue R12", 0) > 0:
+            bullets.append("- Aftermarket activity is healthy; explore PM bundles and uptime guarantees.")
+        if totals.get("Rental Revenue R12", 0) == 0:
+            bullets.append("- No rental spend detected; propose seasonal or peak coverage rentals.")
+        if totals.get("New Equip R36 Revenue", 0) == 0 and totals.get("Used Equip R36 Revenue", 0) == 0:
+            bullets.append("- No recent equipment revenue; qualify fleet age and replacement cycles.")
+        if not bullets:
+            bullets.append("- Qualify current fleet utilization and maintenance pain points.")
+
+        narrative = "\n".join([
+            f"Customer: {display_name}" + (f" (Segment {seg_val})" if seg_val else ""),
+            "Summary:",
+            *bullets
+        ])
+
+    # send both keys so the frontend can read either
     return jsonify({
-        "result": analysis or metrics_block,
+        "response": narrative,
+        "result": narrative,
         "metrics": totals,
         "segment": seg_val,
         "matched_rows": int(len(hit)),
-        "aggregated": bool("Sold to ID" in df.columns and (hit["Sold to ID"].astype(str).str.strip() != "").any()),
+        "aggregated": aggregated_flag,
     })
 
 # --- Segment lookup for map popups ---------------------------------------

@@ -48,7 +48,7 @@
       position: fixed;
       top: 80px;
       right: 20px;
-      max-width: 400px;
+      max-width: 420px;
       max-height: 80vh;
       padding: 18px;
       background: #fff;
@@ -57,7 +57,6 @@
       z-index: 2147483647;
       overflow-y: auto;
       font-family: system-ui, sans-serif;
-      white-space: pre-wrap;
       display: none;
     }
     .ai-popup h3 { margin: 0 0 8px 0; font-size: 18px; color: var(--brand); }
@@ -72,7 +71,6 @@
       color: #999;
     }
     .ai-popup .close-btn:hover { color: #333; }
-    .ai-popup pre { margin: 0; font-size: 13px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -111,7 +109,7 @@
         ZIP
         <input id="zipFilter" type="text" placeholder="Exact ZIP" size="8" />
       </label>
-      <!-- NEW: Company name search -->
+      <!-- Company name search -->
       <label>
         Company
         <input id="nameFilter" type="text" placeholder="Search company…" size="18" />
@@ -160,7 +158,7 @@
     const stateFilter  = document.getElementById('stateFilter');
     const countyFilter = document.getElementById('countyFilter');
     const zipFilter    = document.getElementById('zipFilter');
-    const nameFilter   = document.getElementById('nameFilter'); // NEW
+    const nameFilter   = document.getElementById('nameFilter');
     const heatToggle   = document.getElementById('heatToggle');
 
     function markerStyle(rep) {
@@ -187,7 +185,7 @@
       return m ? m[0] : '';
     }
     function lookupSegmentForPoint(p) {
-      const name  = p.label || '';
+      const name  = p.company || p.label || ''; // prefer company
       const city  = p.city || '';
       const state = (p.state || '').toUpperCase();
       const z5    = zip5(p.zip);
@@ -208,58 +206,54 @@
       return p.segment || '';
     }
 
-function deriveFields(p) {
-  const company = p.company || p.Company || p['Sold to Name'] || p['Ship to Name'] || '';
-  const label = company || p.label || 'Unknown';
+    function deriveFields(p) {
+      const company = p.company || p.Company || p['Sold to Name'] || p['Ship to Name'] || '';
+      const label = company || p.label || 'Unknown';
 
-  // County/State like "Greene IN"
-  let state = p.state || p.State || '';
-  let county = p.county || p.County || '';
-  const countyStateRaw = p['County State'] || p.county_state || '';
-  if ((!county || !state) && countyStateRaw) {
-    const parts = String(countyStateRaw).trim().split(/\s+/);
-    if (parts.length >= 2) {
-      state  = state  || parts[parts.length - 1];
-      county = county || parts.slice(0, -1).join(' ');
+      // County/State like "Greene IN"
+      let state = p.state || p.State || '';
+      let county = p.county || p.County || '';
+      const countyStateRaw = p['County State'] || p.county_state || '';
+      if ((!county || !state) && countyStateRaw) {
+        const parts = String(countyStateRaw).trim().split(/\s+/);
+        if (parts.length >= 2) {
+          state  = state  || parts[parts.length - 1];
+          county = county || parts.slice(0, -1).join(' ');
+        }
+      }
+
+      const address = p.Address || p.address || '';
+      const city    = p.City    || p.city    || '';
+      const zip     = String(p['Zip Code'] || p.zip || '').trim();
+
+      const full_address = [address, [city, state].filter(Boolean).join(', '), zip, 'USA']
+        .filter(Boolean).join(', ');
+
+      const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
+
+      // coords sanity
+      let lat = p.lat, lon = p.lon;
+      lat = lat == null ? null : parseFloat(lat);
+      lon = lon == null ? null : parseFloat(lon);
+      if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
+        lat = null; lon = null;
+      }
+
+      // contact passthrough
+      const first_name = p.first_name || p['First Name'] || '';
+      const last_name  = p.last_name  || p['Last Name']  || '';
+      const job_title  = p.job_title  || p['Job Title']  || '';
+      const phone      = p.phone      || p['Phone']      || '';
+      const mobile     = p.mobile     || p['Mobile']     || '';
+      const email      = p.email      || p['Email']      || '';
+
+      return {
+        company, label, full_address, address, city, state, county, zip,
+        sales_rep, segment: '', lat, lon,
+        // contact
+        first_name, last_name, job_title, phone, mobile, email
+      };
     }
-  }
-
-  const address = p.Address || p.address || '';
-  const city    = p.City    || p.city    || '';
-  const zip     = String(p['Zip Code'] || p.zip || '').trim();
-
-  const full_address = [
-    address,
-    [city, state].filter(Boolean).join(', '),
-    zip,
-    'USA'
-  ].filter(Boolean).join(', ');
-
-  const sales_rep = p.sales_rep || p['Sales Rep Name'] || 'Unassigned';
-
-  // coords sanity
-  let lat = p.lat, lon = p.lon;
-  lat = lat == null ? null : parseFloat(lat);
-  lon = lon == null ? null : parseFloat(lon);
-  if (!(Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
-    lat = null; lon = null;
-  }
-
-  // contact passthrough
-  const first_name = p.first_name || p['First Name'] || '';
-  const last_name  = p.last_name  || p['Last Name']  || '';
-  const job_title  = p.job_title  || p['Job Title']  || '';
-  const phone      = p.phone      || p['Phone']      || '';
-  const mobile     = p.mobile     || p['Mobile']     || '';
-  const email      = p.email      || p['Email']      || '';
-
-  return {
-    company, label, full_address, address, city, state, county, zip,
-    sales_rep, segment: '', lat, lon,
-    // contact
-    first_name, last_name, job_title, phone, mobile, email
-  };
-}
 
     function withinRepFilter(pt) {
       const want = repFilter.value;
@@ -286,32 +280,97 @@ function deriveFields(p) {
       return true;
     }
 
-    // NEW: name filter
+    // name filter
     function withinNameFilter(pt) {
       const q = (nameFilter.value || '').trim().toLowerCase();
       if (!q) return true;
       return (pt.label || '').toLowerCase().includes(q);
     }
 
-    // GLOBAL so inline onclick can call it
+    // ===== AI sidebar formatting helpers & function =====
+    function fmtMoney(n) {
+      try { return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
+      catch { return `$${(n||0).toLocaleString()}`; }
+    }
+    function renderMetricsTable(metrics) {
+      if (!metrics || typeof metrics !== 'object') return '';
+      const rows = Object.entries(metrics)
+        .map(([k,v]) => [k, Number(v||0)])
+        .filter(([,v]) => v > 0)
+        .sort((a,b) => b[1]-a[1]); // biggest first
+      if (!rows.length) return '';
+      const tr = rows.map(([k,v]) => `<tr><td>${k}</td><td class="num">${fmtMoney(v)}</td></tr>`).join('');
+      return `
+        <div class="ai-metrics">
+          <table>
+            <thead><tr><th>Metric</th><th class="num">Amount</th></tr></thead>
+            <tbody>${tr}</tbody>
+          </table>
+        </div>
+      `;
+    }
+    function renderAnalysisText(text) {
+      if (!text || !text.trim()) return '';
+      let t = text.replace(/^Customer:.*$/mi, '')
+                  .replace(/^Key financial metrics:.*$/mi, '')
+                  .trim();
+      const lines = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const bullets = lines.filter(s => s.startsWith('- ')).map(s => s.slice(2));
+      const nonBullets = lines.filter(s => !s.startsWith('- '));
+      const paras = nonBullets.length ? `<p>${nonBullets.join(' ')}</p>` : '';
+      const ul = bullets.length ? `<ul>${bullets.map(x => `<li>${x}</li>`).join('')}</ul>` : '';
+      return `${paras}${ul}`;
+    }
+    (function ensureAICss(){
+      if (document.getElementById('ai-css')) return;
+      const css = `
+        #aiContainer { font-family: system-ui, sans-serif; }
+        #aiContainer .ai-header { margin:0 0 6px 0; font-size:16px; font-weight:600; color:#222; }
+        #aiContainer .ai-sub    { margin:0 0 10px 0; color:#666; font-size:12px; }
+        #aiContainer .ai-metrics table { width:100%; border-collapse: collapse; margin: 6px 0 10px; }
+        #aiContainer .ai-metrics th, #aiContainer .ai-metrics td { padding:6px 8px; border-bottom:1px solid #eee; font-size:12px; }
+        #aiContainer .ai-metrics td.num, #aiContainer .ai-metrics th.num { text-align:right; white-space:nowrap; }
+        #aiContainer ul { margin: 6px 0 0 18px; padding:0; }
+        #aiContainer li { margin: 4px 0; }
+      `;
+      const el = document.createElement('style');
+      el.id = 'ai-css';
+      el.textContent = css;
+      document.head.appendChild(el);
+    })();
+
+    // Global so inline onclick can call it
     window.askAIAboutCustomer = async function(name, city, zip, address, state) {
       const container = document.getElementById('aiContainer');
       const content = document.getElementById('aiContent');
       const heading = document.querySelector('#aiContainer h3');
 
       container.style.display = 'block';
-      if (heading) heading.textContent = `AI Insights — ${name}`;
-      content.innerHTML = `<p><em>Loading AI analysis for <b>${name}</b>...</em></p>`;
+      if (heading) heading.textContent = 'AI Insights';
+      content.innerHTML = `<p class="ai-sub"><em>Analyzing <b>${name || 'Unknown'}</b>…</em></p>`;
 
       try {
         const res = await fetch('/api/ai_map_analysis', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customer: name, city, zip, address, state })
+          body: JSON.stringify({ customer: name || '', city, zip, address, state })
         });
         const data = await res.json();
-        const text = (data.response ?? data.result ?? '').toString().trim();
-        content.innerHTML = text ? `<pre>${text}</pre>` : `<p><strong>Note:</strong> Server returned an empty response.</p>`;
+
+        const rawText = (data.response ?? data.result ?? '').toString();
+        const metricsHtml = renderMetricsTable(data.metrics);
+        const analysisHtml = renderAnalysisText(rawText);
+
+        const headerHtml = `
+          <div class="ai-header">${name || 'Unknown Customer'}</div>
+          <div class="ai-sub">
+            ${[city, state, zip].filter(Boolean).join(' • ')}
+            ${data.segment ? ` • Segment: <b>${data.segment}</b>` : ''}
+            ${data.aggregated ? ' • Aggregated (Sold-to group)' : ''}
+          </div>
+        `;
+
+        content.innerHTML = headerHtml + metricsHtml + (analysisHtml || '<p>No narrative available.</p>');
       } catch (err) {
         content.innerHTML = `<p><strong>Network Error:</strong> ${err.message}</p>`;
       }
@@ -331,7 +390,7 @@ function deriveFields(p) {
         withinRepFilter(p) &&
         withinSegFilter(p) &&
         withinStateCountyZip(p) &&
-        withinNameFilter(p) // NEW
+        withinNameFilter(p)
       );
 
       if (heatToggle.checked) {
@@ -341,41 +400,47 @@ function deriveFields(p) {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-     const segFull = p.segment || lookupSegmentForPoint(p) || '-';
+          const segFull = p.segment || lookupSegmentForPoint(p) || '-';
 
-// Build contact block only if any contact data exists
-const contactBits = [];
-const nameLine = [p.first_name, p.last_name].filter(Boolean).join(' ');
-if (nameLine) contactBits.push(nameLine);
-if (p.job_title) contactBits.push(p.job_title);
-if (p.phone) contactBits.push(`Phone: ${p.phone}`);
-if (p.mobile) contactBits.push(`Mobile: ${p.mobile}`);
-if (p.email) contactBits.push(`<a href="mailto:${p.email}">${p.email}</a>`);
+          // Contact block
+          const contactBits = [];
+          const nameLine = [p.first_name, p.last_name].filter(Boolean).join(' ');
+          if (nameLine) contactBits.push(nameLine);
+          if (p.job_title) contactBits.push(p.job_title);
+          if (p.phone)  contactBits.push(`Phone: <a href="tel:${p.phone}">${p.phone}</a>`);
+          if (p.mobile) contactBits.push(`Mobile: <a href="tel:${p.mobile}">${p.mobile}</a>`);
+          if (p.email)  contactBits.push(`<a href="mailto:${p.email}">${p.email}</a>`);
+          const contactBlock = contactBits.length
+            ? `<div style="margin-top:6px;">
+                 <div style="font-weight:700;color:#7b4f1b;">Primary Contact:</div>
+                 <div>${contactBits.join('<br>')}</div>
+               </div>`
+            : '';
 
-const contactBlock = contactBits.length
-  ? `<div style="margin-top:6px;">
-       <div style="font-weight:700;color:#7b4f1b;">Primary Contact:</div>
-       <div>${contactBits.join('<br>')}</div>
-     </div>`
-  : '';
+          const escapedCompany = (p.company || p.label || '').replace(/'/g, "\\'");
+          const escapedCity    = (p.city || '').replace(/'/g, "\\'");
+          const escapedZip     = (p.zip  || '').replace(/'/g, "\\'");
+          const escapedAddr    = (p.address || '').replace(/'/g, "\\'");
+          const escapedState   = (p.state || '').replace(/'/g, "\\'");
 
-const popupHtml = `
-  <div style="font:14px/1.35 system-ui, sans-serif;">
-    <div style="font-weight:700;">${p.label}</div>
-    <div>${p.full_address}</div>
-    <div>${p.sales_rep || 'Unassigned'}</div>
-    <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
-    <div>Segment: ${segFull}</div>
-    ${contactBlock}
-    <div style="margin-top:6px;">
-      <button style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
-              onclick="askAIAboutCustomer('${(p.company || p.label || '').replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')"
-        Run AI Analysis
-      </button>
-    </div>
-  </div>
-`;
-
+          const popupHtml = `
+            <div style="font:14px/1.35 system-ui, sans-serif;">
+              <div style="font-weight:700;">${p.company || p.label}</div>
+              <div>${p.full_address}</div>
+              <div>${p.sales_rep || 'Unassigned'}</div>
+              <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
+              <div>Segment: ${segFull}</div>
+              ${contactBlock}
+              <div style="margin-top:8px">
+                <button
+                  type="button"
+                  style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
+                  onclick="askAIAboutCustomer('${escapedCompany}','${escapedCity}','${escapedZip}','${escapedAddr}','${escapedState}')">
+                  AI Analysis
+                </button>
+              </div>
+            </div>
+          `;
 
           L.circleMarker([p.lat, p.lon], style).bindPopup(popupHtml).addTo(group);
         });
@@ -457,7 +522,6 @@ const popupHtml = `
       clearTimeout(zipFilter._t);
       zipFilter._t = setTimeout(render, 200);
     });
-    // NEW: debounce name search
     nameFilter.addEventListener('input', () => {
       clearTimeout(nameFilter._t);
       nameFilter._t = setTimeout(render, 200);
