@@ -691,17 +691,18 @@ def map_page():
 @login_required
 def api_locations():
     """
-    Build map points from customer_location.csv (your exact headers),
-    attach Sales Rep from customer_report.csv for territory coloring,
-    and (NEW) attach Segment directly so popups never miss it.
-    Also (NEW) include contact fields if present.
+    Build map points from a tolerant customer locations CSV and enrich with:
+      - Sales Rep (territory) from customer_report.csv
+      - Segment (R12...) from customer_report.csv
+      - Contact fields (if present) for popup
+    Also logs column names + row counts so Render logs are useful.
     """
-    import csv, json as _json, re as _re
+    import csv, os, json as _json, re as _re
     import pandas as _pd
     from difflib import get_close_matches
     from flask import Response as _Response
 
-    # -------- helpers --------
+    # ---------- helpers ----------
     def strip_suffixes(s: str) -> str:
         return _re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
                        "", s or "", flags=_re.IGNORECASE)
@@ -714,12 +715,6 @@ def api_locations():
         s = (s or "").lower()
         s = _re.sub(r"[^a-z0-9]+", " ", s)
         return _re.sub(r"\s+", " ", s).strip()
-    def state_from_county_state(v: str) -> str:
-        parts = _re.sub(r"\s+", " ", (v or "").strip()).split(" ")
-        return parts[-1].upper() if len(parts) >= 2 else ""
-    def county_from_county_state(v: str) -> str:
-        parts = _re.sub(r"\s+", " ", (v or "").strip()).split(" ")
-        return " ".join(parts[:-1]) if len(parts) >= 2 else ""
     def zip5(z: str) -> str:
         m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
@@ -732,7 +727,14 @@ def api_locations():
         except Exception:
             return None
 
-    # -------- build rep + segment indexes from customer_report.csv --------
+    def pick_col(row, *opts):
+        """Return first non-empty among possible header names."""
+        for k in opts:
+            if k in row and str(row[k]).strip() != "":
+                return row[k]
+        return ""
+
+    # ---------- build rep + segment indexes from customer_report.csv ----------
     rep_idx_exact = {}
     rep_idx_norm = {}
     rep_idx_norm_zip = {}
@@ -758,13 +760,13 @@ def api_locations():
         rep_df["_zip5"]      = rep_df.get(ZIP_COL, "").apply(zip5)
         rep_df["_city_norm"] = rep_df.get(CITY_COL, "").str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True)\
                                                      .str.replace(r"\s+", " ", regex=True).str.strip()
-        rep_df["_state"]     = rep_df.get(CST_COL, "").apply(state_from_county_state)
+        # state: take last token of "County State"
+        rep_df["_state"]     = rep_df.get(CST_COL, "").apply(lambda v: (str(v).strip().split() or [""])[-1].upper())
 
         for _, r in rep_df.iterrows():
             seg = (r.get(SEG_COL, "") or "").strip()
             rep = (r.get("Sales Rep Name", "") or "").strip() if HAVE_REP else ""
 
-            # exact
             for col in (SOLD_COL, SHIP_COL):
                 nm = (r.get(col, "") or "").strip()
                 if not nm:
@@ -774,7 +776,6 @@ def api_locations():
                 if seg:
                     seg_idx_exact.setdefault(nm, seg)
 
-            # normalized keys
             for nval in (r.get("_sold_norm", ""), r.get("_ship_norm", "")):
                 nval = (nval or "").strip()
                 if not nval:
@@ -802,6 +803,7 @@ def api_locations():
 
         rep_norm_keys = list(rep_idx_norm.keys())
         seg_norm_keys = list(seg_idx_norm.keys())
+        print(f"ℹ️ customer_report.csv loaded: rows={len(rep_df)}, rep_col={HAVE_REP}, seg_col={'R12 Segment (Sold to ID)' in rep_df.columns}")
     except Exception as e:
         print("⚠️ customer_report.csv not available for rep/segment enrichment:", e)
         rep_norm_keys = []
@@ -855,30 +857,61 @@ def api_locations():
                 return seg_idx_norm.get(guess[0])
         return None
 
-    # -------- build points from customer_location.csv --------
+    # ---------- find a locations file & read it ----------
+    candidates = [
+        os.getenv("CUSTOMER_LOCATIONS_PATH", "").strip() or "",  # allow override
+        "customer_location.csv",
+        "customer_locations.csv",
+        "data/customer_location.csv",
+        "data/customer_locations.csv",
+    ]
+    loc_path = next((p for p in candidates if p and os.path.exists(p)), None)
+
+    if not loc_path:
+        print("❌ No customer locations CSV found. Checked:", [p for p in candidates if p])
+        return _Response(_json.dumps({"error": "customer_location(s).csv not found"}), status=500, mimetype="application/json")
+
     items = []
     try:
-        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
+        with open(loc_path, "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
+            cols = reader.fieldnames or []
+            print(f"ℹ️ Reading locations from {loc_path} with columns: {cols}")
+
+            # tolerate alternative header names
             for row in reader:
-                name    = (row.get("Account Name", "") or "").strip()
-                city    = (row.get("City", "") or "").strip()
-                address = (row.get("Address", "") or "").strip()
-                cs_raw  = (row.get("County State", "") or "").strip()
-                county  = county_from_county_state(cs_raw)
-                state   = state_from_county_state(cs_raw)
-                zipc    = zip5(row.get("Zip Code", ""))
+                # name
+                name = (pick_col(row, "Account Name", "Name", "Customer", "Account") or "").strip()
+                if not name:
+                    continue
 
-                lat = to_float(row.get("Min of Latitude", ""))
-                lon = to_float(row.get("Min of Longitude", ""))
+                # city/address/state/zip: allow variants
+                address = (pick_col(row, "Address", "Street", "Street Address") or "").strip()
+                city    = (pick_col(row, "City", "Town") or "").strip()
 
-                # NEW: contact fields (may be blank)
-                first = (row.get("First Name", "") or "").strip()
-                last  = (row.get("Last Name", "") or "").strip()
-                title = (row.get("Job Title", "") or "").strip()
-                phone = (row.get("Phone", "") or "").strip()
-                mobile= (row.get("Mobile", "") or "").strip()
-                email = (row.get("Email", "") or "").strip()
+                # "County State" or split columns
+                cs_raw  = (pick_col(row, "County State", "County/State", "CountyState") or "").strip()
+                if cs_raw:
+                    parts = cs_raw.split()
+                    state  = parts[-1].upper() if len(parts) >= 2 else ""
+                    county = " ".join(parts[:-1]) if len(parts) >= 2 else ""
+                else:
+                    county = (pick_col(row, "County") or "").strip()
+                    state  = (pick_col(row, "State", "State Code") or "").strip().upper()
+
+                zipc    = zip5(pick_col(row, "Zip Code", "ZIP", "Zip", "Postal Code"))
+
+                # latitude/longitude tolerant headers
+                lat = to_float(pick_col(row, "Min of Latitude", "Latitude", "Lat", "lat", "LAT"))
+                lon = to_float(pick_col(row, "Min of Longitude", "Longitude", "Lon", "lng", "LON"))
+
+                # contacts (optional)
+                first = (pick_col(row, "First Name", "First") or "").strip()
+                last  = (pick_col(row, "Last Name", "Last") or "").strip()
+                title = (pick_col(row, "Job Title", "Title") or "").strip()
+                phone = (pick_col(row, "Phone", "Office Phone") or "").strip()
+                mobile= (pick_col(row, "Mobile", "Cell") or "").strip()
+                email = (pick_col(row, "Email", "E-mail") or "").strip()
 
                 if lat is None or lon is None:
                     continue
@@ -889,20 +922,18 @@ def api_locations():
                 seg = lookup_seg(name, city, state, zipc) or ""
 
                 items.append({
-                    "label": name or "Unknown",
+                    "label": name,
                     "address": address,
                     "city": city,
                     "state": state,
                     "county": county,
                     "zip": zipc,
-                    "sales_rep": rep,                   # for coloring
-                    "Sales Rep Name": rep,              # compatibility – some UIs read this
-                    "segment": seg,                     # NEW: server-provided segment
+                    "sales_rep": rep,
+                    "Sales Rep Name": rep,
+                    "segment": seg,
                     "lat": lat,
                     "lon": lon,
-                    "County State": cs_raw,
-
-                    # NEW: contacts
+                    # contacts
                     "first_name": first,
                     "last_name": last,
                     "job_title": title,
@@ -910,12 +941,11 @@ def api_locations():
                     "mobile": mobile,
                     "email": email,
                 })
-    except FileNotFoundError:
-        return _Response(_json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
     except Exception as e:
         print("❌ /api/locations error:", e)
-        return _Response(_json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
+        return _Response(_json.dumps({"error": "Failed to read locations CSV"}), status=500, mimetype="application/json")
 
+    print(f"✅ /api/locations built {len(items)} points from {loc_path}")
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
 @app.route('/service-worker.js')
