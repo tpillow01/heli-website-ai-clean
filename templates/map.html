@@ -209,7 +209,8 @@
     }
 
 function deriveFields(p) {
-  const label = p.label || p['Sold to Name'] || p['Ship to Name'] || 'Unknown';
+  const company = p.company || p.Company || p['Sold to Name'] || p['Ship to Name'] || '';
+  const label = company || p.label || 'Unknown';
 
   // County/State like "Greene IN"
   let state = p.state || p.State || '';
@@ -244,7 +245,7 @@ function deriveFields(p) {
     lat = null; lon = null;
   }
 
-  // NEW: pass contact fields through (may be empty strings; that’s fine)
+  // contact passthrough
   const first_name = p.first_name || p['First Name'] || '';
   const last_name  = p.last_name  || p['Last Name']  || '';
   const job_title  = p.job_title  || p['Job Title']  || '';
@@ -253,13 +254,12 @@ function deriveFields(p) {
   const email      = p.email      || p['Email']      || '';
 
   return {
-    label, full_address, address, city, state, county, zip,
+    company, label, full_address, address, city, state, county, zip,
     sales_rep, segment: '', lat, lon,
     // contact
     first_name, last_name, job_title, phone, mobile, email
   };
 }
-
 
     function withinRepFilter(pt) {
       const want = repFilter.value;
@@ -369,7 +369,7 @@ const popupHtml = `
     ${contactBlock}
     <div style="margin-top:6px;">
       <button style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
-              onclick="askAIAboutCustomer('${p.label.replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')">
+              onclick="askAIAboutCustomer('${(p.company || p.label || '').replace(/'/g, "\\'")}', '${(p.city||'').replace(/'/g, "\\'")}', '${(p.zip||'').replace(/'/g, "\\'")}', '${(p.address||'').replace(/'/g, "\\'")}', '${(p.state||'').replace(/'/g, "\\'")}')"
         Run AI Analysis
       </button>
     </div>
