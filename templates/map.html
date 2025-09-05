@@ -341,7 +341,7 @@ function deriveFields(p) {
         const group = L.featureGroup();
         toShow.forEach(p => {
           const style = markerStyle(p.sales_rep);
-     const segFull = lookupSegmentForPoint(p) || '-';
+     const segFull = p.segment || lookupSegmentForPoint(p) || '-';
 
 // Build contact block only if any contact data exists
 const contactBits = [];
