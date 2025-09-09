@@ -530,6 +530,210 @@ def run_recommendation_flow(user_q: str) -> str:
 
     return ai_reply
 
+# ========= Structured "top-N by spend" helper =========
+import pandas as pd
+from functools import lru_cache
+
+_CAT_MAP = {
+    # user token        -> column in customer_report.csv
+    "rental": "Rental Revenue R12",
+    "rentals": "Rental Revenue R12",
+    "parts": "Parts Revenue R12",
+    "service": "Service Revenue R12 (Includes GM)",
+    "parts & service": "Parts & Service Revenue R12",
+    "aftermarket": "Revenue Rolling 12 Months - Aftermarket",
+    "new equip": "New Equip R36 Revenue",
+    "new equipment": "New Equip R36 Revenue",
+    "used equip": "Used Equip R36 Revenue",
+    "used equipment": "Used Equip R36 Revenue",
+}
+
+_STATES = {
+    # quick resolution for common state words (optional)
+    "indiana":"IN","ohio":"OH","illinois":"IL","michigan":"MI","kentucky":"KY","tennessee":"TN",
+    "wisconsin":"WI","missouri":"MO","iowa":"IA","minnesota":"MN",
+}
+
+def _zip5(z: str) -> str:
+    import re
+    m = re.search(r"\b(\d{5})\b", str(z or ""))
+    return m.group(1) if m else ""
+
+def _county_of(cstate: str) -> str:
+    # "Marion IN" -> "Marion"
+    s = (cstate or "").strip()
+    if not s:
+        return ""
+    parts = s.split()
+    if len(parts) >= 2 and len(parts[-1]) == 2:
+        return " ".join(parts[:-1]).strip()
+    return s
+
+def _state_of(cstate: str) -> str:
+    # "Marion IN" -> "IN"
+    s = (cstate or "").strip()
+    if not s:
+        return ""
+    parts = s.split()
+    return parts[-1].upper() if len(parts) >= 2 and len(parts[-1]) == 2 else ""
+
+def _money_to_float(s: pd.Series) -> pd.Series:
+    return (
+        s.astype(str)
+         .str.replace(r"[\$,]", "", regex=True)
+         .replace({"": "0", "nan": "0", None: "0"})
+         .astype(float)
+    )
+
+@lru_cache(maxsize=1)
+def _load_report_df_cached():
+    try:
+        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+    except Exception:
+        return None
+    # derive helpers
+    df["_zip5"]   = df.get("Zip Code", "").apply(_zip5)
+    df["_county"] = df.get("County State", "").apply(_county_of).str.strip().str.lower()
+    df["_state"]  = df.get("County State", "").apply(_state_of).str.upper()
+    df["_city"]   = df.get("City", "").str.strip().str.lower()
+    # company label: prefer Sold-to, then Ship-to
+    sold = df.get("Sold to Name", "")
+    ship = df.get("Ship to Name", "")
+    df["_company"] = sold.where(sold.astype(str).str.strip() != "", ship).fillna("")
+    return df
+
+def _pick_category_column(q: str) -> str | None:
+    t = q.lower()
+    # try longest keys first so "parts & service" wins over "parts"
+    for key in sorted(_CAT_MAP.keys(), key=len, reverse=True):
+        if key in t:
+            return _CAT_MAP[key]
+    # default: rentals if user said "spent the most" without a category?
+    return None
+
+def _parse_geo_filters(q: str):
+    """
+    Returns a dict like:
+      {"zip":"46204"}  OR  {"county":"marion","state":"IN"}  OR  {"state":"IN"}  OR  {"city":"indianapolis","state":"IN"}
+    """
+    import re
+    t = q.lower().strip()
+
+    # ZIP (exact 5-digit)
+    m = re.search(r"\b(\d{5})\b", t)
+    if m:
+        return {"zip": m.group(1)}
+
+    # County [optional state]
+    m = re.search(r"\b([a-z][a-z\s]+?)\s+county(?:,?\s+([a-z]{2}|\w+))?\b", t)
+    if m:
+        county = re.sub(r"\s+", " ", m.group(1)).strip()
+        st_raw = (m.group(2) or "").strip()
+        st = st_raw.upper() if len(st_raw) == 2 else _STATES.get(st_raw, "").upper()
+        return {"county": county, "state": st or None}
+
+    # City[, State]
+    m = re.search(r"\bin\s+([a-z][a-z\.\-\s]+?)(?:,?\s+([a-z]{2}|\w+))?\b", t)
+    if m:
+        city = re.sub(r"[^a-z\s\.-]", "", m.group(1)).replace(".", " ").strip()
+        st_raw = (m.group(2) or "").strip()
+        st = st_raw.upper() if len(st_raw) == 2 else _STATES.get(st_raw, "").upper()
+        if city and st:
+            return {"city": city, "state": st}
+
+    # State alone (2-letter or word)
+    m = re.search(r"\b(in|of)\s+([a-z]{2}|\w+)\b", t)
+    if m:
+        st_raw = m.group(2)
+        st = st_raw.upper() if len(st_raw) == 2 else _STATES.get(st_raw.lower(), "").upper()
+        if st:
+            return {"state": st}
+
+    return {}  # no geo parsed
+
+def _parse_top_n(q: str, default_n: int = 5) -> int:
+    import re
+    m = re.search(r"\b(top|biggest|largest)\s+(\d{1,3})\b", q.lower())
+    if m:
+        try:
+            return max(1, min(100, int(m.group(2))))
+        except Exception:
+            pass
+    m = re.search(r"\b(\d{1,3})\s+(companies|accounts|customers)\b", q.lower())
+    if m:
+        try:
+            return max(1, min(100, int(m.group(1))))
+        except Exception:
+            pass
+    return default_n
+
+def try_structured_top_spend_answer(question: str) -> str | None:
+    """
+    If the user's question looks like a 'top N by spend' query, return
+    a ready-to-send text answer. Otherwise return None and let normal flow continue.
+    """
+    df = _load_report_df_cached()
+    if df is None or df.empty:
+        return None
+
+    n = _parse_top_n(question, default_n=5)
+    cat_col = _pick_category_column(question)
+    if not cat_col or cat_col not in df.columns:
+        return None  # not a recognized category-query
+
+    geo = _parse_geo_filters(question)
+    mask = pd.Series(True, index=df.index)
+
+    if "zip" in geo:
+        mask &= (df["_zip5"] == geo["zip"])
+        scope = f"ZIP {geo['zip']}"
+    elif "county" in geo:
+        c = (geo["county"] or "").strip().lower()
+        mask &= (df["_county"] == c)
+        if geo.get("state"):
+            mask &= (df["_state"] == geo["state"])
+            scope = f"{geo['county'].title()} County, {geo['state']}"
+        else:
+            scope = f"{geo['county'].title()} County"
+    elif ("city" in geo) and ("state" in geo):
+        mask &= (df["_city"] == geo["city"].strip().lower())
+        mask &= (df["_state"] == geo["state"])
+        scope = f"{geo['city'].title()}, {geo['state']}"
+    elif "state" in geo:
+        mask &= (df["_state"] == geo["state"])
+        scope = geo["state"]
+    else:
+        # no geography parsed → don't hijack generic questions
+        return None
+
+    sub = df[mask]
+    if sub.empty:
+        return f"No rows found for {scope} in the report."
+
+    # numeric column
+    vals = _money_to_float(sub[cat_col] if cat_col in sub.columns else pd.Series([], dtype=str))
+    sub = sub.assign(_amt=vals)
+
+    # group by company and rank
+    g = sub.groupby("_company", dropna=False)["_amt"].sum().sort_values(ascending=False)
+    top = g.head(n)
+    total_scope = float(vals.sum())
+
+    if top.empty or total_scope <= 0:
+        return f"No non-zero '{cat_col}' found for {scope}."
+
+    # tidy output
+    lines = [f"Top {len(top)} by {cat_col} — {scope}"]
+    rank = 1
+    for company, amt in top.items():
+        share = (amt / total_scope) * 100 if total_scope > 0 else 0.0
+        name = company.strip() or "(Unnamed)"
+        lines.append(f"{rank}. {name} — ${amt:,.0f} ({share:.1f}% of local total)")
+        rank += 1
+
+    lines.append(f"Local total {cat_col}: ${total_scope:,.0f}")
+    return "\n".join(lines)
+
 # ─── Chat API (Recommendation + Inquiry + Coach) ─────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -550,6 +754,11 @@ def chat():
 
     # ───────── Inquiry mode ─────────
     if mode == "inquiry":
+        # Try structured 'top-N by spend' answer first
+        structured = try_structured_top_spend_answer(user_q)
+        if structured:
+            return jsonify({"response": structured})
+
         from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
 
         qnorm = _norm_name(user_q)
