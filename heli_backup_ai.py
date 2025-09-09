@@ -575,13 +575,40 @@ def _state_of(cstate: str) -> str:
     parts = s.split()
     return parts[-1].upper() if len(parts) >= 2 and len(parts[-1]) == 2 else ""
 
-def _money_to_float(series: pd.Series) -> pd.Series:
-    return (
-        series.astype(str)
-        .str.replace(r"[\$,]", "", regex=True)
-        .replace({"": "0", "nan": "0", None: "0"})
-        .astype(float)
-    )
+def _money_to_float(s: pd.Series) -> pd.Series:
+    """
+    Robustly parse money-ish strings to float.
+    Handles $, commas, blanks, '—', 'NA', and accounting negatives like (1,187).
+    """
+    import re
+
+    def parse_one(v) -> float:
+        t = str(v or "").strip()
+        if not t or t.lower() in {"nan", "none", "null", "n/a", "-"} or t == "—":
+            return 0.0
+
+        # Detect accounting negatives "(1234)" => -1234
+        neg = t.startswith("(") and t.endswith(")")
+        if neg:
+            t = t[1:-1]
+
+        # Strip currency symbols, commas, spaces, etc.
+        t = re.sub(r"[\$,]", "", t)
+
+        # Keep only digits, optional leading minus, and a single dot
+        # (in case something odd slipped through)
+        t = re.sub(r"[^0-9\.\-]", "", t)
+
+        # Final safety: find the first number pattern if conversion still fails
+        try:
+            val = float(t) if t not in {"", ".", "-"} else 0.0
+        except Exception:
+            m = re.search(r"-?\d+(?:\.\d+)?", t)
+            val = float(m.group(0)) if m else 0.0
+
+        return -val if neg and val > 0 else val
+
+    return s.apply(parse_one)
 
 @lru_cache(maxsize=1)
 def _load_report_df_cached():
