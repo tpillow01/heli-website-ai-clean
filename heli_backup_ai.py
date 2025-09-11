@@ -76,198 +76,31 @@ def init_user_db():
     conn.commit()
     conn.close()
 
-def migrate_visits_table():
-    """
-    Ensure 'visits' has the expected schema:
-      - user_id INTEGER NOT NULL
-      - place_key TEXT NOT NULL
-      - visited INTEGER NOT NULL DEFAULT 0
-      - visited_at DATETIME NULL
-      - PRIMARY KEY (user_id, place_key)
-    If an older/incorrect table exists, migrate its data.
-    """
-    conn = get_user_db()
-    cur = conn.cursor()
-
-    # Does visits exist?
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='visits'")
-    exists = cur.fetchone() is not None
-
-    def current_columns():
-        cur.execute("PRAGMA table_info(visits)")
-        # returns: cid, name, type, notnull, dflt_value, pk
-        return {row[1]: row for row in cur.fetchall()}
-
-    if not exists:
-        cur.execute("""
-            CREATE TABLE visits (
-                user_id    INTEGER NOT NULL,
-                place_key  TEXT    NOT NULL,
-                visited    INTEGER NOT NULL DEFAULT 0,
-                visited_at DATETIME,
-                PRIMARY KEY (user_id, place_key)
-            )
-        """)
-        conn.commit()
-        conn.close()
-        return
-
-    # Check columns/PK
-    need_recreate = False
-    cols = current_columns()
-    required = {"user_id", "place_key", "visited", "visited_at"}
-    if not required.issubset(set(cols.keys())):
-        need_recreate = True
-    else:
-        # Ensure composite PK order (user_id, place_key)
-        pk_cols_sorted = [name for name, row in sorted(cols.items(), key=lambda kv: kv[1][5]) if row[5] > 0]
-        if pk_cols_sorted != ["user_id", "place_key"]:
-            need_recreate = True
-
-    if not need_recreate:
-        conn.close()
-        return
-
-    # Recreate with migration
-    cur.execute("BEGIN")
-    try:
-        cur.execute("ALTER TABLE visits RENAME TO visits_old")
-        cur.execute("""
-            CREATE TABLE visits (
-                user_id    INTEGER NOT NULL,
-                place_key  TEXT    NOT NULL,
-                visited    INTEGER NOT NULL DEFAULT 0,
-                visited_at DATETIME,
-                PRIMARY KEY (user_id, place_key)
-            )
-        """)
-
-        # Best-effort migrate data
-        cur.execute("PRAGMA table_info(visits_old)")
-        old_cols = {r[1].lower() for r in cur.fetchall()}
-        user_col    = "user_id"    if "user_id"    in old_cols else None
-        key_col     = "place_key"  if "place_key"  in old_cols else None
-        visited_col = "visited"    if "visited"    in old_cols else None
-        ts_col      = "visited_at" if "visited_at" in old_cols else None
-
-        if user_col and key_col:
-            select_parts = [
-                f"{user_col} AS user_id",
-                f"{key_col} AS place_key",
-                (f"{visited_col} AS visited" if visited_col else "0 AS visited"),
-                (f"{ts_col} AS visited_at" if ts_col else "NULL AS visited_at"),
-            ]
-            cur.execute(f"""
-                INSERT OR IGNORE INTO visits (user_id, place_key, visited, visited_at)
-                SELECT {", ".join(select_parts)} FROM visits_old
-            """)
-
-        cur.execute("DROP TABLE visits_old")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-# ─── Visit helpers (used by /api/locations and /api/visit) ───────────────
-def get_current_user_id() -> int | None:
-    # requires: from flask import session
-    return session.get("user_id")
-
-def get_visit_map_for_user(user_id: int) -> dict[str, bool]:
-    """Return {place_key: visited_bool} for this user. Auto-migrates if needed."""
-    if not user_id:
-        return {}
-    conn = get_user_db()
-    try:
-        rows = conn.execute(
-            "SELECT place_key, visited FROM visits WHERE user_id = ?",
-            (user_id,),
-        ).fetchall()
-        return {row["place_key"]: bool(row["visited"]) for row in rows}
-    except sqlite3.OperationalError as e:
-        # If schema is old, migrate and retry once
-        if "no such column: place_key" in str(e).lower() or "no such table: visits" in str(e).lower():
-            try:
-                migrate_visits_table()
-                rows = conn.execute(
-                    "SELECT place_key, visited FROM visits WHERE user_id = ?",
-                    (user_id,),
-                ).fetchall()
-                return {row["place_key"]: bool(row["visited"]) for row in rows}
-            except Exception:
-                return {}
-        return {}
-    finally:
-        conn.close()
-
-def set_visit(user_id: int, place_key: str, visited: bool) -> bool:
-    """Upsert a visit flag for this user/place_key."""
-    if not user_id or not place_key:
-        return False
-    conn = get_user_db()
-    try:
-        conn.execute("""
-            INSERT INTO visits (user_id, place_key, visited, visited_at)
-            VALUES (?, ?, ?, CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE visited_at END)
-            ON CONFLICT(user_id, place_key)
-            DO UPDATE SET
-                visited = excluded.visited,
-                visited_at = CASE
-                    WHEN excluded.visited = 1 THEN CURRENT_TIMESTAMP
-                    ELSE visits.visited_at
-                END
-        """, (user_id, place_key, 1 if visited else 0, 1 if visited else 0))
-        conn.commit()
-        return True
-    except sqlite3.OperationalError:
-        # Auto-migrate and try once more
-        migrate_visits_table()
-        try:
-            conn.execute("""
-                INSERT INTO visits (user_id, place_key, visited, visited_at)
-                VALUES (?, ?, ?, CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE visited_at END)
-                ON CONFLICT(user_id, place_key)
-                DO UPDATE SET
-                    visited = excluded.visited,
-                    visited_at = CASE
-                        WHEN excluded.visited = 1 THEN CURRENT_TIMESTAMP
-                        ELSE visits.visited_at
-                    END
-            """, (user_id, place_key, 1 if visited else 0, 1 if visited else 0))
-            conn.commit()
-            return True
-        except Exception:
-            return False
-    finally:
-        conn.close()
-
-# Call these once at import
 init_user_db()
-migrate_visits_table()
 
-# ─── VISITS DB (per-user pin state) ───────────────────────────────────────
-def init_visits_db():
+# --- Visits: table + helpers (ONE place only) -----------------------------
+def ensure_visits_table():
     conn = get_user_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS visits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            visit_key TEXT NOT NULL,
-            visited INTEGER NOT NULL DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, visit_key)
+            user_id     INTEGER NOT NULL,
+            visit_key   TEXT    NOT NULL,
+            visited     INTEGER NOT NULL DEFAULT 0,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, visit_key)
         )
     """)
     conn.commit()
     conn.close()
 
-# Call once at startup
-init_visits_db()
+ensure_visits_table()
 
-def get_visit_map_for_user(user_id: int) -> dict:
-    """Return {visit_key: True/False} for this user."""
+def get_current_user_id():
+    return session.get("user_id")
+
+def get_visit_map_for_user(user_id: int) -> dict[str, bool]:
+    if not user_id:
+        return {}
     conn = get_user_db()
     rows = conn.execute(
         "SELECT visit_key, visited FROM visits WHERE user_id=?",
@@ -276,14 +109,70 @@ def get_visit_map_for_user(user_id: int) -> dict:
     conn.close()
     return {r["visit_key"]: bool(r["visited"]) for r in rows}
 
-
 def set_visit(user_id: int, key: str, visited: bool) -> bool:
-    """Insert/update visited flag for this user + key."""
+    if not (user_id and key):
+        return False
     conn = get_user_db()
     try:
         conn.execute("""
-            INSERT INTO visits (user_id, visit_key, visited)
-            VALUES (?, ?, ?)
+            INSERT INTO visits (user_id, visit_key, visited, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, visit_key)
+            DO UPDATE SET visited=excluded.visited,
+                          updated_at=CURRENT_TIMESTAMP
+        """, (user_id, key, int(visited)))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+# ─── VISITS: unified schema + API (matches map.html) ──────────────────────
+def ensure_visits_table():
+    """
+    Canonical schema:
+      PRIMARY KEY(user_id, visit_key)
+      visited is 0/1; updated_at refreshed on change
+    """
+    conn = get_user_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS visits (
+            user_id     INTEGER NOT NULL,
+            visit_key   TEXT    NOT NULL,
+            visited     INTEGER NOT NULL DEFAULT 0,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, visit_key)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+# Call once at startup
+ensure_visits_table()
+
+def get_visit_map_for_user(user_id: int) -> dict[str, bool]:
+    """
+    Return { visit_key: True/False } for this user.
+    Keep it simple (bools only) so /api/locations can read it directly.
+    """
+    if not user_id:
+        return {}
+    conn = get_user_db()
+    rows = conn.execute(
+        "SELECT visit_key, visited FROM visits WHERE user_id = ?",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    return {r["visit_key"]: bool(r["visited"]) for r in rows}
+
+def set_visit(user_id: int, key: str, visited: bool) -> bool:
+    """Insert/update visited flag for this user + key."""
+    if not (user_id and key):
+        return False
+    conn = get_user_db()
+    try:
+        conn.execute("""
+            INSERT INTO visits (user_id, visit_key, visited, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id, visit_key)
             DO UPDATE SET visited=excluded.visited,
                           updated_at=CURRENT_TIMESTAMP
@@ -291,11 +180,31 @@ def set_visit(user_id: int, key: str, visited: bool) -> bool:
         conn.commit()
         return True
     except Exception as e:
-        print("❌ set_visit error:", e)
+        app.logger.error(f"❌ set_visit error: {e}")
         return False
     finally:
         conn.close()
 
+# Tiny API the map button calls (matches map.html → { key, visited })
+@app.post("/api/visit/mark")
+def api_visit_mark():
+    """
+    Expects JSON: {"key": "<visit_key>", "visited": true/false}
+    """
+    data = request.get_json(force=True) or {}
+    key = (data.get("key") or "").strip()
+    visited = bool(data.get("visited"))
+    uid = get_current_user_id()
+
+    if not uid:
+        return jsonify({"error": "Not logged in"}), 401
+    if not key:
+        return jsonify({"error": "Missing key"}), 400
+
+    ok = set_visit(uid, key, visited)
+    return jsonify({"ok": bool(ok), "visited": visited})
+
+# (These user helpers are fine to keep here if you don't already define them elsewhere)
 def find_user_by_email(email: str):
     conn = get_user_db()
     row = conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)).fetchone()
@@ -772,61 +681,82 @@ _STATES = {
     "iowa": "IA", "minnesota": "MN",
 }
 
+import re
+import pandas as pd
+from typing import Union
+
 def _zip5(z: str) -> str:
-    m = re.search(r"\b(\d{5})\b", str(z or ""))
-    return m.group(1) if m else ""
+    """
+    Return the first 5-digit ZIP fragment found anywhere in the string.
+    Works with '12345', '12345-6789', and noisy text.
+    """
+    m = re.search(r"\d{5}", str(z or ""))
+    return m.group(0) if m else ""
 
 def _county_of(cstate: str) -> str:
+    """
+    Extract county name from 'County State' text like 'Greene County IN' or 'Greene IN'.
+    Returns lowercased county without the word 'county'.
+    """
     s = (cstate or "").strip()
-    if not s: return ""
+    if not s:
+        return ""
     s = re.sub(r"[,\s]+", " ", s)
     parts = s.split()
     if len(parts) >= 2 and len(parts[-1]) == 2:
-        s = " ".join(parts[:-1])
+        s = " ".join(parts[:-1])  # drop trailing state code
     s = re.sub(r"\bcounty\b", "", s, flags=re.IGNORECASE).strip()
     return s.lower()
 
 def _state_of(cstate: str) -> str:
+    """
+    Extract 2-letter state code from 'County State' or 'City State' text.
+    """
     s = (cstate or "").strip()
-    if not s: return ""
+    if not s:
+        return ""
     s = re.sub(r"[,\s]+", " ", s)
     parts = s.split()
-    return parts[-1].upper() if len(parts) >= 2 and len(parts[-1]) == 2 else ""
+    return parts[-1].upper() if (len(parts) >= 2 and len(parts[-1]) == 2) else ""
 
-def _money_to_float(s: pd.Series) -> pd.Series:
+def _money_to_float(x: Union[pd.Series, str, float, int]) -> Union[pd.Series, float]:
     """
     Robustly parse money-ish strings to float.
-    Handles $, commas, blanks, '—', 'NA', and accounting negatives like (1,187).
+    Handles $, commas, blanks, em dash, NA-like tokens, and accounting negatives like (1,187).
+    If a Series is passed, returns a Series; if a scalar, returns a float.
     """
-    import re
+    NA_TOKENS = {"nan", "none", "null", "n/a", "na", "-", "—", "—".encode('utf-8').decode('utf-8')}
+    num_pat = re.compile(r"-?\d+(?:\.\d+)?")  # safety fallback
 
     def parse_one(v) -> float:
         t = str(v or "").strip()
-        if not t or t.lower() in {"nan", "none", "null", "n/a", "-"} or t == "—":
+        if not t or t.lower() in NA_TOKENS:
             return 0.0
 
-        # Detect accounting negatives "(1234)" => -1234
+        # Accounting negatives "(1234)" => -1234
         neg = t.startswith("(") and t.endswith(")")
         if neg:
-            t = t[1:-1]
+            t = t[1:-1].strip()
 
-        # Strip currency symbols, commas, spaces, etc.
+        # Drop currency symbols and commas
         t = re.sub(r"[\$,]", "", t)
 
-        # Keep only digits, optional leading minus, and a single dot
-        # (in case something odd slipped through)
-        t = re.sub(r"[^0-9\.\-]", "", t)
+        # Keep digits, optional leading minus, and dot
+        t = re.sub(r"[^0-9.\-]", "", t)
 
-        # Final safety: find the first number pattern if conversion still fails
+        # Convert, with final safety regex
         try:
             val = float(t) if t not in {"", ".", "-"} else 0.0
         except Exception:
-            m = re.search(r"-?\d+(?:\.\d+)?", t)
+            m = num_pat.search(t)
             val = float(m.group(0)) if m else 0.0
 
         return -val if neg and val > 0 else val
 
-    return s.apply(parse_one)
+    if isinstance(x, pd.Series):
+        return x.apply(parse_one)
+    else:
+        return parse_one(x)
 
 @lru_cache(maxsize=1)
 def _load_report_df_cached():
@@ -1353,49 +1283,7 @@ def api_locations():
 
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
-# ─── Visit API Routes ─────────────────────────────────────
-
-@app.route("/api/visit/mark", methods=["POST"])
-@login_required
-def mark_visit():
-    """
-    Mark or unmark a place as visited for the current user.
-    Request JSON must include: {"place_key": "...", "visited": true/false}
-    """
-    data = request.get_json(force=True) or {}
-    uid = get_current_user_id()
-    if not uid:
-        return jsonify({"error": "Not logged in"}), 401
-
-    place_key = (data.get("place_key") or "").strip()
-    visited = bool(data.get("visited"))
-
-    if not place_key:
-        return jsonify({"error": "place_key required"}), 400
-
-    conn = get_user_db()
-    cur = conn.cursor()
-
-    if visited:
-        # Insert or update
-        cur.execute(
-            """
-            INSERT INTO visits (user_id, place_key, visited_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id, place_key)
-            DO UPDATE SET visited_at = CURRENT_TIMESTAMP
-            """,
-            (uid, place_key),
-        )
-    else:
-        # Delete the record
-        cur.execute("DELETE FROM visits WHERE user_id = ? AND place_key = ?", (uid, place_key))
-
-    conn.commit()
-    conn.close()
-
-    return jsonify({"ok": True, "place_key": place_key, "visited": visited})
-
+# ─── Visit API Routes (unified; matches map.html) ─────────────────────────
 @app.post("/api/visit/mark")
 @login_required
 def api_visit_mark():
@@ -1403,13 +1291,13 @@ def api_visit_mark():
     key = (data.get("key") or "").strip()
     visited = bool(data.get("visited"))
     uid = get_current_user_id()
-    if not uid:
-        return jsonify({"error": "Not logged in"}), 401
+
     if not key:
         return jsonify({"error": "Missing key"}), 400
 
     ok = set_visit(uid, key, visited)
-    return jsonify({"ok": bool(ok), "visited": visited})
+    return jsonify({"ok": bool(ok), "visited": visited, "key": key})
+
 
 # ─── AI Map Analysis Endpoint ────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
@@ -1730,88 +1618,59 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
-# ─── Visits API (per-user) ────────────────────────────────────────────────
-@app.get("/api/visits")
-@login_required
-def api_visits_list():
-    uid = session.get("user_id")
-    conn = get_user_db()
-    rows = conn.execute(
-        "SELECT place_key FROM visits WHERE user_id = ?", (uid,)
-    ).fetchall()
-    conn.close()
-    return jsonify({"visited": [r["place_key"] for r in rows]})
-
-
+# ─── Visits API (per-user) — unified with visit_key ───────────────────────
 @app.post("/api/visits/toggle")
 @login_required
 def api_visits_toggle():
-    uid = session.get("user_id")
+    """
+    Toggle a location's visited status for the current user.
+    Expects JSON: {"key": "<visit_key>"}
+    Returns: {"key": "...", "visited": true/false}
+    """
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify({"error": "Not logged in"}), 401
+
     data = request.get_json(force=True) or {}
-    key  = (data.get("place_key") or "").strip()
+    key  = (data.get("key") or "").strip()
     if not key:
-        return jsonify({"error": "place_key required"}), 400
+        return jsonify({"error": "key required"}), 400
 
-    # optional metadata (for your logs or later reporting)
-    company = (data.get("company") or "").strip()
-    address = (data.get("address") or "").strip()
-    city    = (data.get("city") or "").strip()
-    state   = (data.get("state") or "").strip()
-    zipc    = (data.get("zip") or "").strip()
-    lat     = data.get("lat")
-    lon     = data.get("lon")
-
+    # Read current state
     conn = get_user_db()
-    cur  = conn.cursor()
+    row = conn.execute(
+        "SELECT visited FROM visits WHERE user_id = ? AND visit_key = ?",
+        (uid, key)
+    ).fetchone()
+    conn.close()
 
-    # check if already visited
-    cur.execute(
-        "SELECT id FROM visits WHERE user_id = ? AND place_key = ?", (uid, key)
-    )
-    row = cur.fetchone()
+    current = bool(row["visited"]) if row else False
+    new_state = not current
 
-    if row:
-        # unmark
-        cur.execute("DELETE FROM visits WHERE id = ?", (row["id"],))
-        conn.commit()
-        conn.close()
-        return jsonify({"visited": False})
-    else:
-        # mark visited
-        cur.execute("""
-            INSERT OR IGNORE INTO visits
-                (user_id, place_key, company, address, city, state, zip, lat, lon)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (uid, key, company, address, city, state, zipc, lat, lon))
-        conn.commit()
-        conn.close()
-        return jsonify({"visited": True})
+    ok = set_visit(uid, key, new_state)
+    if not ok:
+        return jsonify({"error": "Failed to update"}), 500
 
-# ─── Visit Tracking Helpers ──────────────────────────────
-def get_current_user_id():
-    """Return the logged-in user's ID from the session, or None."""
-    return session.get("user_id")
+    return jsonify({"key": key, "visited": new_state})
 
-def get_visit_map_for_user(uid: int) -> dict:
+
+# ─── Visit Tracking Helpers (unified) ─────────────────────────────────────
+# NOTE: get_current_user_id() already defined elsewhere in your app.
+# Keep a single definition to avoid duplicates.
+
+def get_visit_map_for_user(uid: int) -> dict[str, bool]:
     """
-    Return a dict of {place_key: row} for all visits by this user.
-    Each row has keys: place_key, visited_at, notes (if you add later).
+    Return a dict of {visit_key: True/False} for all visits by this user.
     """
+    if not uid:
+        return {}
     conn = get_user_db()
-    conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT place_key, visited_at, notes FROM visits WHERE user_id = ?",
+        "SELECT visit_key, visited FROM visits WHERE user_id = ?",
         (uid,)
     ).fetchall()
     conn.close()
-    out = {}
-    for r in rows:
-        out[r["place_key"]] = {
-            "place_key": r["place_key"],
-            "visited_at": r["visited_at"],
-            "notes": r["notes"],
-        }
-    return out
+    return {r["visit_key"]: bool(r["visited"]) for r in rows}
 
 # --- Battle Cards (reads your JSON schema + routes + AI Fit) -----------------
 import os, json, re
