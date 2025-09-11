@@ -85,23 +85,47 @@ def init_visits_db():
         CREATE TABLE IF NOT EXISTS visits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            place_key TEXT NOT NULL,
-            company   TEXT,
-            address   TEXT,
-            city      TEXT,
-            state     TEXT,
-            zip       TEXT,
-            lat       REAL,
-            lon       REAL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, place_key)
+            visit_key TEXT NOT NULL,
+            visited INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, visit_key)
         )
     """)
     conn.commit()
     conn.close()
 
+# Call once at startup
 init_visits_db()
 
+def get_visit_map_for_user(user_id: int) -> dict:
+    """Return {visit_key: True/False} for this user."""
+    conn = get_user_db()
+    rows = conn.execute(
+        "SELECT visit_key, visited FROM visits WHERE user_id=?",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    return {r["visit_key"]: bool(r["visited"]) for r in rows}
+
+
+def set_visit(user_id: int, key: str, visited: bool) -> bool:
+    """Insert/update visited flag for this user + key."""
+    conn = get_user_db()
+    try:
+        conn.execute("""
+            INSERT INTO visits (user_id, visit_key, visited)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, visit_key)
+            DO UPDATE SET visited=excluded.visited,
+                          updated_at=CURRENT_TIMESTAMP
+        """, (user_id, key, int(visited)))
+        conn.commit()
+        return True
+    except Exception as e:
+        print("❌ set_visit error:", e)
+        return False
+    finally:
+        conn.close()
 
 def find_user_by_email(email: str):
     conn = get_user_db()
@@ -1202,6 +1226,21 @@ def mark_visit():
     conn.close()
 
     return jsonify({"ok": True, "place_key": place_key, "visited": visited})
+
+@app.post("/api/visit/mark")
+@login_required
+def api_visit_mark():
+    data = request.get_json(force=True) or {}
+    key = (data.get("key") or "").strip()
+    visited = bool(data.get("visited"))
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify({"error": "Not logged in"}), 401
+    if not key:
+        return jsonify({"error": "Missing key"}), 400
+
+    ok = set_visit(uid, key, visited)
+    return jsonify({"ok": bool(ok), "visited": visited})
 
 # ─── AI Map Analysis Endpoint ────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
