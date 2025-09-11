@@ -183,6 +183,9 @@ def migrate_visits_table():
     finally:
         conn.close()
 
+        migrate_visits_table()
+
+
 # ─── VISITS DB (per-user pin state) ───────────────────────────────────────
 def init_visits_db():
     conn = get_user_db()
