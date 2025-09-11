@@ -55,7 +55,7 @@ app.register_blueprint(admin_bp)  # /admin/login, /admin, /admin/usage.json
 # (Your routes continue below…)
 
 
-# ─── USERS DB (simple SQLite) ────────────────────────────────────────────
+# ─── USERS DB (simple SQLite) + per-user visit tracking ───────────────────
 USERS_DB_PATH = os.getenv("USERS_DB_PATH", "heli_users.db")
 
 def get_user_db():
@@ -75,8 +75,6 @@ def init_user_db():
     """)
     conn.commit()
     conn.close()
-
-init_user_db()
 
 def migrate_visits_table():
     """
@@ -100,22 +98,7 @@ def migrate_visits_table():
         # returns: cid, name, type, notnull, dflt_value, pk
         return {row[1]: row for row in cur.fetchall()}
 
-    need_recreate = False
-    if exists:
-        cols = current_columns()
-        # We require these exact columns
-        required = {"user_id", "place_key", "visited", "visited_at"}
-        if not required.issubset(set(cols.keys())):
-            need_recreate = True
-        else:
-            # ensure composite PK (user_id, place_key)
-            # in SQLite, pk column shows 1..N order; if not composite, recreate
-            pk_cols = [name for name, row in cols.items() if row[5] > 0]
-            pk_cols_sorted = [name for name, row in sorted(cols.items(), key=lambda kv: kv[1][5]) if row[5] > 0]
-            if pk_cols_sorted != ["user_id", "place_key"]:
-                need_recreate = True
-    else:
-        # create fresh
+    if not exists:
         cur.execute("""
             CREATE TABLE visits (
                 user_id    INTEGER NOT NULL,
@@ -129,6 +112,18 @@ def migrate_visits_table():
         conn.close()
         return
 
+    # Check columns/PK
+    need_recreate = False
+    cols = current_columns()
+    required = {"user_id", "place_key", "visited", "visited_at"}
+    if not required.issubset(set(cols.keys())):
+        need_recreate = True
+    else:
+        # Ensure composite PK order (user_id, place_key)
+        pk_cols_sorted = [name for name, row in sorted(cols.items(), key=lambda kv: kv[1][5]) if row[5] > 0]
+        if pk_cols_sorted != ["user_id", "place_key"]:
+            need_recreate = True
+
     if not need_recreate:
         conn.close()
         return
@@ -137,7 +132,6 @@ def migrate_visits_table():
     cur.execute("BEGIN")
     try:
         cur.execute("ALTER TABLE visits RENAME TO visits_old")
-
         cur.execute("""
             CREATE TABLE visits (
                 user_id    INTEGER NOT NULL,
@@ -148,19 +142,13 @@ def migrate_visits_table():
             )
         """)
 
-        # Try to migrate what we can from old table
-        # Best-effort: map any similarly named columns; otherwise default visited=0
-        old_cols = []
+        # Best-effort migrate data
         cur.execute("PRAGMA table_info(visits_old)")
-        for r in cur.fetchall():
-            old_cols.append(r[1].lower())
-
-        # Build a best-effort insert selecting whatever overlaps
-        # Try common legacy patterns
-        user_col   = "user_id"   if "user_id"   in old_cols else None
-        key_col    = "place_key" if "place_key" in old_cols else None
-        visited_col= "visited"   if "visited"   in old_cols else None
-        ts_col     = "visited_at"if "visited_at" in old_cols else None
+        old_cols = {r[1].lower() for r in cur.fetchall()}
+        user_col    = "user_id"    if "user_id"    in old_cols else None
+        key_col     = "place_key"  if "place_key"  in old_cols else None
+        visited_col = "visited"    if "visited"    in old_cols else None
+        ts_col      = "visited_at" if "visited_at" in old_cols else None
 
         if user_col and key_col:
             select_parts = [
@@ -173,7 +161,6 @@ def migrate_visits_table():
                 INSERT OR IGNORE INTO visits (user_id, place_key, visited, visited_at)
                 SELECT {", ".join(select_parts)} FROM visits_old
             """)
-        # else: nothing to migrate
 
         cur.execute("DROP TABLE visits_old")
         conn.commit()
@@ -183,8 +170,82 @@ def migrate_visits_table():
     finally:
         conn.close()
 
-        migrate_visits_table()
+# ─── Visit helpers (used by /api/locations and /api/visit) ───────────────
+def get_current_user_id() -> int | None:
+    # requires: from flask import session
+    return session.get("user_id")
 
+def get_visit_map_for_user(user_id: int) -> dict[str, bool]:
+    """Return {place_key: visited_bool} for this user. Auto-migrates if needed."""
+    if not user_id:
+        return {}
+    conn = get_user_db()
+    try:
+        rows = conn.execute(
+            "SELECT place_key, visited FROM visits WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        return {row["place_key"]: bool(row["visited"]) for row in rows}
+    except sqlite3.OperationalError as e:
+        # If schema is old, migrate and retry once
+        if "no such column: place_key" in str(e).lower() or "no such table: visits" in str(e).lower():
+            try:
+                migrate_visits_table()
+                rows = conn.execute(
+                    "SELECT place_key, visited FROM visits WHERE user_id = ?",
+                    (user_id,),
+                ).fetchall()
+                return {row["place_key"]: bool(row["visited"]) for row in rows}
+            except Exception:
+                return {}
+        return {}
+    finally:
+        conn.close()
+
+def set_visit(user_id: int, place_key: str, visited: bool) -> bool:
+    """Upsert a visit flag for this user/place_key."""
+    if not user_id or not place_key:
+        return False
+    conn = get_user_db()
+    try:
+        conn.execute("""
+            INSERT INTO visits (user_id, place_key, visited, visited_at)
+            VALUES (?, ?, ?, CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE visited_at END)
+            ON CONFLICT(user_id, place_key)
+            DO UPDATE SET
+                visited = excluded.visited,
+                visited_at = CASE
+                    WHEN excluded.visited = 1 THEN CURRENT_TIMESTAMP
+                    ELSE visits.visited_at
+                END
+        """, (user_id, place_key, 1 if visited else 0, 1 if visited else 0))
+        conn.commit()
+        return True
+    except sqlite3.OperationalError:
+        # Auto-migrate and try once more
+        migrate_visits_table()
+        try:
+            conn.execute("""
+                INSERT INTO visits (user_id, place_key, visited, visited_at)
+                VALUES (?, ?, ?, CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE visited_at END)
+                ON CONFLICT(user_id, place_key)
+                DO UPDATE SET
+                    visited = excluded.visited,
+                    visited_at = CASE
+                        WHEN excluded.visited = 1 THEN CURRENT_TIMESTAMP
+                        ELSE visits.visited_at
+                    END
+            """, (user_id, place_key, 1 if visited else 0, 1 if visited else 0))
+            conn.commit()
+            return True
+        except Exception:
+            return False
+    finally:
+        conn.close()
+
+# Call these once at import
+init_user_db()
+migrate_visits_table()
 
 # ─── VISITS DB (per-user pin state) ───────────────────────────────────────
 def init_visits_db():
