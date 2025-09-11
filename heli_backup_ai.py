@@ -1,4 +1,5 @@
-# app.py  — no "Rules:" section in AI responses
+# app.py — cleaned & unified (simple per-user "Visited" pins)
+
 import os, json, difflib, sqlite3, re, time
 from datetime import timedelta
 from functools import wraps
@@ -7,8 +8,8 @@ from flask import (
     Flask, render_template, request, jsonify, redirect, url_for, session, Response
 )
 
-# add near the top with other imports
-from csv_locations import load_csv_locations, to_geojson
+# Optional helpers for other features you already had
+from csv_locations import load_csv_locations, to_geojson  # ok if unused
 
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
@@ -18,8 +19,8 @@ from ai_logic import (
     generate_forklift_context,
     select_models_for_question,
     allowed_models_block,
-    debug_parse_and_rank,   # <<< keep this
-    top_pick_meta           # <<< NEW: promotions helper
+    debug_parse_and_rank,   # keep this for your debug endpoint
+    top_pick_meta           # promotions helper
 )
 
 # Admin usage tracking
@@ -29,10 +30,13 @@ from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usag
 from promotions import promos_for_context, render_promo_lines
 
 # -------------------------------------------------------------------------
-# Data boot
-# (If you load accounts/models earlier, keep that; then load locations.)
-locations_index = load_csv_locations()
-print(f"✅ Loaded {len(locations_index)} locations from customer_location.csv")
+# Data boot (safe if the CSV is missing — load_csv_locations should handle)
+try:
+    locations_index = load_csv_locations()
+    print(f"✅ Loaded {len(locations_index)} locations from customer_location.csv")
+except Exception as e:
+    locations_index = []
+    print("⚠️ Could not load locations at startup:", e)
 
 # -------------------------------------------------------------------------
 # Flask & OpenAI client
@@ -44,7 +48,6 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=bool(os.getenv("SESSION_COOKIE_SECURE", "1") == "1"),
 )
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # -------------------------------------------------------------------------
@@ -52,10 +55,9 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 init_admin_usage(app)
 app.register_blueprint(admin_bp)  # /admin/login, /admin, /admin/usage.json
 
-# (Your routes continue below…)
-
-
-# ─── USERS DB (simple SQLite) + per-user visit tracking ───────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# USERS DB (simple SQLite) + VISITS
+# ─────────────────────────────────────────────────────────────────────────
 USERS_DB_PATH = os.getenv("USERS_DB_PATH", "heli_users.db")
 
 def get_user_db():
@@ -78,55 +80,11 @@ def init_user_db():
 
 init_user_db()
 
-# --- Visits: table + helpers (ONE place only) -----------------------------
-def ensure_visits_table():
-    conn = get_user_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS visits (
-            user_id     INTEGER NOT NULL,
-            visit_key   TEXT    NOT NULL,
-            visited     INTEGER NOT NULL DEFAULT 0,
-            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (user_id, visit_key)
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-ensure_visits_table()
-
 def get_current_user_id():
+    """Return the logged-in user's ID from the session, or None."""
     return session.get("user_id")
 
-def get_visit_map_for_user(user_id: int) -> dict[str, bool]:
-    if not user_id:
-        return {}
-    conn = get_user_db()
-    rows = conn.execute(
-        "SELECT visit_key, visited FROM visits WHERE user_id=?",
-        (user_id,)
-    ).fetchall()
-    conn.close()
-    return {r["visit_key"]: bool(r["visited"]) for r in rows}
-
-def set_visit(user_id: int, key: str, visited: bool) -> bool:
-    if not (user_id and key):
-        return False
-    conn = get_user_db()
-    try:
-        conn.execute("""
-            INSERT INTO visits (user_id, visit_key, visited, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id, visit_key)
-            DO UPDATE SET visited=excluded.visited,
-                          updated_at=CURRENT_TIMESTAMP
-        """, (user_id, key, int(visited)))
-        conn.commit()
-        return True
-    finally:
-        conn.close()
-
-# ─── VISITS: unified schema + API (matches map.html) ──────────────────────
+# VISITS: canonical schema & helpers (ONE place only)
 def ensure_visits_table():
     """
     Canonical schema:
@@ -146,23 +104,7 @@ def ensure_visits_table():
     conn.commit()
     conn.close()
 
-# Call once at startup
 ensure_visits_table()
-
-def get_visit_map_for_user(user_id: int) -> dict[str, bool]:
-    """
-    Return { visit_key: True/False } for this user.
-    Keep it simple (bools only) so /api/locations can read it directly.
-    """
-    if not user_id:
-        return {}
-    conn = get_user_db()
-    rows = conn.execute(
-        "SELECT visit_key, visited FROM visits WHERE user_id = ?",
-        (user_id,)
-    ).fetchall()
-    conn.close()
-    return {r["visit_key"]: bool(r["visited"]) for r in rows}
 
 def set_visit(user_id: int, key: str, visited: bool) -> bool:
     """Insert/update visited flag for this user + key."""
@@ -185,26 +127,24 @@ def set_visit(user_id: int, key: str, visited: bool) -> bool:
     finally:
         conn.close()
 
-# Tiny API the map button calls (matches map.html → { key, visited })
-@app.post("/api/visit/mark")
-def api_visit_mark():
+def get_visit_map_for_user(user_id: int) -> dict:
     """
-    Expects JSON: {"key": "<visit_key>", "visited": true/false}
+    Return { visit_key: True/False } for this user.
+    Keep it simple (bools only) so /api/locations can read it directly.
     """
-    data = request.get_json(force=True) or {}
-    key = (data.get("key") or "").strip()
-    visited = bool(data.get("visited"))
-    uid = get_current_user_id()
+    if not user_id:
+        return {}
+    conn = get_user_db()
+    rows = conn.execute(
+        "SELECT visit_key, visited FROM visits WHERE user_id = ?",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    return {r["visit_key"]: bool(r["visited"]) for r in rows}
 
-    if not uid:
-        return jsonify({"error": "Not logged in"}), 401
-    if not key:
-        return jsonify({"error": "Missing key"}), 400
-
-    ok = set_visit(uid, key, visited)
-    return jsonify({"ok": bool(ok), "visited": visited})
-
-# (These user helpers are fine to keep here if you don't already define them elsewhere)
+# ─────────────────────────────────────────────────────────────────────────
+# User helpers
+# ─────────────────────────────────────────────────────────────────────────
 def find_user_by_email(email: str):
     conn = get_user_db()
     row = conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)).fetchone()
@@ -220,7 +160,9 @@ def create_user(email: str, password: str):
     conn.commit()
     conn.close()
 
-# ─── Auth decorator ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Auth decorator
+# ─────────────────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -229,7 +171,9 @@ def login_required(f):
         return f(*args, **kwargs)
     return wrapper
 
-# ─── JSON DATA LOAD (once at startup) ────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Data (JSON) load once
+# ─────────────────────────────────────────────────────────────────────────
 with open("accounts.json", "r", encoding="utf-8") as f:
     account_data = json.load(f)
 print(f"✅ Loaded {len(account_data)} accounts from JSON")
@@ -250,7 +194,9 @@ def find_account_by_name(text: str):
         return next(a for a in account_data if a.get("Account Name") == match[0])
     return None
 
-# ─── Pages ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Pages
+# ─────────────────────────────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def home():
@@ -297,7 +243,9 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ─── Prompt leak cleaner & model enforcement ─────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Prompt leak cleaner & formatting
+# ─────────────────────────────────────────────────────────────────────────
 def _strip_prompt_leak(text: str) -> str:
     if not isinstance(text, str):
         return text
@@ -305,6 +253,19 @@ def _strip_prompt_leak(text: str) -> str:
     text = re.sub(r'(?is)\nGuidelines:\n(?:.*\n?)*?(?=\n[A-Z][^\n]*:|\Z)', '\n', text).strip()
     text = re.sub(r'(?is)\nRules:\n(?:.*\n?)*?(?=\n[A-Z][^\n]*:|\Z)', '\n', text).strip()
     text = re.sub(r'(?is)\nALLOWED MODELS:\n(?:- .*\n?)*', '\n', text).strip()
+    return text
+
+def _tidy_formatting(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    # Normalize bullets: turn • / · into "- "
+    text = re.sub(r'(?m)^\s*[•·]\s+', "- ", text)
+    # Remove extra blank lines after headers like "Section:\n\n" -> "Section:\n"
+    text = re.sub(r'(?m)^([A-Z][A-Za-z \/&()-]*:)\s*\n+\s*', r'\1\n', text)
+    # Collapse 3+ consecutive newlines -> 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Trim trailing spaces
+    text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
     return text
 
 def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
@@ -344,151 +305,84 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
     text = _tidy_formatting(text)
     return _strip_prompt_leak(text)
 
-# --- Helpers to clean the LLM output ------------------------------------
-
 def _unify_model_mentions(text: str, allowed: list[str]) -> str:
-    """
-    Make sure every model name outside the Model: section refers to the Top Pick.
-    We only rewrite codes that appear in the allowed list (to avoid overreach).
-    """
+    """Make sure every model name outside the Model: section refers to the Top Pick."""
     if not isinstance(text, str) or not text.strip() or not allowed:
         return text
-
-    # Grab the Model: section
     sec_pat = r'(?s)(?:^|\n)Model:\n(?:.*?\n)*?(?=\n[A-Z][^\n]*:|\Z)'
     msec = re.search(sec_pat, text)
     if not msec:
         return text
-
     model_sec = msec.group(0)
     body = text[:msec.start()] + '<<MODEL_SECTION>>' + text[msec.end():]
-
-    # Find Top Pick inside the section
     mtop = re.search(r'-\s*Top Pick:\s*([A-Za-z0-9().\- ]+)', model_sec)
     if not mtop:
-        return text  # nothing to unify if we don't have a top pick
-
+        return text
     top = mtop.group(1).strip()
-
-    # Replace other allowed codes with Top Pick everywhere OUTSIDE the Model: section
     for code in allowed:
-        code = code.strip()
+        code = (code or "").strip()
         if not code or code == top:
             continue
         body = re.sub(rf'\b{re.escape(code)}\b', top, body)
-
     return body.replace('<<MODEL_SECTION>>', model_sec)
 
 def _fix_labels_and_breaks(text: str) -> str:
-    """
-    Clean odd line wraps like 'Minimum\\nCapacity:' and 'Suggested\\nAttachments:'.
-    Also normalize those labels to 'Capacity:', 'Attachments:', 'Tire:'.
-    """
     if not isinstance(text, str) or not text.strip():
         return text
-
-    # merge split labels across a newline
     text = re.sub(r'(?mi)^-\s*Minimum\s*\n\s*Capacity:', '- Capacity:', text)
     text = re.sub(r'(?mi)^-\s*Suggested\s*\n\s*Attachments:', '- Attachments:', text)
     text = re.sub(r'(?mi)^-\s*Suggested\s*\n\s*Tire:', '- Tire:', text)
-
-    # direct label normalization (in case they weren’t split)
     text = re.sub(r'(?mi)^-\s*Minimum\s+Capacity:', '- Capacity:', text)
     text = re.sub(r'(?mi)^-\s*Suggested\s+Attachments:', '- Attachments:', text)
     text = re.sub(r'(?mi)^-\s*Suggested\s+Tire:', '- Tire:', text)
-
-    # fix any stray "Next; Next:" typos the model sometimes emits
     text = text.replace('Next; Next:', 'Next:')
-
     return text
 
 def _fix_common_objections(text: str) -> str:
-    """
-    Reformat Common Objections into concise, scan-friendly single-line bullets:
-    - <Objection> — Ask: … | Reframe: … | Proof: … | Next: …
-    Preserves content, just tidies punctuation/spacing and ensures 'Next:' exists.
-    """
     if not isinstance(text, str) or not text.strip():
         return text
-
     block_pat = r'(?s)(?:^|\n)Common Objections:\n(.*?)(?=\n[A-Z][^\n]*:|\Z)'
     m = re.search(block_pat, text)
     if not m:
         return text
-
     block = m.group(1)
     lines_in = [ln.strip() for ln in block.splitlines() if ln.strip()]
     out = []
-
     for ln in lines_in:
-        # strip leading dash/quotes and normalize punctuation
         s = ln.lstrip('-• ').strip()
         s = s.replace('“', '"').replace('”', '"').replace("’", "'")
         s = s.strip('"').strip("'")
-
-        # collapse multiple spaces and normalize separators
         s = re.sub(r'\s{2,}', ' ', s)
-        s = s.replace(' — ', ' — ').replace('–', '—')  # unify dash
-        s = s.replace('; Next:', ' | Next:')           # make Next separator consistent
+        s = s.replace(' — ', ' — ').replace('–', '—')
+        s = s.replace('; Next:', ' | Next:')
         s = s.replace('; Reframe:', ' | Reframe:')
         s = s.replace('; Proof:', ' | Proof:')
         s = s.replace('; Ask:', ' | Ask:')
         s = s.replace('Next; ', 'Next: ')
-        s = s.replace('Next; Next:', 'Next:')          # safety
-
-        # ensure labeled segments are present in preferred order
+        s = s.replace('Next; Next:', 'Next:')
         if 'Ask:' not in s and '—' in s:
-            # try to split on '—' to get the objection text
             parts = [p.strip() for p in s.split('—', 1)]
             objection = parts[0]
             rest = parts[1] if len(parts) > 1 else ''
             s = f"{objection} — {rest}"
         if 'Next:' not in s:
             s += ' | Next: Schedule a brief site walk to confirm spec.'
-
-        # keep to one tidy bullet
         s = re.sub(r'\s*\|\s*$', '', s).rstrip('.')
         out.append(f"- {s}.")
-
-        if len(out) >= 6:  # keep it brief but useful
+        if len(out) >= 6:
             break
-
     new_block = "Common Objections:\n" + "\n".join(out) + "\n"
     return re.sub(block_pat, "\n" + new_block, text)
 
-def _tidy_formatting(text: str) -> str:
-    if not isinstance(text, str):
-        return text
-
-    # Normalize bullets: turn • / · into "- "
-    text = re.sub(r'(?m)^\s*[•·]\s+', "- ", text)
-
-    # Remove extra blank lines after headers like "Section:\n\n" -> "Section:\n"
-    text = re.sub(r'(?m)^([A-Z][A-Za-z \/&()-]*:)\s*\n+\s*', r'\1\n', text)
-
-    # Collapse 3+ consecutive newlines -> 2
-    text = re.sub(r'\n{3,}', '\n\n', text)
-
-    # Trim trailing spaces
-    text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
-
-    return text
-
 # --- Helpers to ground "Comparison:" on competitor JSON -------------------
-import re
 from difflib import get_close_matches
 
 def _find_heli_model_by_code(code: str):
-    """
-    Locate the HELI model dict (from _load_models()) by its exact model code.
-    Falls back to a fuzzy match if exact not found.
-    """
     code_norm = (code or "").strip().lower()
     models = _load_models()
     for m in models:
         if str(m.get("model", "")).strip().lower() == code_norm:
             return m
-    # fuzzy fallback
     names = [m.get("model", "") for m in models]
     guess = get_close_matches(code, names, n=1, cutoff=0.92)
     if guess:
@@ -498,39 +392,44 @@ def _find_heli_model_by_code(code: str):
                 return m
     return None
 
-def _format_peer_row(p: dict) -> str:
-    """One competitor line: Brand Model — Capacity; turn; width; fuel."""
-    brand = (p.get("brand") or "").strip()
-    model = (p.get("model") or "").strip()
-    cap   = _as_lb(p.get("capacity_lb"))
-    turn  = _as_in(p.get("turning_in"))
-    width = _as_in(p.get("width_in"))
-    fuel  = (p.get("fuel") or "—").title()
-    parts = [f"{brand} {model}".strip()]
-    extras = []
-    if cap and cap != "—":   extras.append(cap)
-    if turn and turn != "—": extras.append(f"turn {turn}")
-    if width and width != "—":extras.append(f"width {width}")
-    if fuel and fuel != "—": extras.append(fuel)
-    if extras:
-        return f"{parts[0]} — " + "; ".join(extras)
-    return parts[0]
+def _fmt_int(n):
+    try:
+        if n is None:
+            return None
+        return f"{int(round(float(n))):,}"
+    except (TypeError, ValueError):
+        return None
 
+def _fmt_in(n):  v = _fmt_int(n); return f"{v} in" if v is not None else None
+def _fmt_lb(n):  v = _fmt_int(n); return f"{v} lb" if v is not None else None
+
+def _as_lb(v):
+    s = _fmt_lb(v)
+    return s or ("—")
+
+def _as_in(v):
+    s = _fmt_in(v)
+    return s or ("—")
+
+def _inject_section(text: str, header: str, bullets: list[str]) -> str:
+    if not isinstance(text, str):
+        return text
+    block = header + ":\n" + "\n".join(f"- {b}" for b in bullets) + "\n"
+    pattern = r'(?:^|\n)' + re.escape(header) + r':\n(?:- .*\n?)*'
+    if re.search(pattern, text, flags=re.MULTILINE):
+        return re.sub(pattern, "\n" + block, text, flags=re.MULTILINE)
+    else:
+        return text + ("\n" if not text.endswith("\n") else "") + block
+
+# (Peer matching impl is defined later; used at runtime)
 def _build_peer_comparison_lines(top_model_code: str, K: int = 4) -> list[str]:
-    """
-    Use the chosen HELI top pick to fetch K closest peers and format stable comparison bullets.
-    If we can't resolve peers, we return a safe generic line.
-    """
     heli_model = _find_heli_model_by_code(top_model_code)
     if not heli_model:
         return ["Similar capacity trucks from other brands are available; lithium cushion 5k class typically compares well on TCO."]
-
     peers = find_best_competitors(heli_model, K=K) or []
     if not peers:
         return ["Compared with common 5k electric cushion trucks from other brands, lithium uptime/PM savings often lower TCO vs IC."]
-
     lines = []
-    # 1) Lead line anchoring why HELI wins (tie to power/geometry if present)
     power_txt = (heli_model.get("power") or "").lower()
     drive_txt = (heli_model.get("drive_type") or "").lower()
     why_bits = []
@@ -539,49 +438,29 @@ def _build_peer_comparison_lines(top_model_code: str, K: int = 4) -> list[str]:
     if "cushion" in drive_txt:
         why_bits.append("indoor traction and floor protection")
     if heli_model.get("_turning_in"):
-        why_bits.append(f"tight turning ({_as_in(heli_model['_turning_in'])})")
-    if heli_model.get("_overall_width_in"):
-        why_bits.append(f"compact width ({_as_in(heli_model['_overall_width_in'])})")
-    why = "; ".join(why_bits) if why_bits else "balanced maneuverability and total cost of ownership"
-    lines.append(f"Top pick vs peers: HELI advantages typically include {why}.")
-
-    # 2) One line per peer
+        lines.append(f"Top pick vs peers: HELI advantages typically include tight turning ({_as_in(heli_model['_turning_in'])}).")
+    elif why_bits:
+        lines.append("Top pick vs peers: HELI advantages typically include " + "; ".join(why_bits) + ".")
+    else:
+        lines.append("Top pick vs peers: HELI shows balanced maneuverability and total cost of ownership.")
     for p in peers:
-        lines.append(_format_peer_row(p))
-
-    # 3) Close with a practical compare action
+        brand = (p.get("brand") or "").strip()
+        model = (p.get("model") or "").strip()
+        lines.append(f"{brand} {model} — {_as_lb(p.get('capacity_lb'))}; turn {_as_in(p.get('turning_in'))}; width {_as_in(p.get('width_in'))}; {(p.get('fuel') or '—').title()}")
     lines.append("We can demo against these peers on your dock to validate turning, lift, and cycle times.")
     return lines
 
-def _inject_section(text: str, header: str, bullets: list[str]) -> str:
-    """
-    Replace the section 'header:' with our own bullet list.
-    Fits your app's formatting: each bullet starts '- ' and sections are 'Header:' on their own line.
-    """
-    if not isinstance(text, str):
-        return text
-    block = header + ":\n" + "\n".join(f"- {b}" for b in bullets) + "\n"
-
-    # Match the existing section: Header:\n- ... (until next Title: or end)
-    pattern = r'(?:^|\n)' + re.escape(header) + r':\n(?:- .*\n?)*'
-    if re.search(pattern, text, flags=re.MULTILINE):
-        return re.sub(pattern, "\n" + block, text, flags=re.MULTILINE)
-    else:
-        # Append at the end if not present
-        return text + ("\n" if not text.endswith("\n") else "") + block
-
-# ─── Recommendation flow helper ──────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Recommendation flow helper
+# ─────────────────────────────────────────────────────────────────────────
 def run_recommendation_flow(user_q: str) -> str:
-    # Build context WITHOUT prepending account text into the parser input
     acct = find_account_by_name(user_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
 
-    # strict grounding list (helpmate picks)
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
     print(f"[recommendation] allowed models: {allowed}")
 
-    # Pick the top HELI model code (if any)
     top_pick_code = allowed[0] if allowed else None
 
     system_prompt = {
@@ -613,44 +492,33 @@ def run_recommendation_flow(user_q: str) -> str:
 
     messages = [
         system_prompt,
-        {"role": "system", "content": allowed_block},  # strict grounding list
+        {"role": "system", "content": allowed_block},
         {"role": "user",   "content": prompt_ctx}
     ]
 
     try:
-        # Start timer for fine-grained usage logging
         t0 = time.perf_counter()
-
         resp = client.chat.completions.create(
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             messages=messages,
             max_tokens=650,
             temperature=0.4
         )
-
-        # Compute duration and log token usage
         duration_ms = int((time.perf_counter() - t0) * 1000)
         log_model_usage(
-            resp,
-            endpoint="/chat",
-            action="chat_reply",
-            duration_ms=duration_ms,
-            extra={"who": session.get("username")}
+            resp, endpoint="/chat", action="chat_reply",
+            duration_ms=duration_ms, extra={"who": session.get("username")}
         )
-
         ai_reply = resp.choices[0].message.content.strip()
-
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
-    # Enforce model list & tidy
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
     ai_reply = _unify_model_mentions(ai_reply, allowed) if '_unify_model_mentions' in globals() else ai_reply
     ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
     ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
     ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply
 
-    # >>> NEW: compute grounded peer comparison and inject it
     if top_pick_code:
         peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
         ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)
@@ -660,7 +528,7 @@ def run_recommendation_flow(user_q: str) -> str:
 # ========= Structured "top-N by spend" helper (inline) =========
 import pandas as pd
 from functools import lru_cache
-import re
+from typing import Union
 
 _CAT_MAP = {
     "rental": "Rental Revenue R12",
@@ -681,76 +549,45 @@ _STATES = {
     "iowa": "IA", "minnesota": "MN",
 }
 
-import re
-import pandas as pd
-from typing import Union
-
 def _zip5(z: str) -> str:
-    """
-    Return the first 5-digit ZIP fragment found anywhere in the string.
-    Works with '12345', '12345-6789', and noisy text.
-    """
     m = re.search(r"\d{5}", str(z or ""))
     return m.group(0) if m else ""
 
 def _county_of(cstate: str) -> str:
-    """
-    Extract county name from 'County State' text like 'Greene County IN' or 'Greene IN'.
-    Returns lowercased county without the word 'county'.
-    """
     s = (cstate or "").strip()
-    if not s:
-        return ""
+    if not s: return ""
     s = re.sub(r"[,\s]+", " ", s)
     parts = s.split()
     if len(parts) >= 2 and len(parts[-1]) == 2:
-        s = " ".join(parts[:-1])  # drop trailing state code
+        s = " ".join(parts[:-1])
     s = re.sub(r"\bcounty\b", "", s, flags=re.IGNORECASE).strip()
     return s.lower()
 
 def _state_of(cstate: str) -> str:
-    """
-    Extract 2-letter state code from 'County State' or 'City State' text.
-    """
     s = (cstate or "").strip()
-    if not s:
-        return ""
+    if not s: return ""
     s = re.sub(r"[,\s]+", " ", s)
     parts = s.split()
     return parts[-1].upper() if (len(parts) >= 2 and len(parts[-1]) == 2) else ""
 
 def _money_to_float(x: Union[pd.Series, str, float, int]) -> Union[pd.Series, float]:
-    """
-    Robustly parse money-ish strings to float.
-    Handles $, commas, blanks, em dash, NA-like tokens, and accounting negatives like (1,187).
-    If a Series is passed, returns a Series; if a scalar, returns a float.
-    """
     NA_TOKENS = {"nan", "none", "null", "n/a", "na", "-", "—", "—".encode('utf-8').decode('utf-8')}
-    num_pat = re.compile(r"-?\d+(?:\.\d+)?")  # safety fallback
+    num_pat = re.compile(r"-?\d+(?:\.\d+)?")
 
     def parse_one(v) -> float:
         t = str(v or "").strip()
         if not t or t.lower() in NA_TOKENS:
             return 0.0
-
-        # Accounting negatives "(1234)" => -1234
         neg = t.startswith("(") and t.endswith(")")
         if neg:
             t = t[1:-1].strip()
-
-        # Drop currency symbols and commas
         t = re.sub(r"[\$,]", "", t)
-
-        # Keep digits, optional leading minus, and dot
         t = re.sub(r"[^0-9.\-]", "", t)
-
-        # Convert, with final safety regex
         try:
             val = float(t) if t not in {"", ".", "-"} else 0.0
         except Exception:
             m = num_pat.search(t)
             val = float(m.group(0)) if m else 0.0
-
         return -val if neg and val > 0 else val
 
     if isinstance(x, pd.Series):
@@ -783,11 +620,9 @@ def _pick_category_column(q: str) -> str | None:
 def _parse_geo_filters(q: str):
     t = q.lower().strip()
 
-    # ZIP
     m = re.search(r"\b(\d{5})\b", t)
     if m: return {"zip": m.group(1)}
 
-    # County
     m = re.search(r"\b([a-z][a-z\s]+?)\s+county(?:,?\s+([a-z]{2}|\w+))?\b", t)
     if m:
         county = re.sub(r"\s+", " ", m.group(1)).strip()
@@ -795,7 +630,6 @@ def _parse_geo_filters(q: str):
         st = st_raw.upper() if len(st_raw) == 2 else _STATES.get(st_raw, "").upper()
         return {"county": county, "state": st or None}
 
-    # City, State
     m = re.search(r"\bin\s+([a-z][a-z\.\-\s]+?)(?:,?\s+([a-z]{2}|\w+))?\b", t)
     if m:
         city = re.sub(r"[^a-z\s\.-]", "", m.group(1)).replace(".", " ").strip()
@@ -804,7 +638,6 @@ def _parse_geo_filters(q: str):
         if city and st:
             return {"city": city, "state": st}
 
-    # State only
     m = re.search(r"\b(in|of)\s+([a-z]{2}|\w+)\b", t)
     if m:
         st_raw = m.group(2).lower()
@@ -880,7 +713,9 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     lines.append(f"Local total {cat_col}: ${total_scope:,.0f}")
     return "\n".join(lines)
 
-# ─── Chat API (Recommendation + Inquiry + Coach) ─────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Chat API (Recommendation + Inquiry + Coach)
+# ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
@@ -893,14 +728,13 @@ def chat():
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
-    # ───────── Sales Coach mode ─────────
+    # Sales Coach
     if mode == "coach":
-        ai_reply = run_sales_coach(user_q)   # helper can be defined later in this file
+        ai_reply = run_sales_coach(user_q)
         return jsonify({"response": ai_reply})
 
-    # ───────── Inquiry mode ─────────
+    # Inquiry
     if mode == "inquiry":
-        # Try structured 'top-N by spend' answer first
         structured = try_structured_top_spend_answer(user_q)
         if structured:
             return jsonify({"response": structured})
@@ -993,18 +827,13 @@ def chat():
         ai_reply = _strip_prompt_leak(ai_reply)
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
-    # ───────── Recommendation mode (default) ─────────
-    user_q = user_q if 'user_q' in locals() else request.form.get('message') or request.args.get('q') or ''
+    # Recommendation (default)
     ai_reply = run_recommendation_flow(user_q)
 
-    # >>> Inject Current Promotions (no top_pick_code needed)
-    from ai_logic import top_pick_meta
-    from promotions import promos_for_context, render_promo_lines
-
-    meta = top_pick_meta(user_q)  # (model_code, class, power) inferred from your models
+    # Inject Current Promotions
+    meta = top_pick_meta(user_q)
     if meta:
         top_code, top_class, top_power = meta
-        # if power preference was in the user's text, it will already be reflected in meta; this is just a gentle override
         if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
         elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
         elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
@@ -1027,7 +856,9 @@ def api_debug_recommend():
         return jsonify({"error": "Missing 'q'"}), 400
     return jsonify(debug_parse_and_rank(user_q, limit=10))
 
-# ─── Modes list ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Modes list
+# ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/modes")
 def api_modes():
     return jsonify([
@@ -1036,7 +867,9 @@ def api_modes():
         {"id": "coach",          "label": "Sales Coach"},
     ])
 
-# ─── Map routes ───────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Map routes
+# ─────────────────────────────────────────────────────────────────────────
 @app.route("/map")
 @login_required
 def map_page():
@@ -1048,13 +881,12 @@ def api_locations():
     """
     Build map points from customer_location.csv and enrich with Sales Rep,
     Segment, and Company by matching customer_report.csv via street+ZIP first,
-    then ZIP fallback. Also joins per-user 'visited' marks.
+    then ZIP fallback. Also joins per-user 'visited' marks (boolean).
     """
     import csv, json as _json, re as _re
     import pandas as _pd
     from flask import Response as _Response
 
-    # ---------- small helpers ----------
     def zip5(z):
         m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
@@ -1073,7 +905,6 @@ def api_locations():
             return (" ".join(parts[:-1]) or None), parts[-1].upper()
         return val, None
 
-    # shared street normalizer (same logic as /api/ai_map_analysis)
     def norm_street(s: str) -> str:
         ABR = {
             "ROAD":"RD","RD.":"RD","RD":"RD","STREET":"ST","ST.":"ST","ST":"ST",
@@ -1086,12 +917,7 @@ def api_locations():
         t = _re.sub(r"\s+", " ", t).strip()
         return " ".join(ABR.get(w, w) for w in t.split())
 
-    # NEW: stable key for a place (used to store visits)
     def make_place_key(address: str, zipc: str, company: str) -> str:
-        """
-        Build a deterministic key so the same customer location matches across sessions.
-        Prefers exact address+ZIP; falls back to company+ZIP.
-        """
         a = norm_street(address or "").strip()
         z = zip5(zipc or "")
         c = (company or "").strip().lower()
@@ -1101,21 +927,19 @@ def api_locations():
             safe_c = _re.sub(r"[^a-z0-9 ]+", "", c)
             safe_c = _re.sub(r"\s+", " ", safe_c).strip()
             return f"COMP|{safe_c}|{z}"
-        # last resort (rare): just the normalized address
         if a:
             return f"ADDR|{a}"
-        return ""  # no stable key possible
+        return ""
 
-    # ---------- Preload report for enrichment ----------
+    # Enrichment maps
     rep_by_zip, seg_by_zip = {}, {}
-    addrzip_to_info = {}  # key: "<STREET_NORM>|<ZIP5>" -> (company, city, seg, rep)
+    addrzip_to_info = {}
 
     try:
         df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
         df["_zip5"] = df.get("Zip Code", "").apply(zip5)
         df["_street_norm"] = df.get("Address", "").apply(norm_street)
 
-        # ZIP majority fallbacks
         if "Sales Rep Name" in df.columns:
             gb_rep = (
                 df[df["_zip5"] != ""]
@@ -1139,7 +963,6 @@ def api_locations():
             )
             seg_by_zip.update(gb_seg)
 
-        # Exact address+ZIP → prefer a Sold-to/Ship-to name
         sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
         ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
 
@@ -1159,15 +982,14 @@ def api_locations():
     except Exception as e:
         print("⚠️ customer_report.csv not available for enrichment:", e)
 
-    # ---------- Pull per-user visited map ----------
+    # Pull per-user visited map (bools)
     try:
-        uid = get_current_user_id()  # from step 1b
+        uid = get_current_user_id()
         visit_map = get_visit_map_for_user(uid) if uid else {}
     except Exception as e:
         print("⚠️ could not load visit map:", e)
         visit_map = {}
 
-    # ---------- Read locations CSV & build items ----------
     items = []
     try:
         with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
@@ -1176,7 +998,6 @@ def api_locations():
             print(f"ℹ️ Reading locations from customer_location.csv with columns: {cols}")
 
             for row in reader:
-                # Coordinates
                 lat = parse_latlon(row.get("Min of Latitude"))
                 lon = parse_latlon(row.get("Min of Longitude"))
                 if lat is None or lon is None:
@@ -1184,13 +1005,11 @@ def api_locations():
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                     continue
 
-                # Address + geography
                 address = (row.get("Address") or "").strip()
                 cs_raw  = (row.get("County State") or "").strip()
                 county, state = split_county_state(cs_raw)
                 zipc = zip5(row.get("Zip Code"))
 
-                # Enrichment by exact street+ZIP
                 company = ""
                 city = ""
                 seg = ""
@@ -1201,13 +1020,11 @@ def api_locations():
                     if key in addrzip_to_info:
                         company, city, seg, rep = addrzip_to_info[key]
 
-                # Fallback to ZIP aggregates
                 if not rep:
                     rep = (rep_by_zip.get(zipc) or "").strip() or "Unassigned"
                 if not seg:
                     seg = (seg_by_zip.get(zipc) or "").strip()
 
-                # Contact bits from locations CSV
                 first = (row.get("First Name") or "").strip()
                 last  = (row.get("Last Name") or "").strip()
                 title = (row.get("Job Title") or "").strip()
@@ -1215,63 +1032,35 @@ def api_locations():
                 mobile= (row.get("Mobile") or "").strip()
                 email = (row.get("Email") or "").strip()
 
-                # Label preference: Company > contact name > email > street
                 label_candidates = [company, " ".join([first, last]).strip(), email, address]
                 label = next((c for c in label_candidates if c), "Unknown")
 
-                # One-line address for popups
                 full_address = ", ".join([bit for bit in [address, city, state, zipc, "USA"] if bit])
 
-                # NEW: compute per-user place key & visited state
                 pkey = make_place_key(address, zipc, company or label)
-                vrow = visit_map.get(pkey) if pkey else None
-                visited = bool(vrow)
-                visited_at = (vrow or {}).get("visited_at")
-                notes = (vrow or {}).get("notes")
+                visited = bool(visit_map.get(pkey)) if pkey else False
 
                 items.append({
-                    # map essentials
                     "company": company,
                     "label": label,
                     "address": address,
                     "full_address": full_address or (address or ""),
-                    "city": city or "",         # may come from report
+                    "city": city or "",
                     "state": state or "",
                     "county": county or "",
                     "zip": zipc,
                     "lat": lat,
                     "lon": lon,
-
-                    # coloring + filtering
                     "sales_rep": rep or "Unassigned",
                     "segment": seg,
-
-                    # raw "County State"
                     "County State": cs_raw,
-
-                    # contact (from locations CSV)
                     "contact": {
-                        "first_name": first,
-                        "last_name": last,
-                        "job_title": title,
-                        "phone": phone,
-                        "mobile": mobile,
-                        "email": email
+                        "first_name": first, "last_name": last, "job_title": title,
+                        "phone": phone, "mobile": mobile, "email": email
                     },
-
-                    # also pass through top-level fallbacks (frontend reads both)
-                    "first_name": first,
-                    "last_name": last,
-                    "job_title": title,
-                    "phone": phone,
-                    "mobile": mobile,
-                    "email": email,
-
-                    # NEW: visit tracking
+                    # simple visit info for the frontend
                     "place_key": pkey,
                     "visited": visited,
-                    "visited_at": visited_at,
-                    "visit_notes": notes,
                 })
 
         print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
@@ -1283,29 +1072,14 @@ def api_locations():
 
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
-# ─── Visit API Routes (unified; matches map.html) ─────────────────────────
-@app.post("/api/visit/mark")
-@login_required
-def api_visit_mark():
-    data = request.get_json(force=True) or {}
-    key = (data.get("key") or "").strip()
-    visited = bool(data.get("visited"))
-    uid = get_current_user_id()
-
-    if not key:
-        return jsonify({"error": "Missing key"}), 400
-
-    ok = set_visit(uid, key, visited)
-    return jsonify({"ok": bool(ok), "visited": visited, "key": key})
-
-
-# ─── AI Map Analysis Endpoint ────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# AI Map Analysis Endpoint (unchanged logic)
+# ─────────────────────────────────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
     import pandas as pd, re, os
     from difflib import get_close_matches
 
-    # ---------- helpers ----------
     def zip5(z: str) -> str:
         m = re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
@@ -1329,7 +1103,6 @@ def ai_map_analysis():
         return parts[-1].upper() if len(parts) >= 2 else ""
 
     def norm_street(s: str) -> str:
-        # Uppercase, collapse spaces, standardize common suffixes, drop punctuation (keeps numbers)
         _abbr = {
             "ROAD": "RD", "RD.": "RD", "RD": "RD",
             "STREET": "ST", "ST.": "ST", "ST": "ST",
@@ -1357,7 +1130,6 @@ def ai_map_analysis():
             m = re.search(r"-?\d+(\.\d+)?", s)
             return float(m.group(0)) if m else 0.0
 
-    # ---------- payload ----------
     payload = request.get_json(force=True) or {}
     customer_raw = (payload.get('customer') or '').strip()
     zip_hint     = zip5(payload.get('zip') or '')
@@ -1369,23 +1141,19 @@ def ai_map_analysis():
     if not any([customer_raw, street_norm, zip_hint]):
         return jsonify({"error": "Provide at least one of: customer name, street+zip"}), 400
 
-    # ---------- load report ----------
     try:
         df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
     except Exception as e:
         print("❌ ai_map_analysis read error:", e)
         return jsonify({"error": "Could not read customer_report.csv"}), 500
 
-    # required columns (guard if missing)
     for col in ["Sold to Name", "Ship to Name", "Address", "City", "Zip Code", "County State", "Sold to ID"]:
         if col not in df.columns:
             df[col] = ""
 
-    # segment column (handles both)
     seg_col = "R12 Segment (Sold to ID)" if "R12 Segment (Sold to ID)" in df.columns \
               else ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
 
-    # precompute normals
     df["_sold_norm"]   = df["Sold to Name"].apply(norm_name)
     df["_ship_norm"]   = df["Ship to Name"].apply(norm_name)
     df["_zip5"]        = df["Zip Code"].apply(zip5)
@@ -1395,7 +1163,6 @@ def ai_map_analysis():
 
     cust_norm = norm_name(customer_raw) if customer_raw else ""
 
-    # ---------- exact address+zip first ----------
     hit = None
     if street_norm and zip_hint:
         m_addrzip = (df["_street_norm"] == street_norm) & (df["_zip5"] == zip_hint)
@@ -1403,7 +1170,6 @@ def ai_map_analysis():
         if not cand.empty:
             hit = cand
 
-    # ---------- layered name matching (refined by hints if present) ----------
     if hit is None:
         m_exact = (df["Sold to Name"].str.lower() == customer_raw.lower()) | \
                   (df["Ship to Name"].str.lower() == customer_raw.lower())
@@ -1422,10 +1188,9 @@ def ai_map_analysis():
                 hit = cand
                 break
 
-    # ---------- fuzzy (last resort) ----------
     if (hit is None or hit.empty) and cust_norm:
         all_norms = list(set(df["_sold_norm"].tolist() + df["_ship_norm"].tolist()))
-        guess = get_close_matches(cust_norm, all_norms, n=1, cutoff=0.88)  # forgiving, but not too loose
+        guess = get_close_matches(cust_norm, all_norms, n=1, cutoff=0.88)
         if guess:
             g = guess[0]
             hit = df[(df["_sold_norm"] == g) | (df["_ship_norm"] == g)]
@@ -1438,7 +1203,6 @@ def ai_map_analysis():
             msg += f" Name seen: '{customer_raw}'."
         return jsonify({"error": msg}), 200
 
-    # ---------- aggregate by Sold to ID if available ----------
     use_df = hit
     aggregated_flag = False
     if "Sold to ID" in df.columns:
@@ -1448,7 +1212,6 @@ def ai_map_analysis():
             use_df = df[df["Sold to ID"].astype(str).str.strip() == chosen_id]
             aggregated_flag = True
 
-    # revenue columns to summarize (only sum the ones that exist)
     REV_COLS = [
         "New Equip R36 Revenue",
         "Used Equip R36 Revenue",
@@ -1463,7 +1226,6 @@ def ai_map_analysis():
     for col in REV_COLS:
         totals[col] = use_df[col].map(money_to_float).sum() if col in use_df.columns else 0.0
 
-    # pick display name & segment
     display_name = (customer_raw or hit["Sold to Name"].iloc[0] or hit["Ship to Name"].iloc[0]).strip()
     seg_val = ""
     if seg_col and seg_col in use_df.columns:
@@ -1471,7 +1233,6 @@ def ai_map_analysis():
         if not mode_series.empty:
             seg_val = str(mode_series.iat[0])
 
-    # ---------- build a concise metrics-first block ----------
     def top_n_metrics(n=3):
         pairs = [(k, v) for k, v in totals.items() if v and v > 0]
         pairs.sort(key=lambda kv: kv[1], reverse=True)
@@ -1485,10 +1246,8 @@ def ai_map_analysis():
         metrics_lines.append(f"- {k}: ${totals[k]:,.2f}")
     metrics_block = "\n".join(metrics_lines)
 
-    # ---------- try OpenAI for narrative; fall back to a hand-written one ----------
     narrative = None
     try:
-        # reuse the global OpenAI client you already created at startup
         prompt = f"""{metrics_block}
 
 Write a concise analysis that USES the dollar figures above in your sentences.
@@ -1511,7 +1270,6 @@ Keep it crisp and sales-focused."""
         print("❌ OpenAI error:", e)
 
     if not narrative:
-        # Simple deterministic fallback using the top 3 metrics
         tops = top_n_metrics(3)
         bullets = []
         if tops:
@@ -1525,14 +1283,12 @@ Keep it crisp and sales-focused."""
             bullets.append("- No recent equipment revenue; qualify fleet age and replacement cycles.")
         if not bullets:
             bullets.append("- Qualify current fleet utilization and maintenance pain points.")
-
         narrative = "\n".join([
             f"Customer: {display_name}" + (f" (Segment {seg_val})" if seg_val else ""),
             "Summary:",
             *bullets
         ])
 
-    # send both keys so the frontend can read either
     return jsonify({
         "response": narrative,
         "result": narrative,
@@ -1542,7 +1298,7 @@ Keep it crisp and sales-focused."""
         "aggregated": aggregated_flag,
     })
 
-# --- Segment lookup for map popups ---------------------------------------
+# Segment lookup for map popups
 @app.route("/api/segments")
 @login_required
 def api_segments():
@@ -1618,7 +1374,30 @@ def api_segments():
         "by_norm_city_state": by_norm_city_state
     })
 
-# ─── Visits API (per-user) — unified with visit_key ───────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+# Visits API (per-user) — unified with visit_key
+# ─────────────────────────────────────────────────────────────────────────
+@app.post("/api/visit/mark")
+@login_required
+def api_visit_mark():
+    """
+    Set a location's visited status for the current user.
+    Expects JSON: {"key": "<visit_key>", "visited": true/false}
+    Returns: {"ok": true/false, "visited": true/false}
+    """
+    data = request.get_json(force=True) or {}
+    key = (data.get("key") or "").strip()
+    visited = bool(data.get("visited"))
+    uid = get_current_user_id()
+
+    if not uid:
+        return jsonify({"error": "Not logged in"}), 401
+    if not key:
+        return jsonify({"error": "Missing key"}), 400
+
+    ok = set_visit(uid, key, visited)
+    return jsonify({"ok": bool(ok), "visited": visited})
+
 @app.post("/api/visits/toggle")
 @login_required
 def api_visits_toggle():
@@ -1653,45 +1432,19 @@ def api_visits_toggle():
 
     return jsonify({"key": key, "visited": new_state})
 
+# ─────────────────────────────────────────────────────────────────────────
+# Battle Cards + Competitor helpers (same features, cleaned)
+# ─────────────────────────────────────────────────────────────────────────
+import os as _os
+from functools import lru_cache as _lru_cache
+from flask import abort
 
-# ─── Visit Tracking Helpers (unified) ─────────────────────────────────────
-# NOTE: get_current_user_id() already defined elsewhere in your app.
-# Keep a single definition to avoid duplicates.
+BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
+MODELS_PATH = _os.path.join(BASE_DIR, "models.json")
 
-def get_visit_map_for_user(uid: int) -> dict[str, bool]:
-    """
-    Return a dict of {visit_key: True/False} for all visits by this user.
-    """
-    if not uid:
-        return {}
-    conn = get_user_db()
-    rows = conn.execute(
-        "SELECT visit_key, visited FROM visits WHERE user_id = ?",
-        (uid,)
-    ).fetchall()
-    conn.close()
-    return {r["visit_key"]: bool(r["visited"]) for r in rows}
-
-# --- Battle Cards (reads your JSON schema + routes + AI Fit) -----------------
-import os, json, re
-from functools import lru_cache
-from flask import render_template, jsonify, request, abort
-
-# Reuse existing OpenAI client if one is already created above
-try:
-    client  # noqa: F821
-except NameError:
-    from openai import OpenAI
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODELS_PATH = os.path.join(BASE_DIR, "models.json")
-
-# ------------------------------- helpers -------------------------------------
 _num_re = re.compile(r"-?\d+(\.\d+)?")
 
 def _canon(s: str) -> str:
-    """Normalize header keys: lowercase -> trim -> collapse ws -> drop punctuation/spaces."""
     if s is None:
         return ""
     t = re.sub(r"\s+", " ", str(s)).strip().lower()
@@ -1711,23 +1464,10 @@ def _clean_or(v, fallback):
     return fallback if _is_na_value(v) else v
 
 def _num_from_text(s):
-    """Return the FIRST number in a string; '49-57' -> 49."""
     if s is None:
         return None
     m = _num_re.search(str(s))
     return float(m.group(0)) if m else None
-
-def _fmt_int(n):
-    try:
-        if n is None:
-            return None
-        return f"{int(round(float(n))):,}"
-    except (TypeError, ValueError):
-        return None
-
-def _fmt_in(n):  v = _fmt_int(n); return f"{v} in" if v is not None else None
-def _fmt_lb(n):  v = _fmt_int(n); return f"{v} lb" if v is not None else None
-def _fmt_v(n):   v = _fmt_int(n); return f"{v} V"  if v is not None else None
 
 def _slugify(s):
     return re.sub(r"[^a-z0-9\-]+", "-", str(s).lower()).strip("-")
@@ -1742,37 +1482,26 @@ def _norm_power(p):
     return p
 
 def _row_lookup(row: dict):
-    """Build normalized-header → value map for a single row."""
     return {_canon(k): v for k, v in row.items()}
 
 def _get(lut: dict, *keys):
-    """Return first non-NA value for any normalized key in *keys."""
     for k in keys:
         v = lut.get(k)
         if not _is_na_value(v):
             return v
     return None
 
-# Canonical keys we will look for after _canon()
 K = {
-    # identity
     "model": {"model", "modelname", "modelnumber"},
-    # series
     "series": {"series", "family", "productseries"},
-    # power
     "power": {"power", "powertype", "powertrain"},
-    # drive type (your JSON uses 'Type')
     "drive_type": {"drivetype", "drive", "drivesystem", "type"},
-    # controller
     "controller": {"controller", "controllerbrand", "control"},
-    # capacity (your JSON uses 'Capacity_lbs')
     "capacity_lbs": {"capacitylbs", "loadcapacitylbs", "ratedcapacity", "capacity", "ratedload"},
-    # dimensions (your JSON uses *_in)
     "height_in": {"heightin", "overallheightin", "overallheight"},
     "width_in": {"widthin", "overallwidthin", "overallwidth"},
     "length_in": {"lengthin", "overalllengthin", "overalllength"},
     "liftheight_in": {"liftheightin", "maxliftingheightin", "maxlifthtin", "mastmaxheightin"},
-    # optional extras
     "battery_v": {"batteryvoltage", "batteryv", "battvoltage", "battv", "voltage", "voltagev"},
     "wheel_base_in": {"wheelbase", "wheelbasein"},
     "turning_in": {"minoutsideturningradiusin", "outsideturningradiusin", "turningradiusin", "turningin"},
@@ -1781,10 +1510,7 @@ K = {
 }
 
 def _normalize_record(rec):
-    """One row -> clean dict for templates + AI (using your JSON keys)."""
     lut = _row_lookup(rec)
-
-    # pull values with our tolerant keys
     raw_model = _get(lut, *K["model"])
     series     = _get(lut, *K["series"])
     power_raw  = _get(lut, *K["power"])
@@ -1796,16 +1522,13 @@ def _normalize_record(rec):
     ow   = _num_from_text(_get(lut, *K["width_in"]))
     ol   = _num_from_text(_get(lut, *K["length_in"]))
     mlh  = _num_from_text(_get(lut, *K["liftheight_in"]))
-
     batt = _num_from_text(_get(lut, *K["battery_v"]))
     wbase= _num_from_text(_get(lut, *K["wheel_base_in"]))
     trn  = _num_from_text(_get(lut, *K["turning_in"]))
     lctr = _num_from_text(_get(lut, *K["load_center_in"]))
     workplace = _get(lut, *K["workplace"])
-
     power_norm = _norm_power(power_raw)
 
-    # raw strings (fallbacks if numbers missing)
     cap_raw  = _get(lut, *K["capacity_lbs"])
     oh_raw   = _get(lut, *K["height_in"])
     ow_raw   = _get(lut, *K["width_in"])
@@ -1817,29 +1540,25 @@ def _normalize_record(rec):
     lctr_raw = _get(lut, *K["load_center_in"])
 
     model = {
-        # identity
         "model": raw_model or "Unknown Model",
         "_display": raw_model or "Unknown Model",
-        "_slug": None,  # set later
+        "_slug": None,
 
-        # descriptors
         "series": _clean_or(series, "—"),
         "power": _clean_or(power_norm or power_raw, "—"),
         "drive_type": _clean_or(drive, "—"),
         "controller": _clean_or(controller, "—"),
 
-        # strings with units (UI)
         "capacity": _fmt_lb(cap)           or _clean_or(cap_raw, "Not specified"),
         "turning_radius": _fmt_in(trn)     or _clean_or(trn_raw, "Not specified"),
         "load_center": _fmt_in(lctr)       or _clean_or(lctr_raw, "Not specified"),
-        "battery_voltage": _fmt_v(batt)    or _clean_or(batt_raw, "Not specified"),
+        "battery_voltage": _fmt_in(None)   or _clean_or(batt_raw, "Not specified"),
         "wheel_base": _fmt_in(wbase)       or _clean_or(wbase_raw, "Not specified"),
-        "overall_height": _fmt_in(oh)      or _clean_or(oh_raw, "Not specified"),   # Height_in
-        "overall_length": _fmt_in(ol)      or _clean_or(ol_raw, "Not specified"),   # Length_in
-        "overall_width": _fmt_in(ow)       or _clean_or(ow_raw, "Not specified"),   # Width_in
-        "max_lift_height": _fmt_in(mlh)    or _clean_or(mlh_raw, "Not specified"),  # LiftHeight_in
+        "overall_height": _fmt_in(oh)      or _clean_or(oh_raw, "Not specified"),
+        "overall_length": _fmt_in(ol)      or _clean_or(ol_raw, "Not specified"),
+        "overall_width": _fmt_in(ow)       or _clean_or(ow_raw, "Not specified"),
+        "max_lift_height": _fmt_in(mlh)    or _clean_or(mlh_raw, "Not specified"),
 
-        # numeric cache
         "_capacity_lb": cap, "_turning_in": trn, "_load_center_in": lctr, "_battery_v": batt,
         "_wheel_base_in": wbase, "_overall_width_in": ow, "_overall_length_in": ol,
         "_overall_height_in": oh, "_max_lift_height_in": mlh,
@@ -1847,7 +1566,6 @@ def _normalize_record(rec):
         "workplace": _clean_or(workplace, None),
     }
 
-    # Light, spec-driven enrichment
     why, env_in, env_out, env_special = [], [], [], []
     if "Electric" in model["power"]:
         why += ["Zero local emissions", "Lower routine maintenance vs. IC", "Quiet operation"]
@@ -1873,9 +1591,8 @@ def _normalize_record(rec):
     model["why_wins"] = list(dict.fromkeys(why)) or ["Not specified"]
     return model
 
-@lru_cache(maxsize=1)
+@_lru_cache(maxsize=1)
 def _load_models():
-    """Read models.json as list OR {'models': [...]} OR {'data': [...]}."""
     with open(MODELS_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)
     rows = raw if isinstance(raw, list) else raw.get("models", raw.get("data", []))
@@ -1899,7 +1616,6 @@ def _find_model_by_slug(slug: str):
             return m
     return None
 
-# -------------------------------- routes -------------------------------------
 @app.route("/battlecards")
 def battlecards_index():
     models = _load_models()
