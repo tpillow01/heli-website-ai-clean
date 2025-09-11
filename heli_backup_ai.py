@@ -78,6 +78,111 @@ def init_user_db():
 
 init_user_db()
 
+def migrate_visits_table():
+    """
+    Ensure 'visits' has the expected schema:
+      - user_id INTEGER NOT NULL
+      - place_key TEXT NOT NULL
+      - visited INTEGER NOT NULL DEFAULT 0
+      - visited_at DATETIME NULL
+      - PRIMARY KEY (user_id, place_key)
+    If an older/incorrect table exists, migrate its data.
+    """
+    conn = get_user_db()
+    cur = conn.cursor()
+
+    # Does visits exist?
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='visits'")
+    exists = cur.fetchone() is not None
+
+    def current_columns():
+        cur.execute("PRAGMA table_info(visits)")
+        # returns: cid, name, type, notnull, dflt_value, pk
+        return {row[1]: row for row in cur.fetchall()}
+
+    need_recreate = False
+    if exists:
+        cols = current_columns()
+        # We require these exact columns
+        required = {"user_id", "place_key", "visited", "visited_at"}
+        if not required.issubset(set(cols.keys())):
+            need_recreate = True
+        else:
+            # ensure composite PK (user_id, place_key)
+            # in SQLite, pk column shows 1..N order; if not composite, recreate
+            pk_cols = [name for name, row in cols.items() if row[5] > 0]
+            pk_cols_sorted = [name for name, row in sorted(cols.items(), key=lambda kv: kv[1][5]) if row[5] > 0]
+            if pk_cols_sorted != ["user_id", "place_key"]:
+                need_recreate = True
+    else:
+        # create fresh
+        cur.execute("""
+            CREATE TABLE visits (
+                user_id    INTEGER NOT NULL,
+                place_key  TEXT    NOT NULL,
+                visited    INTEGER NOT NULL DEFAULT 0,
+                visited_at DATETIME,
+                PRIMARY KEY (user_id, place_key)
+            )
+        """)
+        conn.commit()
+        conn.close()
+        return
+
+    if not need_recreate:
+        conn.close()
+        return
+
+    # Recreate with migration
+    cur.execute("BEGIN")
+    try:
+        cur.execute("ALTER TABLE visits RENAME TO visits_old")
+
+        cur.execute("""
+            CREATE TABLE visits (
+                user_id    INTEGER NOT NULL,
+                place_key  TEXT    NOT NULL,
+                visited    INTEGER NOT NULL DEFAULT 0,
+                visited_at DATETIME,
+                PRIMARY KEY (user_id, place_key)
+            )
+        """)
+
+        # Try to migrate what we can from old table
+        # Best-effort: map any similarly named columns; otherwise default visited=0
+        old_cols = []
+        cur.execute("PRAGMA table_info(visits_old)")
+        for r in cur.fetchall():
+            old_cols.append(r[1].lower())
+
+        # Build a best-effort insert selecting whatever overlaps
+        # Try common legacy patterns
+        user_col   = "user_id"   if "user_id"   in old_cols else None
+        key_col    = "place_key" if "place_key" in old_cols else None
+        visited_col= "visited"   if "visited"   in old_cols else None
+        ts_col     = "visited_at"if "visited_at" in old_cols else None
+
+        if user_col and key_col:
+            select_parts = [
+                f"{user_col} AS user_id",
+                f"{key_col} AS place_key",
+                (f"{visited_col} AS visited" if visited_col else "0 AS visited"),
+                (f"{ts_col} AS visited_at" if ts_col else "NULL AS visited_at"),
+            ]
+            cur.execute(f"""
+                INSERT OR IGNORE INTO visits (user_id, place_key, visited, visited_at)
+                SELECT {", ".join(select_parts)} FROM visits_old
+            """)
+        # else: nothing to migrate
+
+        cur.execute("DROP TABLE visits_old")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 # ─── VISITS DB (per-user pin state) ───────────────────────────────────────
 def init_visits_db():
     conn = get_user_db()
