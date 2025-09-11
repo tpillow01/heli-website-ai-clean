@@ -78,6 +78,31 @@ def init_user_db():
 
 init_user_db()
 
+# ─── VISITS DB (per-user pin state) ───────────────────────────────────────
+def init_visits_db():
+    conn = get_user_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS visits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            place_key TEXT NOT NULL,
+            company   TEXT,
+            address   TEXT,
+            city      TEXT,
+            state     TEXT,
+            zip       TEXT,
+            lat       REAL,
+            lon       REAL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, place_key)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_visits_db()
+
+
 def find_user_by_email(email: str):
     conn = get_user_db()
     row = conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)).fetchone()
@@ -900,12 +925,13 @@ def api_locations():
     """
     Build map points from customer_location.csv and enrich with Sales Rep,
     Segment, and Company by matching customer_report.csv via street+ZIP first,
-    then ZIP fallback.
+    then ZIP fallback. Also joins per-user 'visited' marks.
     """
     import csv, json as _json, re as _re
     import pandas as _pd
     from flask import Response as _Response
 
+    # ---------- small helpers ----------
     def zip5(z):
         m = _re.search(r"\d{5}", str(z or ""))
         return m.group(0) if m else ""
@@ -924,7 +950,7 @@ def api_locations():
             return (" ".join(parts[:-1]) or None), parts[-1].upper()
         return val, None
 
-    # --- shared street normalizer (same logic as /api/ai_map_analysis) ----
+    # shared street normalizer (same logic as /api/ai_map_analysis)
     def norm_street(s: str) -> str:
         ABR = {
             "ROAD":"RD","RD.":"RD","RD":"RD","STREET":"ST","ST.":"ST","ST":"ST",
@@ -937,7 +963,27 @@ def api_locations():
         t = _re.sub(r"\s+", " ", t).strip()
         return " ".join(ABR.get(w, w) for w in t.split())
 
-    # --- Preload report for fast enrichment --------------------------------
+    # NEW: stable key for a place (used to store visits)
+    def make_place_key(address: str, zipc: str, company: str) -> str:
+        """
+        Build a deterministic key so the same customer location matches across sessions.
+        Prefers exact address+ZIP; falls back to company+ZIP.
+        """
+        a = norm_street(address or "").strip()
+        z = zip5(zipc or "")
+        c = (company or "").strip().lower()
+        if a and z:
+            return f"ADDR|{a}|{z}"
+        if c and z:
+            safe_c = _re.sub(r"[^a-z0-9 ]+", "", c)
+            safe_c = _re.sub(r"\s+", " ", safe_c).strip()
+            return f"COMP|{safe_c}|{z}"
+        # last resort (rare): just the normalized address
+        if a:
+            return f"ADDR|{a}"
+        return ""  # no stable key possible
+
+    # ---------- Preload report for enrichment ----------
     rep_by_zip, seg_by_zip = {}, {}
     addrzip_to_info = {}  # key: "<STREET_NORM>|<ZIP5>" -> (company, city, seg, rep)
 
@@ -946,29 +992,38 @@ def api_locations():
         df["_zip5"] = df.get("Zip Code", "").apply(zip5)
         df["_street_norm"] = df.get("Address", "").apply(norm_street)
 
-        # ZIP majority fallbacks (kept from your original)
+        # ZIP majority fallbacks
         if "Sales Rep Name" in df.columns:
-            gb_rep = df[df["_zip5"] != ""].groupby("_zip5")["Sales Rep Name"] \
-                      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "") \
-                      .to_dict()
+            gb_rep = (
+                df[df["_zip5"] != ""]
+                .groupby("_zip5")["Sales Rep Name"]
+                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "")
+                .to_dict()
+            )
             rep_by_zip.update(gb_rep)
 
-        seg_col = "R12 Segment (Sold to ID)" if "R12 Segment (Sold to ID)" in df.columns else \
-                  ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
+        seg_col = (
+            "R12 Segment (Sold to ID)"
+            if "R12 Segment (Sold to ID)" in df.columns
+            else ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
+        )
         if seg_col:
-            gb_seg = df[df["_zip5"] != ""].groupby("_zip5")[seg_col] \
-                      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "") \
-                      .to_dict()
+            gb_seg = (
+                df[df["_zip5"] != ""]
+                .groupby("_zip5")[seg_col]
+                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "")
+                .to_dict()
+            )
             seg_by_zip.update(gb_seg)
 
-        # Exact address+ZIP map → prefer a Sold-to/Ship-to name
+        # Exact address+ZIP → prefer a Sold-to/Ship-to name
         sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
         ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
 
         for _, r in df.iterrows():
             z = r.get("_zip5", "")
             stn = r.get("_street_norm", "")
-            if not (z and stn): 
+            if not (z and stn):
                 continue
             company = (r.get(sold_col) or r.get(ship_col) or "").strip() if (sold_col or ship_col) else ""
             city = (r.get("City") or "").strip()
@@ -981,7 +1036,15 @@ def api_locations():
     except Exception as e:
         print("⚠️ customer_report.csv not available for enrichment:", e)
 
-    # --- Read locations CSV and build points --------------------------------
+    # ---------- Pull per-user visited map ----------
+    try:
+        uid = get_current_user_id()  # from step 1b
+        visit_map = get_visit_map_for_user(uid) if uid else {}
+    except Exception as e:
+        print("⚠️ could not load visit map:", e)
+        visit_map = {}
+
+    # ---------- Read locations CSV & build items ----------
     items = []
     try:
         with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
@@ -993,7 +1056,7 @@ def api_locations():
                 # Coordinates
                 lat = parse_latlon(row.get("Min of Latitude"))
                 lon = parse_latlon(row.get("Min of Longitude"))
-                if lat is None or lon is None: 
+                if lat is None or lon is None:
                     continue
                 if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                     continue
@@ -1004,7 +1067,7 @@ def api_locations():
                 county, state = split_county_state(cs_raw)
                 zipc = zip5(row.get("Zip Code"))
 
-                # Try exact street+ZIP enrichment
+                # Enrichment by exact street+ZIP
                 company = ""
                 city = ""
                 seg = ""
@@ -1015,7 +1078,7 @@ def api_locations():
                     if key in addrzip_to_info:
                         company, city, seg, rep = addrzip_to_info[key]
 
-                # If still missing, fall back to ZIP aggregates
+                # Fallback to ZIP aggregates
                 if not rep:
                     rep = (rep_by_zip.get(zipc) or "").strip() or "Unassigned"
                 if not seg:
@@ -1035,6 +1098,13 @@ def api_locations():
 
                 # One-line address for popups
                 full_address = ", ".join([bit for bit in [address, city, state, zipc, "USA"] if bit])
+
+                # NEW: compute per-user place key & visited state
+                pkey = make_place_key(address, zipc, company or label)
+                vrow = visit_map.get(pkey) if pkey else None
+                visited = bool(vrow)
+                visited_at = (vrow or {}).get("visited_at")
+                notes = (vrow or {}).get("notes")
 
                 items.append({
                     # map essentials
@@ -1066,13 +1136,19 @@ def api_locations():
                         "email": email
                     },
 
-                    # also pass through top-level fallbacks (your frontend reads both)
+                    # also pass through top-level fallbacks (frontend reads both)
                     "first_name": first,
                     "last_name": last,
                     "job_title": title,
                     "phone": phone,
                     "mobile": mobile,
-                    "email": email
+                    "email": email,
+
+                    # NEW: visit tracking
+                    "place_key": pkey,
+                    "visited": visited,
+                    "visited_at": visited_at,
+                    "visit_notes": notes,
                 })
 
         print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
@@ -1084,9 +1160,48 @@ def api_locations():
 
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
-@app.route('/service-worker.js')
-def service_worker():
-    return app.send_static_file('service-worker.js')
+# ─── Visit API Routes ─────────────────────────────────────
+
+@app.route("/api/visit/mark", methods=["POST"])
+@login_required
+def mark_visit():
+    """
+    Mark or unmark a place as visited for the current user.
+    Request JSON must include: {"place_key": "...", "visited": true/false}
+    """
+    data = request.get_json(force=True) or {}
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify({"error": "Not logged in"}), 401
+
+    place_key = (data.get("place_key") or "").strip()
+    visited = bool(data.get("visited"))
+
+    if not place_key:
+        return jsonify({"error": "place_key required"}), 400
+
+    conn = get_user_db()
+    cur = conn.cursor()
+
+    if visited:
+        # Insert or update
+        cur.execute(
+            """
+            INSERT INTO visits (user_id, place_key, visited_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, place_key)
+            DO UPDATE SET visited_at = CURRENT_TIMESTAMP
+            """,
+            (uid, place_key),
+        )
+    else:
+        # Delete the record
+        cur.execute("DELETE FROM visits WHERE user_id = ? AND place_key = ?", (uid, place_key))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({"ok": True, "place_key": place_key, "visited": visited})
 
 # ─── AI Map Analysis Endpoint ────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
@@ -1406,6 +1521,89 @@ def api_segments():
         "by_norm_zip": by_norm_zip,
         "by_norm_city_state": by_norm_city_state
     })
+
+# ─── Visits API (per-user) ────────────────────────────────────────────────
+@app.get("/api/visits")
+@login_required
+def api_visits_list():
+    uid = session.get("user_id")
+    conn = get_user_db()
+    rows = conn.execute(
+        "SELECT place_key FROM visits WHERE user_id = ?", (uid,)
+    ).fetchall()
+    conn.close()
+    return jsonify({"visited": [r["place_key"] for r in rows]})
+
+
+@app.post("/api/visits/toggle")
+@login_required
+def api_visits_toggle():
+    uid = session.get("user_id")
+    data = request.get_json(force=True) or {}
+    key  = (data.get("place_key") or "").strip()
+    if not key:
+        return jsonify({"error": "place_key required"}), 400
+
+    # optional metadata (for your logs or later reporting)
+    company = (data.get("company") or "").strip()
+    address = (data.get("address") or "").strip()
+    city    = (data.get("city") or "").strip()
+    state   = (data.get("state") or "").strip()
+    zipc    = (data.get("zip") or "").strip()
+    lat     = data.get("lat")
+    lon     = data.get("lon")
+
+    conn = get_user_db()
+    cur  = conn.cursor()
+
+    # check if already visited
+    cur.execute(
+        "SELECT id FROM visits WHERE user_id = ? AND place_key = ?", (uid, key)
+    )
+    row = cur.fetchone()
+
+    if row:
+        # unmark
+        cur.execute("DELETE FROM visits WHERE id = ?", (row["id"],))
+        conn.commit()
+        conn.close()
+        return jsonify({"visited": False})
+    else:
+        # mark visited
+        cur.execute("""
+            INSERT OR IGNORE INTO visits
+                (user_id, place_key, company, address, city, state, zip, lat, lon)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (uid, key, company, address, city, state, zipc, lat, lon))
+        conn.commit()
+        conn.close()
+        return jsonify({"visited": True})
+
+# ─── Visit Tracking Helpers ──────────────────────────────
+def get_current_user_id():
+    """Return the logged-in user's ID from the session, or None."""
+    return session.get("user_id")
+
+def get_visit_map_for_user(uid: int) -> dict:
+    """
+    Return a dict of {place_key: row} for all visits by this user.
+    Each row has keys: place_key, visited_at, notes (if you add later).
+    """
+    conn = get_user_db()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT place_key, visited_at, notes FROM visits WHERE user_id = ?",
+        (uid,)
+    ).fetchall()
+    conn.close()
+    out = {}
+    for r in rows:
+        out[r["place_key"]] = {
+            "place_key": r["place_key"],
+            "visited_at": r["visited_at"],
+            "notes": r["notes"],
+        }
+    return out
 
 # --- Battle Cards (reads your JSON schema + routes + AI Fit) -----------------
 import os, json, re

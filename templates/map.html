@@ -161,9 +161,16 @@
     const nameFilter   = document.getElementById('nameFilter');
     const heatToggle   = document.getElementById('heatToggle');
 
-    function markerStyle(rep) {
+    // UPDATED: accept visited and dim visited pins
+    function markerStyle(rep, visited=false) {
       const base = colorForRep(rep || 'Unassigned');
-      return { radius: 7, weight: 1, color: '#333', fillColor: base, fillOpacity: 0.9 };
+      return {
+        radius: 7,
+        weight: 1,
+        color: visited ? '#666' : '#333',
+        fillColor: base,
+        fillOpacity: visited ? 0.35 : 0.9
+      };
     }
 
     // ---------- SEGMENT LOOKUP (from /api/segments) ----------
@@ -376,6 +383,27 @@
       }
     };
 
+    // NEW: toggle visited via API, then update local allPoints + re-render
+    window.toggleVisited = async function(visitKey, currentlyVisited) {
+      if (!visitKey) return;
+      try {
+        const res = await fetch('/api/visit/mark', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: visitKey, visited: !currentlyVisited })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Request failed');
+        let changed = false;
+        (allPoints || []).forEach(p => {
+          if (p.visit_key === visitKey) { p.visited = !currentlyVisited; changed = true; }
+        });
+        if (changed) render();
+      } catch (err) {
+        alert('Could not update visited flag: ' + err.message);
+      }
+    };
+
     function render() {
       layerGroup.clearLayers();
       if (heatLayer) {
@@ -399,7 +427,7 @@
       } else {
         const group = L.featureGroup();
         toShow.forEach(p => {
-          const style = markerStyle(p.sales_rep);
+          const style = markerStyle(p.sales_rep, !!p.visited);  // UPDATED: pass visited
           const segFull = p.segment || lookupSegmentForPoint(p) || '-';
 
           // Contact block
@@ -423,6 +451,11 @@
           const escapedAddr    = (p.address || '').replace(/'/g, "\\'");
           const escapedState   = (p.state || '').replace(/'/g, "\\'");
 
+          const visitedLine = p.visited
+            ? `<div style="margin-top:4px;color:#2e7d32;">Visited ✓</div>`
+            : ``;
+          const visitBtnLabel = p.visited ? 'Unmark Visited' : 'Mark Visited';
+
           const popupHtml = `
             <div style="font:14px/1.35 system-ui, sans-serif;">
               <div style="font-weight:700;">${p.company || p.label}</div>
@@ -430,13 +463,20 @@
               <div>${p.sales_rep || 'Unassigned'}</div>
               <div>State: ${p.state || '-'} | County: ${p.county || '-'} | ZIP: ${p.zip || '-'}</div>
               <div>Segment: ${segFull}</div>
+              ${visitedLine}
               ${contactBlock}
-              <div style="margin-top:8px">
+              <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
                 <button
                   type="button"
                   style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
                   onclick="askAIAboutCustomer('${escapedCompany}','${escapedCity}','${escapedZip}','${escapedAddr}','${escapedState}')">
                   AI Analysis
+                </button>
+                <button
+                  type="button"
+                  style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer"
+                  onclick="toggleVisited('${(p.visit_key||'').replace(/'/g, "\\'")}', ${p.visited ? 'true' : 'false'})">
+                  ${visitBtnLabel}
                 </button>
               </div>
             </div>
