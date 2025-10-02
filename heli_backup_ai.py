@@ -483,7 +483,7 @@ def run_recommendation_flow(user_q: str) -> str:
             "Capacity:\n"
             "Tire Type:\n"
             "Attachments:\n"
-            "Options:\n"
+            "Options:\n"                    # <-- NEW: Options placed right after Attachments
             "Comparison:\n"
             "Sales Pitch Techniques:\n"
             "Common Objections:\n"
@@ -530,13 +530,13 @@ def run_recommendation_flow(user_q: str) -> str:
     ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
     ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply
 
-    # === Enforce Tire Type, Attachments, and Options from Excel ===
+    # === Enforce Tire / Attachments / Options from Excel (keeps Sales Pitch unchanged) ===
     try:
         opt_rec = recommend_options_from_sheet(user_q) or {}
     except Exception:
         opt_rec = {}
 
-    # Tire Type (exactly one line, Name — Benefit)
+    # Tire Type
     tire_bullets = []
     tire = opt_rec.get("tire")
     if tire and tire.get("name"):
@@ -546,45 +546,33 @@ def run_recommendation_flow(user_q: str) -> str:
         tire_bullets.append("Not specified")
     ai_reply = _inject_section(ai_reply, "Tire Type", tire_bullets)
 
-    # Attachments (core attachments only, up to 5, with benefits)
-    attach_rows = opt_rec.get("others") or []
-    core_attachments = {
-        "Sideshifter",
-        "Fork Positioner",
-        "Paper Roll Clamp",
-        "Push/ Pull (Slip-Sheet)",
-        "Carpet Pole",
-        "Fork Extensions",
-    }
+    # Attachments (up to 5) — from sheet's attachment recommendations
+    attach_rows = opt_rec.get("attachments") or opt_rec.get("others") or []
     attach_bullets = []
-    for row in attach_rows:
+    for row in attach_rows[:5]:
         nm = (row.get("name") or "").strip()
-        if not nm or nm not in core_attachments:
+        if not nm:
             continue
         ben = (row.get("benefit") or "").strip()
         attach_bullets.append(f"{nm} — {ben}" if ben else nm)
-        if len(attach_bullets) >= 5:
-            break
     if not attach_bullets:
         attach_bullets = ["Not specified"]
     ai_reply = _inject_section(ai_reply, "Attachments", attach_bullets)
 
-    # ===== Options (non-attachment extras) with benefit lines =====
-    # Anything recommended beyond the core attachments goes here.
-    options_bullets = []
-    for row in (attach_rows or []):
-        name = (row.get("name") or "").strip()
-        if not name or name in core_attachments:
+    # Options (non-attachment options, up to 5) — INSERTED RIGHT AFTER ATTACHMENTS
+    option_rows = opt_rec.get("options") or []
+    option_bullets = []
+    for row in option_rows[:5]:
+        nm = (row.get("name") or "").strip()
+        if not nm:
             continue
-        benefit = (row.get("benefit") or "").strip()
-        options_bullets.append(f"{name} — {benefit}" if benefit else name)
+        ben = (row.get("benefit") or "").strip()
+        option_bullets.append(f"{nm} — {ben}" if ben else nm)
+    if not option_bullets:
+        option_bullets = ["Not specified"]
+    ai_reply = _inject_section(ai_reply, "Options", option_bullets)
 
-    if not options_bullets:
-        options_bullets = ["Not specified"]
-
-    ai_reply = _inject_section(ai_reply, "Options", options_bullets)
-
-    # Comparison injection (keep as-is)
+    # Comparison injection (unchanged)
     if top_pick_code:
         peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
         ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)

@@ -39,10 +39,8 @@
       <nav class="tabs">
         <a href="#" class="tab active">Chat</a>
         <a href="{{ url_for('map_page') }}" class="tab">Map</a>
-        <a href="/battlecards" class="nav-link {{ 'active' if request.path.startswith('/battlecards') else '' }}">
-        Battle Cards
+        <a href="/battlecards" class="nav-link {{ 'active' if request.path.startswith('/battlecards') else '' }}">Battle Cards</a>
         <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
-        </a>
       </nav>
 
       <div class="nav-actions">
@@ -91,12 +89,15 @@
     }
     document.addEventListener('DOMContentLoaded', loadModes);
 
+    // Wrap section headers with the .section-label span so they match your styling
     function formatLabels(text){
+      // Add Customer Profile and Options to the existing list
       return text.replace(
-        /(Model:|Power:|Capacity:|Tire Type:|Attachments:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
+        /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Current Promotions:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
         '<span class="section-label">$1</span>'
       );
     }
+
     function renderBubble(text, sender='ai'){
       if(sender==='ai') stopAnimation();
       const el=document.createElement('div');
