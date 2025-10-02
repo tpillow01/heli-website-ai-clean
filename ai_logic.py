@@ -1085,10 +1085,28 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
     hits = filter_models(user_q)
 
     # ---- Select tire + options from the Excel sheet
-    # ---- Select tire + options from the Excel sheet
     rec = recommend_options_from_sheet(user_q, max_total=6)  # one tire + top options
     chosen_tire = rec.get("tire")
     other_opts = rec.get("others", [])
+
+    # Indoor sanity override: if environment is Indoor and the chosen tire is "Dual ..."
+    # (and the user didn’t ask for non-marking or stability cues), switch to Non-Marking Tires.
+    _user_l = (user_q or "").lower()
+    if env == "Indoor" and chosen_tire and "dual" in (chosen_tire.get("name","").lower()):
+        has_nonmark = bool(re.search(r'non[-\s]?mark', _user_l))
+        has_stability = bool(re.search(r'(ramp|slope|incline|grade|wide load|long load|top heavy|high mast)', _user_l))
+        if not has_nonmark and not has_stability:
+            nm_row = options_lookup_by_name().get("non-marking tires")
+            if nm_row:
+                chosen_tire = {
+                    "name": nm_row["name"],
+                    "benefit": (nm_row.get("benefit") or "Non-marking compound prevents black marks on painted/epoxy floors.")
+                }
+            else:
+                chosen_tire = {
+                    "name": "Non-Marking Tires",
+                    "benefit": "Non-marking compound prevents black marks on painted/epoxy floors."
+                }
 
     # Indoor sanity override: if environment is Indoor and the chosen tire is "Dual ..."
     # (and the user didn’t ask for non-marking or stability cues), switch to Non-Marking Tires.
@@ -1125,6 +1143,22 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
             attachments.append(o)
         else:
             non_attachments.append(o)
+    
+    # --- Sensible defaults if no attachments were detected but pallets/indoor implied
+    if not attachments:
+        want_pallets = bool(re.search(r'\bpallet(s)?\b', _user_l))
+        if want_pallets or env == "Indoor":
+            # Try to pull benefits from Excel if present
+            _lut = options_lookup_by_name()
+            for nm in ["sideshifter", "fork positioner"]:
+                row = _lut.get(nm)
+                if row:
+                    attachments.append({
+                        "name": row["name"],
+                        "benefit": (row.get("benefit") or "").strip()
+                    })
+                else:
+                    attachments.append({"name": nm.title(), "benefit": ""})
 
     # ------------- FORMAT OUTPUT (keeps your existing headings/flow) ------
     lines.append("Customer Profile:")
