@@ -1085,9 +1085,29 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
     hits = filter_models(user_q)
 
     # ---- Select tire + options from the Excel sheet
+    # ---- Select tire + options from the Excel sheet
     rec = recommend_options_from_sheet(user_q, max_total=6)  # one tire + top options
     chosen_tire = rec.get("tire")
     other_opts = rec.get("others", [])
+
+    # Indoor sanity override: if environment is Indoor and the chosen tire is "Dual ..."
+    # (and the user didn’t ask for non-marking or stability cues), switch to Non-Marking Tires.
+    _user_l = (user_q or "").lower()
+    if env == "Indoor" and chosen_tire and "dual" in chosen_tire["name"].lower():
+        has_nonmark = bool(re.search(r'non[-\s]?mark', _user_l))
+        has_stability = bool(re.search(r'(ramp|slope|incline|grade|wide load|long load|top heavy|high mast)', _user_l))
+        if not has_nonmark and not has_stability:
+            nm_row = options_lookup_by_name().get("non-marking tires")
+            if nm_row:
+                chosen_tire = {
+                    "name": nm_row["name"],
+                    "benefit": (nm_row.get("benefit") or "Non-marking compound prevents black marks on painted/epoxy floors.")
+                }
+            else:
+                chosen_tire = {
+                    "name": "Non-Marking Tires",
+                    "benefit": "Non-marking compound prevents black marks on painted/epoxy floors."
+                }
 
     # Split “others” into attachments vs non-attachments by keywords
     ATTACH_KEYS = [
@@ -1138,7 +1158,11 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
         lines.append(f"- {(_text_from_keys(hits[0], POWER_KEYS) if hits else 'Not specified') or 'Not specified'}")
 
     lines.append("\nCapacity:")
-    lines.append(f"- {int(round(want['cap_lbs'])) if want.get('cap_lbs') else 'Not specified'}")
+    if want.get("cap_lbs"):
+        lines.append(f"- {int(round(want['cap_lbs'])):,} lb")
+    else:
+        lines.append("- Not specified")
+
 
     # Tire Type from Excel recommender
     lines.append("\nTire Type:")
@@ -1148,11 +1172,21 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
         lines.append("- Not specified")
 
     # Attachments from Excel recommender (only if present in your sheet)
+# Attachments from Excel recommender (only if present in your sheet)
     lines.append("\nAttachments:")
     if attachments:
         for a in attachments:
             benefit = (a.get("benefit","") or "").strip()
             lines.append(f"- {a['name']}" + (f" — {benefit}" if benefit else ""))
+    else:
+        lines.append("- Not specified")
+
+    # Options (non-attachments) — cue-gated and pulled from your Excel only
+    lines.append("\nOptions:")
+    if non_attachments:
+        for o in non_attachments:
+            ben = (o.get("benefit","") or "").strip()
+            lines.append(f"- {o['name']}" + (f" — {ben}" if ben else ""))
     else:
         lines.append("- Not specified")
 
@@ -1172,12 +1206,12 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
     lines.append("- Share customer testimonials on performance and reliability.")
 
     lines.append("Common Objections:")
-    lines.append("- I need better all-terrain capability.' — Ask: 'What specific terrains do you operate on?' | Reframe: 'This model excels in diverse conditions.' | Proof: 'Proven performance in various environments.' | Next: 'Shall we schedule a demo?.")
-    lines.append("- Are lithium batteries reliable?' — Ask: 'What concerns do you have about battery performance?' | Reframe: 'Lithium offers longer life and less maintenance.' | Proof: 'Industry-leading warranty on batteries.' | Next: 'Would you like to see the specs?.")
-    lines.append("- How does this compare to diesel?' — Ask: 'What are your priorities, emissions or power?' | Reframe: 'Lithium is cleaner and quieter.' | Proof: 'Lower operational costs over time.' | Next: 'Can I provide a cost analysis?.")
-    lines.append("- What about service and support?' — Ask: 'What level of support do you expect?' | Reframe: 'We offer comprehensive service plans.' | Proof: 'Dedicated support team available.' | Next: 'Shall we discuss service options?.")
-    lines.append("- Is it suitable for heavy-duty tasks?' — Ask: 'What tasks will you be performing?' | Reframe: 'Designed for robust applications.' | Proof: 'Tested under heavy loads.' | Next: 'Would you like to see a demonstration?.")
-    lines.append("- I'm concerned about the upfront cost.' — Ask: 'What budget constraints are you working with?' | Reframe: 'Consider total cost of ownership.' | Proof: 'Lower energy and maintenance costs.' | Next: 'Can I help with financing options?.")
+    lines.append("- I need better all-terrain capability. — Ask: What specific terrains do you operate on? | Reframe: This model excels in diverse conditions. | Proof: Proven performance in various environments. | Next: Shall we schedule a demo?")
+    lines.append("- Are lithium batteries reliable? — Ask: What concerns do you have about battery performance? | Reframe: Lithium offers longer life and less maintenance. | Proof: Industry-leading warranty on batteries. | Next: Would you like to see the specs?")
+    lines.append("- How does this compare to diesel? — Ask: What are your priorities, emissions or power? | Reframe: Lithium is cleaner and quieter. | Proof: Lower operational costs over time. | Next: Can I provide a cost analysis?")
+    lines.append("- What about service and support? — Ask: What level of support do you expect? | Reframe: We offer comprehensive service plans. | Proof: Dedicated support team available. | Next: Shall we discuss service options?")
+    lines.append("- Is it suitable for heavy-duty tasks? — Ask: What tasks will you be performing? | Reframe: Designed for robust applications. | Proof: Tested under heavy loads. | Next: Would you like to see a demonstration?")
+    lines.append("- I'm concerned about the upfront cost. — Ask: What budget constraints are you working with? | Reframe: Consider total cost of ownership. | Proof: Lower energy and maintenance costs. | Next: Can I help with financing options?")
 
     # Pass through the original user question at the end (as your original did)
     lines.append(user_q)
