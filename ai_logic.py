@@ -169,56 +169,148 @@ def _score_option_for_needs(opt: dict, want: dict) -> float:
 
 def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
     """
-    Returns a dict with a single best tire + top-scoring supporting options,
-    but ONLY from what's actually present in the Excel.
-    {
-      "tire": {"name","benefit"},
-      "others": [{"name","benefit"},...],   # supporting options (safety, controls, comfort, etc.)
-    }
+    Returns:
+      {
+        "tire": {"code","name","benefit","why"} | None,
+        "attachments": [{"code","name","benefit"}, ...],
+        "others": [{"code","name","benefit"}, ...]
+      }
     """
-    want = _parse_requirements(user_q)
-    # 1) score all options
-    scored = []
-    tires = []
-    for o in _options_iter():
-        sc = _score_option_for_needs(o, want)
-        if o["category"] == "Tires":
-            tires.append((sc, o))
-        else:
-            scored.append((sc, o))
+    text = (user_q or "").lower()
+    rows = load_options()  # you already have this loader
 
-    # 2) choose ONE best tire (if any)
-    tire_choice = None
-    if tires:
-        tires.sort(key=lambda t: t[0], reverse=True)
-        best_sc, best_o = tires[0]
-        tire_choice = {"name": best_o["name"], "benefit": best_o["benefit"]}
+    # Helper to find an option row by (partial) name
+    def find(name_fragment: str):
+        frag = name_fragment.strip().lower()
+        for r in rows:
+            nm = str(r.get("name", "")).lower()
+            if frag == nm or frag in nm:
+                return r
+        return None
 
-    # 3) pick the top supporting options across categories
-    scored.sort(key=lambda t: t[0], reverse=True)
+    # -------------------- Tire (smart) --------------------
+    tire = None
+    try:
+        t_name, t_why = pick_tire_advanced(user_q)  # added earlier in ai_logic.py
+    except Exception:
+        t_name, t_why = ("Dual Tires", "Mixed/unspecified environment — dual provides added stability and versatility.")
+
+    t_row = find(t_name)
+    if t_row:
+        tire = {
+            "code": t_row.get("code", ""),
+            "name": t_row.get("name", t_name),
+            "benefit": t_row.get("benefit", ""),
+            "why": t_why
+        }
+    else:
+        tire = {"code": "", "name": t_name, "benefit": "", "why": t_why}
+
+    # -------------------- Attachments (rule-based) --------------------
+    # Core attachments you asked to include when relevant
+    attach_targets = [
+        ("Sideshifter", ["tight aisles", "line up", "frequent pallet", "dock", "staging", "align", "precision"]),
+        ("Fork Positioner", ["mixed pallet", "varied pallet", "different pallet", "varying pallet", "multiple widths", "rolls", "coils"]),
+        ("Paper Roll Clamp", ["paper", "roll", "tissue", "newsprint"]),
+        ("Push/ Pull", ["slip-sheet", "slipsheet", "slip sheet", "bagged goods", "bulk goods", "carton flow"]),
+        ("Carpet Pole", ["carpet", "textile", "fabric rolls"]),
+        ("Fork Extensions", ["long", "oversize", "wide", "deep pallet", "overhang", "extra reach"])
+    ]
+
+    attachments = []
+    for name, cues in attach_targets:
+        if any(k in text for k in cues):
+            row = find(name)
+            if row:
+                attachments.append({"code": row.get("code",""), "name": row.get("name", name), "benefit": row.get("benefit","")})
+            else:
+                attachments.append({"code": "", "name": name, "benefit": ""})
+
+    # Gentle defaults if nothing matched but they clearly handle pallets:
+    if not attachments and any(k in text for k in ["pallet", "pallets", "dock", "warehouse", "racking"]):
+        for default_name in ("Sideshifter", "Fork Positioner"):
+            row = find(default_name)
+            if row:
+                attachments.append({"code": row.get("code",""), "name": row.get("name", default_name), "benefit": row.get("benefit","")})
+
+    # Limit attachments
+    attachments = attachments[:min(6, max_total)]
+
+    # -------------------- Options (safety/comfort based on cues) --------------------
     others = []
-    seen_cats = set()
-    for sc, o in scored:
-        if sc <= 0:
-            continue
-        # lightly diversify categories so we don't return 5 lights, for example
-        c = o["category"]
-        cap = want.get("cap_lbs") or 0
-        # Allow multiple from strong categories (e.g., Lighting) but try to mix
-        if c in {"Lighting / Safety","Hydraulics / Controls","Cab / Comfort","Protection / Cooling","Braking","Telematics","Environment","Fuel / LPG","Chassis / Structure","Other"}:
-            # limit per category to 2 initially
-            if sum(1 for x in others if x.get("_cat") == c) >= 2:
-                continue
-        item = {"name": o["name"], "benefit": o["benefit"], "_cat": c}
-        others.append(item)
-        if len(others) >= max_total - (1 if tire_choice else 0):
-            break
 
-    # strip helper field
-    for x in others:
-        x.pop("_cat", None)
+    def maybe_add(opt_name_fragment: str, when: bool):
+        if not when:
+            return
+        row = find(opt_name_fragment)
+        if row:
+            item = {"code": row.get("code",""), "name": row.get("name", opt_name_fragment), "benefit": row.get("benefit","")}
+            # prevent duplicates if already included via another path
+            if all(item["name"] != x.get("name") for x in others):
+                others.append(item)
 
-    return {"tire": tire_choice, "others": others}
+    # Lighting / awareness
+    need_ped = any(k in text for k in ["pedestrian", "foot traffic", "busy aisles", "congested", "blind corner", "walkway"])
+    dark = any(k in text for k in ["low light", "dim", "night", "second shift", "poor lighting"])
+    reversing = any(k in text for k in ["reverse", "backing", "back up", "back-up"])
+
+    maybe_add("Blue spot Light", need_ped or dark)
+    maybe_add("Red side line Light", need_ped)
+    maybe_add("LED Rotating Light", need_ped)
+    maybe_add("Rear Working Light", dark)
+    maybe_add("LED Rear Working Light", dark)
+    maybe_add("Visible backward radar", reversing)
+
+    # Controls / hydraulics (if multiple attachments or precision)
+    precision = any(k in text for k in ["precise", "fine control", "ergonomic", "fatigue", "long shifts"])
+    many_funcs = len(attachments) >= 2 or any(k in text for k in ["4th function", "fourth function", "multiple clamps"])
+    if many_funcs:
+        for name in ["Finger control system(4valve)", "5 Valve with Handle"]:
+            maybe_add(name, True)
+    elif precision:
+        for name in ["Finger control system(3valve)", "3 Valve with Handle"]:
+            maybe_add(name, True)
+
+    # Comfort / cab
+    hot = any(k in text for k in ["hot", "heat", "summer", "high ambient", "foundry"])
+    cold = any(k in text for k in ["cold", "freezer", "cold storage", "refrigerated", "winter"])
+    dusty = any(k in text for k in ["dust", "fines", "powder", "sawdust", "grind"])
+    wet = any(k in text for k in ["rain", "outdoor", "weather", "snow", "sleet"])
+
+    maybe_add("Panel mounted Cab", wet or cold)
+    maybe_add("Air conditioner", hot)
+    maybe_add("Heater", cold)
+    maybe_add("Glass Windshield with Wiper", wet)
+    maybe_add("Top Rain-proof Glass", wet)
+    maybe_add("Rear Windshield Glass", wet)
+    maybe_add("Dual Air Filter", dusty)
+    maybe_add("Pre air cleaner", dusty)
+
+    # Protection / durability
+    debris = any(k in text for k in ["debris", "scrap", "metal", "glass", "shavings"])
+    rough = any(k in text for k in ["rough", "curb", "dock plate", "pothole", "rail"])
+    maybe_add("Radiator protection bar", debris or rough)
+    maybe_add("Steel Belly Pan", debris)
+    maybe_add("Removable radiator screen", dusty or debris)
+
+    # Fuel / operations
+    maybe_add("Low Fuel Indicator Light", any(k in text for k in ["lpg", "diesel", "ic"]))
+    maybe_add("Swing Out Drop LPG Bracket", "lpg" in text or "propane" in text or "lp " in text)
+    maybe_add("LPG Tank", "lpg" in text or "propane" in text)
+    maybe_add("Cooling Fan", hot)
+    maybe_add("Speed Control system", any(k in text for k in ["limit speed", "pedestrian safety", "speeding"]))
+
+    # Telematics / ops policy
+    maybe_add("Full OPS", need_ped or reversing or any(k in text for k in ["safety policy", "osha", "audit", "insurance"]))
+
+    # Cap others to remaining budget after attachments (but <= max_total)
+    remaining = max_total - len(attachments)
+    if remaining > 0:
+        others = others[:remaining]
+    else:
+        others = []
+
+    return {"tire": tire, "attachments": attachments, "others": others}
 
 # ── load JSON once -------------------------------------------------------
 def _load_json(path: str):
@@ -604,6 +696,95 @@ def _tire_guidance(want: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     if outdoor and not indoor:
         return ("pneumatic", "Outdoor/yard work → (solid) pneumatic for stability and grip on uneven ground.")
     return (None, None)
+
+# ---- Advanced tire chooser: maps user text -> your option names ----------
+def pick_tire_advanced(user_q: str) -> tuple[str, str]:
+    """
+    Returns (option_name, rationale), where option_name is EXACTLY one of:
+      - "Non-Marking Tires"
+      - "Non-Marking Dual Tires"
+      - "Solid Tires"
+      - "Dual Solid Tires"
+      - "Dual Tires"
+
+    Logic blends environment, floor requirements, debris/roughness, capacity,
+    and stability cues (ramps/high mast/long loads) to step up to 'dual' when needed.
+    """
+    t = (user_q or "").lower()
+
+    # Signals
+    indoorish = any(k in t for k in [
+        "indoor", "inside", "warehouse", "production line", "manufacturing floor",
+        "painted", "epoxy", "sealed", "polished", "smooth concrete", "food", "pharma",
+        "clean floor", "cleanroom"
+    ])
+    outdoorish = any(k in t for k in [
+        "outdoor", "yard", "dock", "dock yard", "lumber yard", "construction",
+        "pavement", "asphalt", "gravel", "dirt", "parking lot"
+    ])
+    rough = any(k in t for k in [
+        "rough terrain", "rough-terrain", "uneven", "broken", "pothole",
+        "ruts", "curbs", "thresholds", "rails", "speed bumps"
+    ])
+    debris = any(k in t for k in [
+        "debris", "nails", "screws", "scrap", "metal", "glass", "shavings", "chip"
+    ])
+    mixed = any(k in t for k in [
+        "indoor/outdoor", "inside and outside", "both indoor and outdoor",
+        "dock to yard", "mixed environment", "go outside and inside"
+    ])
+    nonmark_need = any(k in t for k in [
+        "non-mark", "non mark", "no marks", "avoid marks", "black marks", "scuff", "no scuffs"
+    ])
+
+    # Stability: ramps, high mast, long/wide loads -> favor dual
+    stability = any(k in t for k in [
+        "ramp", "ramps", "slope", "incline", "grade", "dock plate",
+        "high mast", "elevated", "tall stacks", "top heavy",
+        "wide loads", "long loads", "coil", "paper", "rolls"
+    ])
+
+    # Capacity hint (reuse your existing parser)
+    heavy = False
+    try:
+        cap_min, _ = _parse_capacity_lbs_intent(t)  # existing helper above in this file
+        heavy = bool(cap_min and cap_min >= 7000)
+    except Exception:
+        pass
+
+    # Decision tree
+    # 1) Explicit non-marking requirement overrides (indoor bias)
+    if nonmark_need or (indoorish and not outdoorish and any(k in t for k in ["concrete", "painted", "polished", "epoxy", "clean"])):
+        if heavy or stability or mixed:
+            return ("Non-Marking Dual Tires", "Clean/painted floors with heavier or mixed-duty usage — non-marking duals add stability and reduce scuffing.")
+        return ("Non-Marking Tires", "Clean indoor floors — non-marking prevents black marks and scuffs.")
+
+    # 2) Rough/debris -> Solid; step to Dual Solid if heavy/stability/mixed
+    if rough or debris or (outdoorish and not indoorish and any(k in t for k in ["gravel", "dirt", "pothole", "broken"])):
+        if heavy or stability or mixed:
+            return ("Dual Solid Tires", "Rough/debris-prone surfaces — dual solid improves stability and is puncture-resistant.")
+        return ("Solid Tires", "Rough/debris-prone surfaces — solid is puncture-proof and low maintenance.")
+
+    # 3) Mixed indoors/outdoors (no explicit rough or non-mark need) -> Dual (plain)
+    if mixed or (indoorish and outdoorish):
+        return ("Dual Tires", "Mixed indoor/outdoor travel — dual improves stability and footprint across surfaces.")
+
+    # 4) Pure outdoor (pavement, light duty) without rough/debris -> Solid
+    if outdoorish and not indoorish:
+        if heavy or stability:
+            return ("Dual Solid Tires", "Outdoor duty with heavier loads or ramps — dual solid adds footprint and stability.")
+        return ("Solid Tires", "Outdoor pavement — solid reduces flats and maintenance.")
+
+    # 5) Pure indoor (no non-mark flag): default to non-marking; dual if heavy/stability
+    if indoorish and not outdoorish:
+        if heavy or stability:
+            return ("Non-Marking Dual Tires", "Indoor with higher stability needs — dual non-marking reduces scuffs and adds stability.")
+        return ("Non-Marking Tires", "Indoor warehouse floors — non-marking avoids scuffing on concrete/epoxy.")
+
+    # 6) Ambiguous fallback
+    if any(k in t for k in ["electric", "battery", "lithium"]) and any(k in t for k in ["concrete", "smooth", "painted"]):
+        return ("Non-Marking Tires", "Likely indoor on smooth concrete with electric — non-marking prevents scuffs.")
+    return ("Dual Tires", "Mixed/unspecified environment — dual provides added stability and versatility.")
 
 # --- model filtering & ranking ------------------------------------------
 def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
