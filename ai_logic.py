@@ -169,61 +169,63 @@ def _score_option_for_needs(opt: dict, want: dict) -> float:
 
 # --- Fallback flag extractor (only if you don't already have one) ---
 if '_need_flags_from_text' not in globals():
+# --- Unified flag extractor (strong patterns; safe to always define/override) ---
     def _need_flags_from_text(user_q: str) -> dict:
         t = (user_q or "").lower()
         f = {}
-        # Environment / duty
-        f["indoor"] = re.search(r'\bindoor|warehouse|inside|factory|floor\b', t) is not None
-        f["outdoor"] = re.search(r'\boutdoor|yard|dock|lot|asphalt|gravel|dirt|parking\b', t) is not None
-        f["mixed"] = ("indoor" in t and "outdoor" in t) or "mixed" in t or "both" in t
-        f["yard"] = "yard" in t
-        f["soft_ground"] = re.search(r'soft\s*ground|mud|sand', t) is not None
-        f["gravel"] = "gravel" in t or "dirt" in t
-        f["rough"] = re.search(r'rough|uneven|broken|pothole|curb|rail|speed\s*bumps?', t) is not None
-        f["debris"] = re.search(r'debris|nails|screws|scrap|glass|shavings|chips?', t) is not None
-        f["puncture"] = re.search(r'puncture|flats?|tire\s*damage', t) is not None
-        f["heavy_loads"] = re.search(r'\b(7k|7000|8k|8000)\b|heavy\s*loads?|coil|paper\s*rolls?', t) is not None
-        f["long_runs"] = re.search(r'long\s*shifts?|multi[-\s]?shift|continuous', t) is not None
 
-        # Tires
-        f["non_marking"] = re.search(r'non[-\s]?mark|no\s*marks?|scuff', t) is not None
+        # Environment / duty
+        f["indoor"]        = re.search(r'\bindoor|warehouse|inside|factory|production|line\b', t) is not None
+        f["outdoor"]       = re.search(r'\boutdoor|yard|dock|lot|asphalt|gravel|dirt|parking\b', t) is not None
+        f["mixed"]         = ("indoor" in t and "outdoor" in t) or ("both" in t) or ("mixed" in t)
+        f["yard"]          = "yard" in t
+        f["soft_ground"]   = re.search(r'soft\s*ground|mud|sand', t) is not None
+        f["gravel"]        = "gravel" in t or "dirt" in t
+        f["rough"]         = re.search(r'rough|uneven|broken|pothole|curb|rail|speed\s*bumps?', t) is not None
+        f["debris"]        = re.search(r'debris|nails|screws|scrap|glass|shavings|chips?', t) is not None
+        f["puncture"]      = re.search(r'puncture|flats?|tire\s*damage', t) is not None
+        f["heavy_loads"]   = re.search(r'\b(7k|7000|8k|8000)\b|heavy\s*loads?|coil|paper\s*rolls?', t) is not None
+        f["long_runs"]     = re.search(r'long\s*shifts?|multi[-\s]?shift|continuous', t) is not None
+
+        # Tires (one-line versions you asked for)
+        f["non_marking"]   = bool(re.search(r'non[-\s]?mark|no\s*marks?|black\s*marks?|avoid\s*marks?|scuff', t))
 
         # Work content → attachments
         f["alignment_frequent"] = re.search(r'align|line\s*up|tight\s*aisles|staging', t) is not None
-        f["varied_width"] = re.search(r'vary|mixed\s*pallet|different\s*width|multiple\s*widths', t) is not None
-        f["paper_rolls"] = re.search(r'paper\s*roll|newsprint|tissue', t) is not None
-        f["slip_sheets"] = re.search(r'slip[-\s]?sheet', t) is not None
-        f["carpet"] = "carpet" in t or "textile" in t
-        f["long_loads"] = re.search(r'long|oversize|over[-\s]?length|overhang', t) is not None
-        f["weighing"] = re.search(r'weigh|scale|check\s*weight', t) is not None
+        f["varied_width"]       = bool(re.search(r'vary|mixed\s*pallet|different\s*width|multiple\s*widths|mix\s*of\s*\d+\s*["in]?\s*(and|&)\s*\d+\s*["in]?\s*pallets?', t))
+        f["paper_rolls"]        = re.search(r'paper\s*roll|newsprint|tissue', t) is not None
+        f["slip_sheets"]        = re.search(r'slip[-\s]?sheet', t) is not None
+        f["carpet"]             = "carpet" in t or "textile" in t
+        f["long_loads"]         = bool(re.search(r'long|oversize|over[-\s]?length|overhang|\b\d+\s*[- ]?ft\b|\b\d+\s*foot\b|\b\d+\s*feet\b|crate[s]?', t))
+        f["weighing"]           = re.search(r'weigh|scale|check\s*weight', t) is not None
 
         # Visibility / safety
-        f["pedestrian_heavy"] = re.search(r'pedestrian|foot\s*traffic|busy|congested|blind\s*corner|walkway', t) is not None
-        f["poor_visibility"] = re.search(r'low\s*light|dim|night|second\s*shift|poor\s*lighting', t) is not None
+        f["pedestrian_heavy"]   = re.search(r'pedestrian|foot\s*traffic|busy|congested|blind\s*corner|walkway', t) is not None
+        f["poor_visibility"]    = re.search(r'low\s*light|dim|night|second\s*shift|poor\s*lighting', t) is not None
 
         # Hydraulics / functions
-        f["extra_hydraulics"] = "4th function" in t or "fourth function" in t
-        f["multi_function"] = "multiple clamp" in t or "multiple attachments" in t
-        f["ergonomics"] = re.search(r'ergonomic|fatigue|wrist|reach|comfort', t) is not None
+        f["extra_hydraulics"]   = "4th function" in t or "fourth function" in t
+        f["multi_function"]     = "multiple clamp" in t or "multiple attachments" in t
+        f["ergonomics"]         = re.search(r'ergonomic|fatigue|wrist|reach|comfort', t) is not None
 
-        # Climate / environment specifics
-        f["cold"] = re.search(r'cold|freezer|refrigerated|winter', t) is not None
-        f["hot"] = re.search(r'hot|heat|summer|foundry|high\s*ambient', t) is not None
+        # Climate / environment
+        f["cold"]               = re.search(r'cold|freezer|refrigerated|winter', t) is not None
+        f["hot"]                = re.search(r'hot|heat|summer|foundry|high\s*ambient', t) is not None
 
         # Policy / compliance
-        f["speed_control"] = re.search(r'limit\s*speed|speeding|zoned\s*speed', t) is not None
-        f["ops_required"] = re.search(r'ops|operator\s*presence|osha|insurance|audit|policy', t) is not None
+        f["speed_control"]      = re.search(r'limit\s*speed|speeding|zoned\s*speed', t) is not None
+        f["ops_required"]       = re.search(r'ops|operator\s*presence|osha|insurance|audit|policy', t) is not None
 
-        # Misc
-        f["tall_operator"] = "tall operator" in t or "headroom" in t
-        f["high_loads"] = re.search(r'high\s*mast|tall\s*stacks|top\s*heavy|elevated', t) is not None
-        f["special_color"] = "special color" in t or "paint" in t
-        f["rigging"] = "rigging" in t or "lift with crane" in t
-        f["telematics"] = "fics" in t or "fleet management" in t or "telematics" in t
+        # Misc site/config
+        f["tall_operator"]      = "tall operator" in t or "headroom" in t
+        f["high_loads"]         = re.search(r'high\s*mast|tall\s*stacks|top\s*heavy|elevated', t) is not None
+        f["special_color"]      = "special color" in t or "paint" in t
+        f["rigging"]            = "rigging" in t or "lift with crane" in t
+        f["telematics"]         = "fics" in t or "fleet management" in t or "telematics" in t
 
         # Power hints
-        f["power_lpg"] = re.search(r'\b(lpg|propane|lp[-\s]?gas)\b', t) is not None
-        f["electric"] = re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', t) is not None
+        f["power_lpg"]          = re.search(r'\b(lpg|propane|lp[-\s]?gas)\b', t) is not None
+        f["electric"]           = re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', t) is not None
         return f
 
 # === REPLACEMENT: Excel-driven tires / attachments / options recommender ===
@@ -487,41 +489,8 @@ def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
     # If you already have a sophisticated flagger, use it; otherwise start empty
     flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
 
-    # Lightweight power/env hints (fallbacks)
-    t = (user_q or "").lower()
-    flags.setdefault("power_lpg", bool(re.search(r'\b(lpg|propane|lp[-\s]?gas)\b', t)))
-    flags.setdefault("electric", bool(re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', t)))
-    flags.setdefault("non_marking", bool(re.search(r'non[-\s]?mark|no\s*mark|scuff', t)))
-    flags.setdefault("rough", bool(re.search(r'rough|uneven|broken|pothole|curb|rail|speed\s*bumps', t)))
-    flags.setdefault("debris", bool(re.search(r'debris|nails|screws|scrap|glass|shavings|chips?', t)))
-    flags.setdefault("gravel", "gravel" in t)
-    flags.setdefault("yard", "yard" in t)
-    flags.setdefault("outdoor", bool(re.search(r'\boutdoor|dock|lot|asphalt|gravel|dirt|parking\b', t)))
-    flags.setdefault("indoor", bool(re.search(r'\bindoor|warehouse|inside|factory|floor\b', t)))
-    flags.setdefault("mixed", ("indoor" in t and "outdoor" in t) or "mixed" in t or "both" in t)
+    flags = _need_flags_from_text(user_q)
 
-    # Work content flags for attachments/options
-    flags.setdefault("alignment_frequent", bool(re.search(r'align|line\s*up|tight\s*aisles|staging', t)))
-    flags.setdefault("varied_width", bool(re.search(r'vary|mixed\s*pallet|different\s*width|multiple\s*widths', t)))
-    flags.setdefault("paper_rolls", bool(re.search(r'paper\s*roll|newsprint|tissue', t)))
-    flags.setdefault("slip_sheets", bool(re.search(r'slip[-\s]?sheet', t)))
-    flags.setdefault("carpet", "carpet" in t or "textile" in t)
-    flags.setdefault("long_loads", bool(re.search(r'long|oversize|over[-\s]?length|overhang', t)))
-    flags.setdefault("weighing", bool(re.search(r'weigh|scale|check\s*weight', t)))
-    flags.setdefault("pedestrian_heavy", bool(re.search(r'pedestrian|foot\s*traffic|busy|congested|blind\s*corner|walkway', t)))
-    flags.setdefault("poor_visibility", bool(re.search(r'low\s*light|dim|night|second\s*shift|poor\s*lighting', t)))
-    flags.setdefault("extra_hydraulics", "4th function" in t or "fourth function" in t)
-    flags.setdefault("multi_function", "multiple clamp" in t or "multiple attachments" in t)
-    flags.setdefault("ergonomics", bool(re.search(r'ergonomic|fatigue|wrist|reach|comfort', t)))
-    flags.setdefault("long_runs", bool(re.search(r'long\s*shifts?|multi[-\s]?shift|continuous', t)))
-    flags.setdefault("cold", bool(re.search(r'cold|freezer|refrigerated|winter', t)))
-    flags.setdefault("hot", bool(re.search(r'hot|heat|summer|foundry|high\s*ambient', t)))
-    flags.setdefault("speed_control", bool(re.search(r'limit\s*speed|speeding|zoned\s*speed', t)))
-    flags.setdefault("ops_required", bool(re.search(r'ops|operator\s*presence|osha|insurance|audit|policy', t)))
-    flags.setdefault("tall_operator", "tall operator" in t or "headroom" in t)
-    flags.setdefault("high_loads", bool(re.search(r'high\s*mast|tall\s*stacks|top\s*heavy|elevated', t)))
-    flags.setdefault("special_color", "special color" in t or "paint" in t)
-    flags.setdefault("rigging", "rigging" in t or "lift with crane" in t)
 
     # Tire pick (single, or None)
     tire = _pick_tire_from_flags(flags, lut)
