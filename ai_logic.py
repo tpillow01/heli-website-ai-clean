@@ -230,15 +230,35 @@ if '_need_flags_from_text' not in globals():
 from typing import Dict, Any, List, Tuple
 
 def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").strip().lower())
+    s = (s or "").lower().strip()
+    # Unify punctuation/spacing variants
+    s = re.sub(r"[\/\-–—_]+", " ", s)           # slashes & dashes -> space
+    s = re.sub(r"[()]+", " ", s)                # drop parentheses
+    s = re.sub(r"\bslip\s*[- ]?\s*sheet\b", "slipsheet", s)  # "slip sheet" -> "slipsheet"
+    s = re.sub(r"\s+", " ", s)                  # squeeze spaces
+    return s
 
 def _lut_by_name(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Lookup table by normalized name (lowercased, single spaces)."""
-    lut = {}
+    """
+    Build a lookup by normalized name and seed a single alias so
+    all push/pull slip-sheet variants map to the Excel row
+    'Push/ Pull (Slip-Sheet)'.
+    """
+    lut: Dict[str, Dict[str, Any]] = {}
+
+    # First, index by normalized sheet names
     for it in items or []:
-        nm = _norm(it.get("name") or it.get("Name") or it.get("option") or "")
-        if nm:
-            lut[nm] = it
+        nm_sheet = (it.get("name") or it.get("Name") or it.get("option") or "").strip()
+        if not nm_sheet:
+            continue
+        lut[_norm(nm_sheet)] = it
+
+    # Alias: all "push/pull slip sheet" variants → the canonical sheet row
+    canonical = next((it for it in items if (it.get("name") or it.get("option")) == "Push/ Pull (Slip-Sheet)"), None)
+    if canonical:
+        # normalized key that all variants reduce to via _norm
+        lut["push pull slipsheet"] = canonical
+
     return lut
 
 def _get_with_default(lut: Dict[str, Dict[str, Any]], name: str, default_benefit: str) -> Dict[str, Any]:
@@ -1084,15 +1104,18 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
     # Top models from your models.json filter
     hits = filter_models(user_q)
 
-    # ---- Select tire + options from the Excel sheet
-    rec = recommend_options_from_sheet(user_q, max_total=6)  # one tire + top options
+    # ---- Select tire + options from the Excel sheet (explicit keys)
+    # ---- Select tire + options from the Excel sheet (explicit keys)
+    rec = recommend_options_from_sheet(user_q, max_total=6)
     chosen_tire = rec.get("tire")
-    other_opts = rec.get("others", [])
+    attachments: List[Dict[str, str]] = rec.get("attachments", [])
+    options: List[Dict[str, str]] = rec.get("options", [])
 
-    # Indoor sanity override: if environment is Indoor and the chosen tire is "Dual ..."
-    # (and the user didn’t ask for non-marking or stability cues), switch to Non-Marking Tires.
+    # Indoor sanity override (single copy only):
+    # If environment is Indoor and the chosen tire is any "Dual ..." variant without
+    # an explicit non-marking or stability cue, switch to Non-Marking Tires.
     _user_l = (user_q or "").lower()
-    if env == "Indoor" and chosen_tire and "dual" in (chosen_tire.get("name","").lower()):
+    if env == "Indoor" and chosen_tire and "dual" in (chosen_tire.get("name", "").lower()):
         has_nonmark = bool(re.search(r'non[-\s]?mark', _user_l))
         has_stability = bool(re.search(r'(ramp|slope|incline|grade|wide load|long load|top heavy|high mast)', _user_l))
         if not has_nonmark and not has_stability:
@@ -1107,58 +1130,6 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
                     "name": "Non-Marking Tires",
                     "benefit": "Non-marking compound prevents black marks on painted/epoxy floors."
                 }
-
-    # Indoor sanity override: if environment is Indoor and the chosen tire is "Dual ..."
-    # (and the user didn’t ask for non-marking or stability cues), switch to Non-Marking Tires.
-    _user_l = (user_q or "").lower()
-    if env == "Indoor" and chosen_tire and "dual" in chosen_tire["name"].lower():
-        has_nonmark = bool(re.search(r'non[-\s]?mark', _user_l))
-        has_stability = bool(re.search(r'(ramp|slope|incline|grade|wide load|long load|top heavy|high mast)', _user_l))
-        if not has_nonmark and not has_stability:
-            nm_row = options_lookup_by_name().get("non-marking tires")
-            if nm_row:
-                chosen_tire = {
-                    "name": nm_row["name"],
-                    "benefit": (nm_row.get("benefit") or "Non-marking compound prevents black marks on painted/epoxy floors.")
-                }
-            else:
-                chosen_tire = {
-                    "name": "Non-Marking Tires",
-                    "benefit": "Non-marking compound prevents black marks on painted/epoxy floors."
-                }
-
-    # Split “others” into attachments vs non-attachments by keywords
-    ATTACH_KEYS = [
-        "sideshift", "side shift", "fork positioner", "positioner", "clamp",
-        "rotator", "push/pull", "push pull", "bale", "carton", "appliance",
-        "drum", "jib", "boom", "fork extension", "extensions", "spreader",
-        "multi-pallet", "multi pallet", "double pallet", "triple pallet",
-        "roll clamp", "paper roll", "coil ram", "carpet pole", "layer picker"
-    ]
-    attachments: List[Dict[str, str]] = []
-    non_attachments: List[Dict[str, str]] = []
-    for o in other_opts:
-        name_l = o["name"].lower()
-        if any(k in name_l for k in ATTACH_KEYS):
-            attachments.append(o)
-        else:
-            non_attachments.append(o)
-    
-    # --- Sensible defaults if no attachments were detected but pallets/indoor implied
-    if not attachments:
-        want_pallets = bool(re.search(r'\bpallet(s)?\b', _user_l))
-        if want_pallets or env == "Indoor":
-            # Try to pull benefits from Excel if present
-            _lut = options_lookup_by_name()
-            for nm in ["sideshifter", "fork positioner"]:
-                row = _lut.get(nm)
-                if row:
-                    attachments.append({
-                        "name": row["name"],
-                        "benefit": (row.get("benefit") or "").strip()
-                    })
-                else:
-                    attachments.append({"name": nm.title(), "benefit": ""})
 
     # ------------- FORMAT OUTPUT (keeps your existing headings/flow) ------
     lines.append("Customer Profile:")
@@ -1216,13 +1187,15 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
         lines.append("- Not specified")
 
     # Options (non-attachments) — cue-gated and pulled from your Excel only
+    # Options (non-attachments) — pulled directly from Excel matches
     lines.append("\nOptions:")
-    if non_attachments:
-        for o in non_attachments:
+    if options:
+        for o in options:
             ben = (o.get("benefit","") or "").strip()
             lines.append(f"- {o['name']}" + (f" — {ben}" if ben else ""))
     else:
         lines.append("- Not specified")
+
 
     # Comparison block (kept simple and generic; you can customize later)
     lines.append("\nComparison:")
