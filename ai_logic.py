@@ -8,6 +8,218 @@ from __future__ import annotations
 import json, re, difflib
 from typing import List, Dict, Any, Tuple, Optional
 
+# --- Options loader (Step 2: read /data/forklift_options_benefits.xlsx) ---
+import os
+from functools import lru_cache
+
+try:
+    import pandas as _pd  # uses your existing pandas from requirements.txt
+except Exception:
+    _pd = None
+
+_OPTIONS_XLSX = os.path.join(os.path.dirname(__file__), "data", "forklift_options_benefits.xlsx")
+
+def _make_code(name: str) -> str:
+    s = (name or "").upper()
+    s = re.sub(r"[^\w\+\s-]", " ", s)      # remove odd chars
+    s = s.replace("+", " PLUS ")
+    s = re.sub(r"[\s/-]+", "_", s)         # normalize separators
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s[:64] or "UNKNOWN_OPTION"
+
+@lru_cache(maxsize=1)
+def load_options() -> list[dict]:
+    """
+    Returns a list of dicts: [{code, name, benefit}], read from Excel.
+    Requires columns: Option, Benefit (case-insensitive is OK).
+    """
+    if _pd is None:
+        return []
+    if not os.path.exists(_OPTIONS_XLSX):
+        return []
+    df = _pd.read_excel(_OPTIONS_XLSX)
+    # normalize headers
+    cols = {c.lower().strip(): c for c in df.columns}
+    opt_col = cols.get("option")
+    ben_col = cols.get("benefit")
+    if not opt_col or not ben_col:
+        return []
+    out = []
+    for _, r in df.iterrows():
+        name = str(r.get(opt_col, "")).strip()
+        if not name:
+            continue
+        benefit = str(r.get(ben_col, "")).strip()
+        out.append({"code": _make_code(name), "name": name, "benefit": benefit})
+    return out
+
+@lru_cache(maxsize=1)
+def options_lookup_by_name() -> dict:
+    """Lowercase name -> row dict, for quick lookups."""
+    return {o["name"].lower(): o for o in load_options()}
+
+def option_benefit(name: str) -> str | None:
+    """Convenience: get the benefit sentence for an exact option name."""
+    row = options_lookup_by_name().get((name or "").lower())
+    return row["benefit"] if row else None
+
+# --- Step 3: recommend best options directly from the Excel sheet --------
+def _infer_category_from_name(n: str) -> str:
+    n = (n or "").lower()
+    if "tire" in n: return "Tires"
+    if "valve" in n or "finger control" in n: return "Hydraulics / Controls"
+    if any(k in n for k in ["light", "beacon", "radar", "ops", "blue spot", "red side"]):
+        return "Lighting / Safety"
+    if any(k in n for k in ["seat", "cab", "windshield", "wiper", "heater", "air conditioner", "rain-proof"]):
+        return "Cab / Comfort"
+    if any(k in n for k in ["radiator", "screen", "belly pan", "protection bar", "fan"]):
+        return "Protection / Cooling"
+    if "brake" in n: return "Braking"
+    if "fics" in n or "fleet" in n: return "Telematics"
+    if "cold storage" in n: return "Environment"
+    if "lpg" in n or "fuel" in n: return "Fuel / LPG"
+    if any(k in n for k in ["overhead guard", "lifting eyes"]): return "Chassis / Structure"
+    return "Other"
+
+def _options_iter():
+    """Yield normalized option rows from the Excel loader with inferred category."""
+    for o in load_options():
+        name = o["name"]
+        yield {
+            "code": o["code"],
+            "name": name,
+            "benefit": o.get("benefit",""),
+            "category": _infer_category_from_name(name),
+            "lname": name.lower()
+        }
+
+def _score_option_for_needs(opt: dict, want: dict) -> float:
+    """
+    Heuristic score: higher = more relevant for stated needs.
+    We only use info available in the option name/benefit + parsed needs.
+    """
+    s = 0.0
+    name = opt["lname"]
+    indoor, outdoor = want.get("indoor"), want.get("outdoor")
+    cap = (want.get("cap_lbs") or 0)
+    power_pref = (want.get("power_pref") or "")
+
+    # Tires: pick ONE best later, but still score to rank within tires
+    if opt["category"] == "Tires":
+        # Default logic
+        if indoor and outdoor:
+            if "solid" in name and "dual" not in name and "non-mark" not in name: s += 5.0
+            if "dual" in name: s += 2.0 if cap >= 8000 else -0.5
+            if "non-mark" in name: s -= 0.8  # mixed use penalizes non-marking
+        elif outdoor and not indoor:
+            if "solid" in name: s += 4.0
+            if "dual" in name and cap >= 8000: s += 2.5
+            if "non-mark" in name: s -= 1.5
+        elif indoor and not outdoor:
+            if "non-mark" in name: s += 4.0
+            if "cushion" in name or "press-on" in name: s += 2.0
+            if "solid pneumatic" in name or "pneumatic" in name: s -= 1.0
+        else:
+            if "solid" in name and "non-mark" not in name: s += 2.0
+
+    # Hydraulics / Controls: more functions for productivity & heavy loads
+    if opt["category"] == "Hydraulics / Controls":
+        if any(k in name for k in ["4valve","4-valve","4 valve","5 valve","5-valve"]): s += 3.5
+        if any(k in name for k in ["3valve","3-valve","3 valve"]): s += 2.0
+        if "finger control" in name: s += 1.0  # ergonomics
+        if "msg65" in name: s += 0.8          # seat requirement encoded in name
+
+    # Lighting / Safety: valuable in mixed/indoor aisles & reversing
+    if opt["category"] == "Lighting / Safety":
+        if "blue spot" in name or "red side" in name: s += 2.5 if indoor or (indoor and outdoor) else 1.0
+        if "rotating" in name or "beacon" in name: s += 1.5
+        if "rear working light" in name: s += 1.5 if outdoor or (indoor and outdoor) else 0.8
+        if "radar" in name or "ops" in name: s += 1.2
+
+    # Cab / Comfort: useful for long shifts & temperature extremes
+    if opt["category"] == "Cab / Comfort":
+        if "msg65" in name or "suspension seat" in name: s += 2.0 if cap >= 6000 else 1.0
+        if "heater" in name or "air conditioner" in name: s += 1.5 if outdoor or (indoor and outdoor) else 0.5
+        if "cab" in name or "windshield" in name or "rain-proof" in name: s += 1.2 if outdoor or (indoor and outdoor) else 0.3
+
+    # Protection / Cooling: better outdoors/heavy-duty
+    if opt["category"] == "Protection / Cooling":
+        if outdoor or (indoor and outdoor): s += 1.8
+        if "radiator" in name or "screen" in name or "fan" in name: s += 0.6
+        if "belly pan" in name or "protection bar" in name: s += 0.6
+
+    # Braking: heavy capacities benefit
+    if opt["category"] == "Braking":
+        if cap >= 8000: s += 2.0
+
+    # Telematics note: present but deprioritize if market suspended
+    if opt["category"] == "Telematics":
+        s += 0.4  # useful generally
+        if "suspend" in opt["benefit"].lower() or "suspend" in name: s -= 0.6
+
+    # Environment: cold storage when explicitly mentioned
+    qtext = ""  # only using want for now; you can pass the raw text if needed
+    # (If you later pass raw user_q, you can boost for "freezer", "cold", etc.)
+
+    # Diesel constraint example (speed control)
+    if "speed control" in name and power_pref == "diesel":
+        s -= 5.0  # not for diesel engines per your sheet
+
+    return s
+
+def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
+    """
+    Returns a dict with a single best tire + top-scoring supporting options,
+    but ONLY from what's actually present in the Excel.
+    {
+      "tire": {"name","benefit"},
+      "others": [{"name","benefit"},...],   # supporting options (safety, controls, comfort, etc.)
+    }
+    """
+    want = _parse_requirements(user_q)
+    # 1) score all options
+    scored = []
+    tires = []
+    for o in _options_iter():
+        sc = _score_option_for_needs(o, want)
+        if o["category"] == "Tires":
+            tires.append((sc, o))
+        else:
+            scored.append((sc, o))
+
+    # 2) choose ONE best tire (if any)
+    tire_choice = None
+    if tires:
+        tires.sort(key=lambda t: t[0], reverse=True)
+        best_sc, best_o = tires[0]
+        tire_choice = {"name": best_o["name"], "benefit": best_o["benefit"]}
+
+    # 3) pick the top supporting options across categories
+    scored.sort(key=lambda t: t[0], reverse=True)
+    others = []
+    seen_cats = set()
+    for sc, o in scored:
+        if sc <= 0:
+            continue
+        # lightly diversify categories so we don't return 5 lights, for example
+        c = o["category"]
+        cap = want.get("cap_lbs") or 0
+        # Allow multiple from strong categories (e.g., Lighting) but try to mix
+        if c in {"Lighting / Safety","Hydraulics / Controls","Cab / Comfort","Protection / Cooling","Braking","Telematics","Environment","Fuel / LPG","Chassis / Structure","Other"}:
+            # limit per category to 2 initially
+            if sum(1 for x in others if x.get("_cat") == c) >= 2:
+                continue
+        item = {"name": o["name"], "benefit": o["benefit"], "_cat": c}
+        others.append(item)
+        if len(others) >= max_total - (1 if tire_choice else 0):
+            break
+
+    # strip helper field
+    for x in others:
+        x.pop("_cat", None)
+
+    return {"tire": tire_choice, "others": others}
+
 # ── load JSON once -------------------------------------------------------
 def _load_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
@@ -470,52 +682,119 @@ def filter_models(user_q: str, limit: int = 5) -> List[Dict[str, Any]]:
 # ── build final prompt chunk --------------------------------------------
 def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> str:
     """
-    IMPORTANT: Pass ONLY the raw user question to this function from app.py.
-    The account block is added here (not mixed into user_q), so the parser
-    isn't poisoned by SIC/ZIP/fleet-size numbers.
+    Builds the final context block the AI returns to your UI.
+    Now fills Tire Type + Attachments from the Excel-driven recommender so it only
+    recommends items that actually exist in data/forklift_options_benefits.xlsx.
     """
     lines: List[str] = []
     if acct:
         lines.append(customer_block(acct))
 
-    # NEW: surface environment + tire guidance so the model explains its tire choice
+    # Parse needs (env, capacity, etc.)
     want = _parse_requirements(user_q)
     env = "Indoor" if (want["indoor"] and not want["outdoor"]) else ("Outdoor" if (want["outdoor"] and not want["indoor"]) else "Mixed/Not specified")
-    tire_suggest, tire_reason = _tire_guidance(want)
 
-    lines.append("<span class=\"section-label\">Need Summary:</span>")
-    lines.append(f"- Environment: {env}")
-    if want["aisle_in"]:   lines.append(f"- Aisle Limit: {int(round(want['aisle_in']))} in")
-    if want["power_pref"]: lines.append(f"- Power Preference: {want['power_pref'].capitalize()}")
-    if want["cap_lbs"]:    lines.append(f"- Capacity Min: {int(round(want['cap_lbs'])):,} lb")
-    if tire_suggest:
-        lines.append("<span class=\"section-label\">Tire Guidance:</span>")
-        lines.append(f"- Suggested: {tire_suggest}")
-        if tire_reason:
-            lines.append(f"- Rationale: {tire_reason}")
-
+    # Top models from your models.json filter
     hits = filter_models(user_q)
-    if hits:
-        lines.append("<span class=\"section-label\">Recommended Heli Models:</span>")
-        for m in hits:
-            lines += [
-                "<span class=\"section-label\">Model:</span>",
-                f"- {_safe_model_name(m)}",
-                "<span class=\"section-label\">Power:</span>",
-                f"- {_text_from_keys(m, POWER_KEYS) or 'N/A'}",
-                "<span class=\"section-label\">Capacity:</span>",
-                f"- {(_normalize_capacity_lbs(m) or 'N/A')}",
-                "<span class=\"section-label\">Tire Type:</span>",
-                f"- {_tire_of(m) or 'N/A'}",
-                "<span class=\"section-label\">Attachments:</span>",
-                f"- {str(m.get('Attachments','N/A'))}",
-                "<span class=\"section-label\">Comparison:</span>",
-                "- Similar capacity models available from Toyota or CAT are typically higher cost.\n"
-            ]
-    else:
-        lines.append("No matching models found in the provided data.\n")
 
+    # ---- Select tire + options from the Excel sheet
+    rec = recommend_options_from_sheet(user_q, max_total=6)  # one tire + top options
+    chosen_tire = rec.get("tire")
+    other_opts = rec.get("others", [])
+
+    # Split “others” into attachments vs non-attachments by keywords
+    ATTACH_KEYS = [
+        "sideshift", "side shift", "fork positioner", "positioner", "clamp",
+        "rotator", "push/pull", "push pull", "bale", "carton", "appliance",
+        "drum", "jib", "boom", "fork extension", "extensions", "spreader",
+        "multi-pallet", "multi pallet", "double pallet", "triple pallet",
+        "roll clamp", "paper roll", "coil ram", "carpet pole", "layer picker"
+    ]
+    attachments: List[Dict[str, str]] = []
+    non_attachments: List[Dict[str, str]] = []
+    for o in other_opts:
+        name_l = o["name"].lower()
+        if any(k in name_l for k in ATTACH_KEYS):
+            attachments.append(o)
+        else:
+            non_attachments.append(o)
+
+    # ------------- FORMAT OUTPUT (keeps your existing headings/flow) ------
+    lines.append("Customer Profile:")
+    lines.append(f"- Environment: {env}")
+    if want.get("cap_lbs"):
+        lines.append(f"- Capacity Min: {int(round(want['cap_lbs'])):,} lb")
+    else:
+        lines.append("- Capacity Min: Not specified")
+
+    # Model block: top pick + alternates from hits
+    lines.append("\nModel:")
+    if hits:
+        top = hits[0]
+        top_name = _safe_model_name(top)
+        lines.append(f"- Top Pick: {top_name}")
+        if len(hits) > 1:
+            alts = [ _safe_model_name(m) for m in hits[1:5] ]
+            lines.append(f"- Alternates: {', '.join(alts)}")
+        else:
+            lines.append("- Alternates: None")
+    else:
+        lines.append("- Top Pick: N/A")
+        lines.append("- Alternates: N/A")
+
+    # Power & capacity fields
+    lines.append("\nPower:")
+    if want.get("power_pref"):
+        lines.append(f"- {want['power_pref']}")
+    else:
+        # try to surface top model power if available
+        lines.append(f"- {(_text_from_keys(hits[0], POWER_KEYS) if hits else 'Not specified') or 'Not specified'}")
+
+    lines.append("\nCapacity:")
+    lines.append(f"- {int(round(want['cap_lbs'])) if want.get('cap_lbs') else 'Not specified'}")
+
+    # Tire Type from Excel recommender
+    lines.append("\nTire Type:")
+    if chosen_tire:
+        lines.append(f"- {chosen_tire['name']} — {chosen_tire.get('benefit','').strip() or ''}".rstrip(" —"))
+    else:
+        lines.append("- Not specified")
+
+    # Attachments from Excel recommender (only if present in your sheet)
+    lines.append("\nAttachments:")
+    if attachments:
+        for a in attachments:
+            benefit = (a.get("benefit","") or "").strip()
+            lines.append(f"- {a['name']}" + (f" — {benefit}" if benefit else ""))
+    else:
+        lines.append("- Not specified")
+
+    # Comparison block (kept simple and generic; you can customize later)
+    lines.append("\nComparison:")
+    if hits:
+        lines.append("- Top pick vs peers: HELI advantages typically include tight turning (102 in).")
+        lines.append("- We can demo against peers on your dock to validate turning, lift, and cycle times.")
+    else:
+        lines.append("- No model comparison available for the current filters.")
+
+    # Sales Pitch & Objections (same content you already had downstream)
+    lines.append("Sales Pitch Techniques:")
+    lines.append("- Highlight low emissions of lithium models.")
+    lines.append("- Emphasize versatility in mixed environments.")
+    lines.append("- Discuss cost-effectiveness compared to competitors.")
+    lines.append("- Share customer testimonials on performance and reliability.")
+
+    lines.append("Common Objections:")
+    lines.append("- I need better all-terrain capability.' — Ask: 'What specific terrains do you operate on?' | Reframe: 'This model excels in diverse conditions.' | Proof: 'Proven performance in various environments.' | Next: 'Shall we schedule a demo?.")
+    lines.append("- Are lithium batteries reliable?' — Ask: 'What concerns do you have about battery performance?' | Reframe: 'Lithium offers longer life and less maintenance.' | Proof: 'Industry-leading warranty on batteries.' | Next: 'Would you like to see the specs?.")
+    lines.append("- How does this compare to diesel?' — Ask: 'What are your priorities, emissions or power?' | Reframe: 'Lithium is cleaner and quieter.' | Proof: 'Lower operational costs over time.' | Next: 'Can I provide a cost analysis?.")
+    lines.append("- What about service and support?' — Ask: 'What level of support do you expect?' | Reframe: 'We offer comprehensive service plans.' | Proof: 'Dedicated support team available.' | Next: 'Shall we discuss service options?.")
+    lines.append("- Is it suitable for heavy-duty tasks?' — Ask: 'What tasks will you be performing?' | Reframe: 'Designed for robust applications.' | Proof: 'Tested under heavy loads.' | Next: 'Would you like to see a demonstration?.")
+    lines.append("- I'm concerned about the upfront cost.' — Ask: 'What budget constraints are you working with?' | Reframe: 'Consider total cost of ownership.' | Proof: 'Lower energy and maintenance costs.' | Next: 'Can I help with financing options?.")
+
+    # Pass through the original user question at the end (as your original did)
     lines.append(user_q)
+
     return "\n".join(lines)
 
 # --- expose selected list + ALLOWED block for strict grounding -----------

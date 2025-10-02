@@ -25,9 +25,17 @@ from ai_logic import (
 
 # Admin usage tracking
 from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+from api_options import bp_options
+
+# Admin usage tracking bootstrap (creates DB + coarse per-request logging)
+# init_admin_usage(app)
+# app.register_blueprint(admin_bp)
+# app.register_blueprint(bp_options)
 
 # Promotions
 from promotions import promos_for_context, render_promo_lines
+
+from api_options import bp_options
 
 # -------------------------------------------------------------------------
 # Data boot (safe if the CSV is missing — load_csv_locations should handle)
