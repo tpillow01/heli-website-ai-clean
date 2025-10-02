@@ -20,7 +20,8 @@ from ai_logic import (
     select_models_for_question,
     allowed_models_block,
     debug_parse_and_rank,   # keep this for your debug endpoint
-    top_pick_meta           # promotions helper
+    top_pick_meta,         # promotions helper
+    recommend_options_from_sheet,
 )
 
 # Admin usage tracking
@@ -521,12 +522,43 @@ def run_recommendation_flow(user_q: str) -> str:
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
+    # Post-processing & formatting
     ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
     ai_reply = _unify_model_mentions(ai_reply, allowed) if '_unify_model_mentions' in globals() else ai_reply
     ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
     ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
     ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply
 
+    # === Enforce Tire Type & Attachments from Excel (do not alter Sales Pitch Techniques) ===
+    try:
+        opt_rec = recommend_options_from_sheet(user_q) or {}
+    except Exception:
+        opt_rec = {}
+
+    # Tire Type
+    tire_bullets = []
+    tire = opt_rec.get("tire")
+    if tire and tire.get("name"):
+        benefit = (tire.get("benefit") or "").strip()
+        tire_bullets.append(f"{tire['name']} — {benefit}" if benefit else tire["name"])
+    else:
+        tire_bullets.append("Not specified")
+    ai_reply = _inject_section(ai_reply, "Tire Type", tire_bullets)
+
+    # Attachments (up to 5)
+    attach_rows = opt_rec.get("others") or []
+    attach_bullets = []
+    for row in attach_rows[:5]:
+        nm = (row.get("name") or "").strip()
+        if not nm:
+            continue
+        ben = (row.get("benefit") or "").strip()
+        attach_bullets.append(f"{nm} — {ben}" if ben else nm)
+    if not attach_bullets:
+        attach_bullets = ["Not specified"]
+    ai_reply = _inject_section(ai_reply, "Attachments", attach_bullets)
+
+    # Comparison injection (keep as-is)
     if top_pick_code:
         peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
         ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)
