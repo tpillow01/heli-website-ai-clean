@@ -273,59 +273,81 @@ def _get_with_default(lut: Dict[str, Dict[str, Any]], name: str, default_benefit
     else:
         return {"name": name, "benefit": default_benefit}
 
-def _pick_tire_from_flags(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, Any]]) -> Dict[str, Any] | None:
+def _pick_tire_from_flags(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Decision order (most specific first):
-    - Non-marking requests (with indoor focus) → Non-Marking Tires
-    - Non-marking + indoor/outdoor mix → Non-Marking Dual Tires (if frequently outside)
-    - Very rough / debris / puncture risk → Solid Tires (or Dual Solid if soft ground + heavy loads)
-    - Soft/uneven ground or frequent yard use → Dual Tires
-    - Otherwise: None (leave as 'Not specified')
+    Decision order (most specific first) + hard fallback so a tire is ALWAYS suggested:
+    - Explicit non-marking → Non-Marking (dual if mixed/outdoor/heavy/stability)
+    - Rough/debris/puncture → Solid (dual solid if soft ground/heavy)
+    - Yard/soft ground/mixed/outdoor → Dual Tires
+    - FINAL FALLBACKS (general knowledge):
+        * Indoor-only → Non-Marking Tires
+        * Outdoor-only → Solid Tires
+        * Mixed/unspecified → Dual Tires
     """
     f = {k: bool(flags.get(k)) for k in [
         "non_marking", "rough", "debris", "puncture",
         "outdoor", "indoor", "soft_ground", "yard", "gravel", "mixed",
-        "heavy_loads", "long_runs"
+        "heavy_loads", "long_runs", "high_loads"
     ]}
+
+    heavy_or_stability = f["heavy_loads"] or f["high_loads"]
 
     # Non-marking first
     if f["non_marking"]:
-        if f["outdoor"] or f["mixed"] or f["yard"]:
+        if f["outdoor"] or f["mixed"] or f["yard"] or heavy_or_stability:
             return _get_with_default(
                 excel_lut, "Non-Marking Dual Tires",
-                "Dual non-marking tread — keeps floors clean with extra footprint for outside runs."
+                "Dual non-marking tread — keeps floors clean with extra footprint for stability."
             )
-        else:
-            return _get_with_default(
-                excel_lut, "Non-Marking Tires",
-                "Non-marking compound — reduces floor marks on painted or epoxy floors."
-            )
+        return _get_with_default(
+            excel_lut, "Non-Marking Tires",
+            "Non-marking compound — prevents black marks on painted/epoxy floors."
+        )
 
-    # Puncture/rough/debris
+    # Rough / debris / puncture
     if f["puncture"] or f["debris"] or f["rough"] or f["gravel"]:
         if f["soft_ground"] or f["heavy_loads"]:
             return _get_with_default(
                 excel_lut, "Dual Solid Tires",
-                "Dual solid tires — puncture-proof, added footprint for stability on rough/soft ground."
+                "Puncture-proof dual solids — added footprint and stability on rough/soft ground."
             )
         return _get_with_default(
             excel_lut, "Solid Tires",
-            "Puncture-proof solid tires — best for debris-prone or rough surfaces with low maintenance."
+            "Puncture-proof solid tires — best for debris-prone or rough surfaces."
         )
 
-    # Yard / soft ground / frequent outside
+    # Yard / soft ground / frequent outside or mixed
     if f["yard"] or f["soft_ground"] or f["outdoor"] or f["mixed"]:
         return _get_with_default(
             excel_lut, "Dual Tires",
-            "Wider footprint for better stability and traction on soft or uneven ground."
+            "Wider footprint for traction and stability on soft or uneven ground."
         )
 
-    # Otherwise: leave None (so the formatter can keep 'Not specified')
-    return None
+    # === FALLBACKS so we NEVER return None ===
+    if f["indoor"] and not f["outdoor"]:
+        return _get_with_default(
+            excel_lut, "Non-Marking Tires",
+            "Indoor warehouse floors — non-marking avoids scuffs on concrete/epoxy."
+        )
+    if f["outdoor"] and not f["indoor"]:
+        return _get_with_default(
+            excel_lut, "Solid Tires",
+            "Outdoor pavement/yard — reduced flats and lower maintenance."
+        )
+    # Mixed/unspecified
+    return _get_with_default(
+        excel_lut, "Dual Tires",
+        "Mixed or unspecified environment — dual improves footprint and stability."
+    )
 
 def _pick_attachments_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, Any]], max_items: int = 6) -> List[Dict[str, Any]]:
-    """Choose attachments relevant to hints in the user request."""
+    """
+    Picks only relevant attachments. If nothing explicit is triggered but it's clearly a pallet/indoor scenario,
+    we add Sideshifter as a sensible default (and Fork Positioner only when 'varied_width' is true).
+    """
     out: List[Dict[str, Any]] = []
+    t = (flags.get("_raw_text") or "").lower()
+    pallets_mentioned = bool(re.search(r'\bpallet(s)?\b', t))
 
     def maybe_add(names: List[Tuple[str, str]]):
         for nm, default_ben in names:
@@ -333,23 +355,30 @@ def _pick_attachments_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dic
             if row:
                 out.append(_get_with_default(excel_lut, nm, default_ben))
 
-    # Map flags → attachments
+    # Explicit cues → attachments
     if flags.get("alignment_frequent"):
-        maybe_add([("Sideshifter", "Smoother pallet alignment; reduces driver micro-maneuvers.")])
+        maybe_add([("Sideshifter", "Aligns loads without repositioning the truck—faster, cleaner placement.")])
     if flags.get("varied_width"):
-        maybe_add([("Fork Positioner", "Hydraulic fork spacing changes; faster, safer width changes.")])
+        maybe_add([("Fork Positioner", "Adjust fork spread from the seat for mixed pallet sizes.")])
     if flags.get("paper_rolls"):
         maybe_add([("Paper Roll Clamp", "Secure, damage-reducing handling for paper rolls.")])
     if flags.get("slip_sheets"):
-        maybe_add([("Push/ Pull (Slip-Sheet)", "Eliminates pallets using slip-sheets; higher cube utilization.")])
+        maybe_add([("Push/ Pull (Slip-Sheet)", "Handles slip-sheeted cartons—eliminates pallets and cuts freight weight.")])
     if flags.get("carpet"):
         maybe_add([("Carpet Pole", "Safe handling of carpet or coil-like rolled goods.")])
     if flags.get("long_loads"):
         maybe_add([("Fork Extensions", "Supports longer or over-length loads safely.")])
     if flags.get("weighing"):
-        maybe_add([("Hydraulic weight system (+/-10% difference)", "On-truck weighing for quicker ship/receive checks.")])
+        maybe_add([("Hydraulic weight system (+/-10% difference)", "On-truck weighing for faster ship/receive checks.")])
 
-    # Deduplicate by normalized name while keeping order; then trim
+    # If nothing explicit fired, add a sensible default for indoor pallet work
+    if not out and (flags.get("indoor") or pallets_mentioned):
+        maybe_add([("Sideshifter", "Aligns loads without repositioning the truck—faster, cleaner placement.")])
+        # only add Fork Positioner when we genuinely detect width variation
+        if flags.get("varied_width"):
+            maybe_add([("Fork Positioner", "Adjust fork spread from the seat for mixed pallet sizes.")])
+
+    # Dedup & trim
     seen = set()
     uniq = []
     for it in out:
@@ -372,11 +401,15 @@ def _pick_options_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dict[st
 
     def add_if_present(name: str, default_benefit: str):
         row = excel_lut.get(_norm(name))
-        if row:
-            item = _get_with_default(excel_lut, name, default_benefit)
-            # prevent exact duplicates
-            if all(_norm(item["name"]) != _norm(x["name"]) for x in picks):
-                picks.append(item)
+        if not row:
+            return
+        # Skip items whose Benefit mentions supply suspended (as in your sheet note)
+        ben_txt = (row.get("benefit") or row.get("Benefit") or "").lower()
+        if "suspend" in ben_txt:
+            return
+        item = _get_with_default(excel_lut, name, default_benefit)
+        if all(_norm(item["name"]) != _norm(x["name"]) for x in picks):
+            picks.append(item)
 
     # Pedestrian / visibility
     if flags.get("pedestrian_heavy") or flags.get("poor_visibility"):
@@ -480,32 +513,66 @@ def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
       }
     """
     try:
-        items = load_options()  # your existing Excel reader -> [{name, benefit, code}]
+        items = load_options()
     except Exception:
         items = []
 
     lut = _lut_by_name(items)
 
-    # If you already have a sophisticated flagger, use it; otherwise start empty
+    # Start with your main flagger if present
     flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
 
-    flags = _need_flags_from_text(user_q)
+    # Keep the raw text for attachment defaults that key off wording like “pallets”
+    flags["_raw_text"] = user_q or ""
 
+    # Lightweight power/env/text fallbacks so we don’t miss obvious cues
+    t = (user_q or "").lower()
+    flags.setdefault("power_lpg", bool(re.search(r'\b(lpg|propane|lp[-\s]?gas)\b', t)))
+    flags.setdefault("electric", bool(re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', t)))
 
-    # Tire pick (single, or None)
+    # Surface non-marking / environment cues (helps tire pick ALWAYS return something sensible)
+    flags.setdefault("non_marking", bool(re.search(r'non[-\s]?mark|no\s*marks?|black\s*marks?|avoid\s*marks?|scuff', t)))
+    flags.setdefault("rough", bool(re.search(r'rough|uneven|broken|pothole|curb|rail|speed\s*bumps?', t)))
+    flags.setdefault("debris", bool(re.search(r'debris|nails|screws|scrap|glass|shavings|chips?', t)))
+    flags.setdefault("gravel", "gravel" in t)
+    flags.setdefault("yard", "yard" in t)
+    flags.setdefault("outdoor", bool(re.search(r'\boutdoor|dock|lot|asphalt|gravel|dirt|parking\b', t)))
+    flags.setdefault("indoor", bool(re.search(r'\bindoor|warehouse|inside|factory|floor\b', t)))
+    flags.setdefault("mixed", ("indoor" in t and "outdoor" in t) or ("mixed" in t) or ("both" in t))
+
+    # Attachment/option triggers that your main flagger might miss
+    flags.setdefault("alignment_frequent", bool(re.search(r'align|line\s*up|tight\s*aisles|staging', t)))
+    flags.setdefault("varied_width", bool(re.search(r'vary|mixed\s*pallet|different\s*width|multiple\s*widths|mix\s*of\s*\d+\s*["in]?\s*(?:and|&)\s*\d+\s*["in]?\s*pallets?', t)))
+    flags.setdefault("paper_rolls", bool(re.search(r'paper\s*roll|newsprint|tissue', t)))
+    flags.setdefault("slip_sheets", bool(re.search(r'slip[-\s]?sheet', t)))
+    flags.setdefault("carpet", "carpet" in t or "textile" in t)
+    flags.setdefault("long_loads", bool(re.search(r'long|oversize|over[-\s]?length|overhang|\b\d+\s*[- ]?ft\b|\b\d+\s*foot\b|\b\d+\s*feet\b|crate[s]?', t)))
+    flags.setdefault("weighing", bool(re.search(r'weigh|scale|check\s*weight', t)))
+    flags.setdefault("pedestrian_heavy", bool(re.search(r'pedestrian|foot\s*traffic|busy|congested|blind\s*corner|walkway', t)))
+    flags.setdefault("poor_visibility", bool(re.search(r'low\s*light|dim|night|second\s*shift|poor\s*lighting', t)))
+    flags.setdefault("extra_hydraulics", ("4th function" in t) or ("fourth function" in t))
+    flags.setdefault("multi_function", ("multiple clamp" in t) or ("multiple attachments" in t))
+    flags.setdefault("ergonomics", bool(re.search(r'ergonomic|fatigue|wrist|reach|comfort', t)))
+    flags.setdefault("long_runs", bool(re.search(r'long\s*shifts?|multi[-\s]?shift|continuous', t)))
+    flags.setdefault("cold", bool(re.search(r'cold|freezer|refrigerated|winter', t)))
+    flags.setdefault("hot", bool(re.search(r'hot|heat|summer|foundry|high\s*ambient', t)))
+    flags.setdefault("speed_control", bool(re.search(r'limit\s*speed|speeding|zoned\s*speed', t)))
+    flags.setdefault("ops_required", bool(re.search(r'ops|operator\s*presence|osha|insurance|audit|policy', t)))
+    flags.setdefault("tall_operator", ("tall operator" in t) or ("headroom" in t))
+    flags.setdefault("high_loads", bool(re.search(r'high\s*mast|tall\s*stacks|top\s*heavy|elevated', t)))
+    flags.setdefault("special_color", ("special color" in t) or ("paint" in t))
+    flags.setdefault("rigging", ("rigging" in t) or ("lift with crane" in t))
+
+    # Tire (ALWAYS returns something if you used the updated _pick_tire_from_flags)
     tire = _pick_tire_from_flags(flags, lut)
 
-    # Attachments (relevant only, deduped)
+    # Attachments (relevant + default Sideshifter where sensible)
     attachments = _pick_attachments_from_excel(flags, lut, max_items=min(6, max_total))
 
-    # Options (non-attachments, relevant only, deduped)
+    # Options (strict cue-gated)
     options = _pick_options_from_excel(flags, lut, max_items=min(6, max_total))
 
-    return {
-        "tire": tire,
-        "attachments": attachments,
-        "options": options
-    }
+    return {"tire": tire, "attachments": attachments, "options": options}
 
 # ── load JSON once -------------------------------------------------------
 def _load_json(path: str):
@@ -1074,11 +1141,10 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
     hits = filter_models(user_q)
 
     # ---- Select tire + options from the Excel sheet (explicit keys)
-    # ---- Select tire + options from the Excel sheet (explicit keys)
     rec = recommend_options_from_sheet(user_q, max_total=6)
     chosen_tire = rec.get("tire")
-    attachments: List[Dict[str, str]] = rec.get("attachments", [])
-    options: List[Dict[str, str]] = rec.get("options", [])
+    attachments = rec.get("attachments", [])
+    non_attachments = rec.get("options", [])
 
     # Indoor sanity override (single copy only):
     # If environment is Indoor and the chosen tire is any "Dual ..." variant without
@@ -1158,13 +1224,12 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]]) -> st
     # Options (non-attachments) — cue-gated and pulled from your Excel only
     # Options (non-attachments) — pulled directly from Excel matches
     lines.append("\nOptions:")
-    if options:
-        for o in options:
+    if non_attachments:
+        for o in non_attachments:
             ben = (o.get("benefit","") or "").strip()
             lines.append(f"- {o['name']}" + (f" — {ben}" if ben else ""))
     else:
         lines.append("- Not specified")
-
 
     # Comparison block (kept simple and generic; you can customize later)
     lines.append("\nComparison:")
