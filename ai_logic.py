@@ -341,14 +341,35 @@ def _lut_by_name(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return lut
 
 def _get_with_default(lut: Dict[str, Dict[str, Any]], name: str, default_benefit: str) -> Dict[str, Any]:
-    """Pull row from Excel; if not present, return synthetic row with default benefit."""
+    """Pull row from Excel; if not present, return synthetic row with default benefit.
+    Always include a 'best_for' hint for tires so catalog renderers never KeyError."""
     row = lut.get(_norm(name))
+
+    # Best-for hints (kept lightweight & consistent with your UI copy)
+    nlow = (name or "").strip().lower()
+    tire_best_for = ""
+    if "non-marking dual" in nlow:
+        tire_best_for = "Indoor clean floors + added stability/ramps"
+    elif "non-marking" in nlow:
+        tire_best_for = "Indoor, polished/epoxy floors"
+    elif "dual solid" in nlow:
+        tire_best_for = "Rough/debris sites with heavier loads"
+    elif nlow == "dual tires" or (" dual" in nlow and "tire" in nlow):
+        tire_best_for = "Mixed indoor/outdoor travel"
+    elif "solid tire" in nlow or (("solid" in nlow) and ("tire" in nlow)):
+        tire_best_for = "Outdoor yards, debris/rough pavement"
+
     if row:
-        nm = row.get("name") or row.get("Name") or name
-        ben = (row.get("benefit") or row.get("Benefit") or "").strip()
-        return {"name": nm, "benefit": (ben or default_benefit)}
+        nm  = row.get("name") or row.get("Name") or name
+        ben = (row.get("benefit") or row.get("Benefit") or "").strip() or default_benefit
+        out = {"name": nm, "benefit": ben}
     else:
-        return {"name": name, "benefit": default_benefit}
+        out = {"name": name, "benefit": default_benefit}
+
+    # Only attach 'best_for' when we have a meaningful hint (mostly tires)
+    if tire_best_for:
+        out["best_for"] = tire_best_for
+    return out
 
 def _pick_tire_from_flags(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
