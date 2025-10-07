@@ -674,21 +674,41 @@ def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
 
 def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:
     """
-    Build a concise 'catalog' style answer listing Tires, Attachments, and Options
-    that exist in /data/forklift_options_benefits.xlsx — with a one-line benefit
-    and a short 'best used for' note. It prefers items relevant to the user's
-    scenario (flags); if the ask is vague, it returns a small, sensible starter set.
+    Clean, plain-text "catalog" answer (no markdown/italics/bold quotes).
+    - If the user asks to "list all" options/attachments/tires, show the FULL catalog
+      from the Excel (grouped) with one-line benefits.
+    - Otherwise: concise, scenario-aware picks (Tires, Attachments, Options).
     """
+
+    # ---------- text cleaners (ASCII, no fancy punctuation / markdown) ----------
+    def _plain(s: str) -> str:
+        if not isinstance(s, str):
+            return s
+        s = (s
+             .replace("“", '"').replace("”", '"')
+             .replace("‘", "'").replace("’", "'")
+             .replace("—", "-").replace("–", "-")
+             .replace("\u00a0", " "))
+        s = s.replace("**", "").replace("__", "")
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r" ?\n ?", "\n", s)
+        return s.strip()
+
+    # ---------- detect "list all" intent ----------
+    t = (user_q or "").lower()
+    list_all = bool(re.search(r"\b(list|show|give|display)\b.*\ball\b", t)) or \
+               bool(re.search(r"\b(all|every)\b.*\b(option|attachment|tire)s?\b", t)) or \
+               bool(re.search(r"\b(full|complete)\b.*\b(list|catalog)\b", t))
+
+    # ---------- load rows once ----------
     try:
         rows = load_options()
     except Exception:
         rows = []
 
+    # quick lookup by normalized name
     lut = { _norm(r.get("name") or r.get("option") or ""): r for r in rows }
-    flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
-    t = (user_q or "").lower()
 
-    # --- helpers ----------------------------------------------------------
     def _row(nm: str) -> dict | None:
         return lut.get(_norm(nm))
 
@@ -697,197 +717,90 @@ def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str
         ben = (r.get("benefit") if r else "") or default
         return ben.strip()
 
-    def _mk_item(nm: str, default_ben: str, best_for: str) -> dict | None:
-        r = _row(nm)
-        if not r:
-            return None
-        return {
-            "name": r.get("name", nm),
-            "benefit": _benefit(nm, default_ben),
-            "best_for": best_for
-        }
+    def _line(name: str, benefit: str | None) -> str:
+        name = _plain(name or "")
+        ben  = _plain((benefit or "").strip())
+        return f"- {name}" + (f" - {ben}" if ben else "")
 
-    # Decide tire (always try to suggest)
-    tire_pick = _pick_tire_from_flags(flags, lut)
-    if not tire_pick:
-        # fallback: infer from environment if not stated
-        indoor = flags.get("indoor")
-        outdoor = flags.get("outdoor")
-        mixed = flags.get("mixed")
-        if flags.get("non_marking") or (indoor and not outdoor):
-            tire_pick = _mk_item("Non-Marking Tires",
-                                 "Non-marking compound prevents scuffs on finished floors.",
-                                 "Indoor, polished/epoxy floors")
-        elif mixed or (indoor and outdoor):
-            tire_pick = _mk_item("Dual Tires",
-                                 "Added footprint improves stability across surfaces.",
-                                 "Mixed indoor/outdoor travel")
-        elif outdoor and not indoor:
-            # rough/debris lean
-            if flags.get("rough") or flags.get("debris") or flags.get("gravel"):
-                tire_pick = _mk_item("Solid Tires",
-                                     "Puncture-proof, low maintenance for debris-prone yards.",
-                                     "Outdoor yards, debris/rough pavement")
+    # ---------- FULL CATALOG OUTPUT ----------
+    if list_all:
+        tires, atts, opts = [], [], []
+        for o in _options_iter():  # yields: {code,name,benefit,category,lname}
+            nm = o["name"]
+            ben = o.get("benefit", "")
+            nl = o["lname"]
+            if "tire" in nl:
+                tires.append((nm, ben))
+            elif _is_attachment(nl):
+                atts.append((nm, ben))
             else:
-                tire_pick = _mk_item("Solid Tires",
-                                     "Reduced flats and maintenance on outdoor routes.",
-                                     "Outdoor pavement")
+                opts.append((nm, ben))
+
+        tires.sort(key=lambda x: x[0].lower())
+        atts.sort(key=lambda x: x[0].lower())
+        opts.sort(key=lambda x: x[0].lower())
+
+        out: list[str] = []
+        out.append("Catalog (All Available)")
+        out.append("")
+        out.append("Tires:")
+        if tires:
+            out.extend([_line(n, b) for n, b in tires])
         else:
-            # ambiguous → a conservative default that fits warehouses
-            tire_pick = _mk_item("Non-Marking Tires",
-                                 "Prevents black marks on floors; low rolling resistance indoors.",
-                                 "General indoor warehouse")
+            out.append("- None found in catalog")
+        out.append("")
+        out.append("Attachments:")
+        if atts:
+            out.extend([_line(n, b) for n, b in atts])
+        else:
+            out.append("- None found in catalog")
+        out.append("")
+        out.append("Options:")
+        if opts:
+            out.extend([_line(n, b) for n, b in opts])
+        else:
+            out.append("- None found in catalog")
 
-    # Attachment relevancy map
-    attach_candidates: list[dict] = []
+        return _plain("\n".join(out))
 
-    def add_attach(name: str, default_ben: str, best_for: str, when: bool) -> None:
-        if not when:
-            return
-        it = _mk_item(name, default_ben, best_for)
-        if it and all(_norm(it["name"]) != _norm(x["name"]) for x in attach_candidates):
-            attach_candidates.append(it)
+    # ---------- SCENARIO-AWARE COMPACT OUTPUT (no markdown) ----------
+    flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
 
-    add_attach("Sideshifter",
-               "Aligns loads without moving the truck; faster, cleaner placement.",
-               "Tight aisles, frequent pallet alignment",
-               flags.get("alignment_frequent") or "staging" in t or "tight aisle" in t)
+    rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
+    tire_pick = rec.get("tire")
+    attachments = rec.get("attachments", [])[:max_per_section]
+    options     = rec.get("options", [])[:max_per_section]
 
-    add_attach("Fork Positioner",
-               "Hydraulic fork spacing changes for varied pallet sizes.",
-               "Mixed 36\"/48\" pallets, frequent width changes",
-               flags.get("varied_width") or re.search(r'\b36["in]?\b.*\b48["in]?\b', t) is not None)
-
-    add_attach("Paper Roll Clamp",
-               "Secure clamping that avoids roll damage.",
-               "Paper/tissue/newsprint handling",
-               flags.get("paper_rolls"))
-
-    add_attach("Push/ Pull (Slip-Sheet)",
-               "Handles slip-sheeted loads; reduces pallet costs and increases cube.",
-               "Slip-sheeted cartons / export loads",
-               flags.get("slip_sheets"))
-
-    add_attach("Carpet Pole",
-               "Supports rolled goods without deformation.",
-               "Carpet/fabric/coil-like products",
-               flags.get("carpet"))
-
-    add_attach("Fork Extensions",
-               "Temporarily lengthen forks to support long/overhanging loads.",
-               "Occasional 8–12 ft crates or over-length pallets",
-               flags.get("long_loads") or "crate" in t or re.search(r'\b1[0-2]\s*ft\b|\b10\s*[- ]?ft\b', t) is not None)
-
-    add_attach("Hydraulic weight system (+/-10% difference)",
-               "On-truck weighing for fast ship/receive checks.",
-               "Frequent weight verification at dock",
-               flags.get("weighing"))
-
-    # If still empty and context implies pallets/indoor, give a small starter set
-    if not attach_candidates and (flags.get("indoor") or re.search(r'\bpallets?\b', t)):
-        for nm, ben, bf in [
-            ("Sideshifter", "Aligns loads without moving the truck.", "Tight aisles, staging"),
-            ("Fork Positioner", "Quick fork spacing changes from the seat.", "Mixed pallet sizes")
-        ]:
-            it = _mk_item(nm, ben, bf)
-            if it:
-                attach_candidates.append(it)
-
-    # Option relevancy map (non-attachments)
-    option_candidates: list[dict] = []
-
-    def add_opt(name: str, default_ben: str, best_for: str, when: bool) -> None:
-        if not when:
-            return
-        it = _mk_item(name, default_ben, best_for)
-        if it and all(_norm(it["name"]) != _norm(x["name"]) for x in option_candidates):
-            option_candidates.append(it)
-
-    # Visibility / pedestrian
-    ped = flags.get("pedestrian_heavy") or flags.get("poor_visibility")
-    add_opt("LED Rotating Light", "360° beacon to alert pedestrians.", "Busy aisles, crossings", ped)
-    add_opt("Blue spot Light", "Projects a blue spot ahead/behind as a warning.", "Blind corners, intersections", ped)
-    add_opt("Red side line Light", "Visible side exclusion zone.", "Shared aisles with walkers", ped)
-    add_opt("Visible backward radar, if applicable", "Audible/visual alerts while reversing.", "Tight docks, blind reversing", "reverse" in t or ped)
-    add_opt("Rear Working Light", "Illuminates the rear work zone.", "Night/low-light staging", flags.get("poor_visibility"))
-    add_opt("LED Rear Working Light", "Bright, low-draw rear lighting.", "Dim yards/second shift", flags.get("poor_visibility"))
-
-    # Climate/comfort (only if outdoor/hot/cold; avoid nonsense indoors with no cue)
-    add_opt("Panel mounted Cab", "Weather protection; lowers fatigue.", "Regular outdoor travel", flags.get("outdoor"))
-    add_opt("Heater", "Warm cab in winter/freezer use.", "Cold storage/outdoor winters", flags.get("cold"))
-    add_opt("Air conditioner", "Cools cab, reduces heat stress.", "Foundry/hot summers", flags.get("hot"))
-    add_opt("Glass Windshield with Wiper", "Clear view in rain/dust.", "Outdoor routes, rain/snow", flags.get("outdoor"))
-    add_opt("Top Rain-proof Glass", "Overhead visibility with rain shield.", "Outdoor stacking in rain", flags.get("outdoor"))
-    add_opt("Rear Windshield Glass", "Reduces rain/wind from the rear.", "Outdoor travel", flags.get("outdoor"))
-
-    # Protection/dust
-    yardy = flags.get("rough") or flags.get("debris") or flags.get("yard") or flags.get("gravel")
-    add_opt("Radiator protection bar", "Shields radiator from impacts/debris.", "Scrap yards, rough docks", yardy)
-    add_opt("Steel Belly Pan", "Protects underside from ruts/debris.", "Construction/yard", yardy)
-    add_opt("Removable radiator screen", "Keeps fins clear; easier service.", "Dusty sawmill/quarry", yardy)
-    add_opt("Dual Air Filter", "Better filtration in dust.", "Sawmills, cement, grain", yardy)
-    add_opt("Pre air cleaner", "Cyclonic pre-separation; longer life.", "Heavy dust environments", yardy)
-    add_opt("Air filter service indicator", "Prompts timely filter changes.", "Dusty routes", yardy)
-    add_opt("Tilt or Steering cylinder boot", "Protects cylinder rods from grit.", "Dust/debris prone sites", yardy)
-
-    # Hydraulics / controls
-    many_funcs = "4th function" in t or "fourth function" in t or flags.get("multi_function")
-    ergo = flags.get("ergonomics") or flags.get("long_runs")
-    add_opt("3 Valve with Handle", "Adds third hydraulic function.", "Simple clamp/sideshift combos", many_funcs)
-    add_opt("4 Valve with Handle", "Adds fourth hydraulic circuit.", "More complex attachments", many_funcs)
-    add_opt("5 Valve with Handle", "Maximum hydraulic flexibility.", "Specialty multi-function tools", many_funcs)
-    add_opt("Finger control system(2valve),if applicable.should work together with MSG65 seat", "Compact fingertip controls; less reach/wrist strain.", "Ergonomics, long shifts", ergo)
-    add_opt("Finger control system(3valve),if applicable.should work together with MSG65 seat", "Fingertip precision for 3 functions.", "Frequent hydraulic use", ergo)
-    add_opt("Finger control system(4valve), if applicable, should work together with MSG65 seat", "Fingertip controls for 4-function setups.", "Complex hydraulic tools", many_funcs)
-
-    # OPS / speed / LPG
-    add_opt("Full OPS", "Operator presence interlocks (safety).", "Strict safety policies / OSHA focus", "osha" in t or flags.get("ops_required"))
-    add_opt("Speed Control system (not for diesel engine)", "Zone/global speed limiting.", "High pedestrian zones", "speed" in t or flags.get("speed_control"))
-    add_opt("Swing Out Drop LPG Bracket", "Faster, safer tank swaps.", "LP fleets with frequent changes", flags.get("power_lpg"))
-    add_opt("LPG Tank", "Extra tank for quick swaps.", "Multi-shift LP operations", flags.get("power_lpg"))
-    add_opt("Low Fuel Indicator Light", "Prompts timely tank change.", "Avoid surprise stalls on LP", flags.get("power_lpg"))
-
-    # Cold storage (electric only)
-    add_opt("Added cost for the cold storage package (for electric forklift)",
-            "Seals/heaters for reliable freezer performance.",
-            "Freezer aisles, cold rooms",
-            flags.get("electric") and flags.get("cold"))
-
-    # Ergonomic seats
-    add_opt("Heli Suspension Seat with armrest", "Improves comfort/posture.", "Long shifts, rough floors", ergo)
-    add_opt("Grammar Full Suspension Seat MSG65", "Premium suspension; pairs with fingertip.", "Operators w/ back fatigue", ergo)
-
-    # Curate + trim
-    attachments = attach_candidates[:max_per_section]
-    options = option_candidates[:max_per_section]
-
-    # --- format neatly ----------------------------------------------------
     lines: list[str] = []
-    lines.append("**Tires (recommended for this scenario)**")
+
+    # Tires
+    lines.append("Tires (recommended):")
     if tire_pick:
-        lines.append(f"- {tire_pick['name']} — {tire_pick['benefit']}  \n  _Best used for:_ {tire_pick['best_for']}")
+        best_for = ", ".join(_env_tags_for_name(tire_pick.get("name", ""))) or "General use"
+        lines.append(_line(tire_pick.get("name",""), tire_pick.get("benefit","")))
+        lines.append(f"  Best used for: {best_for}")
     else:
         lines.append("- Not specified")
 
-    lines.append("\n**Attachments (relevant picks)**")
+    # Attachments
+    lines.append("")
+    lines.append("Attachments (relevant):")
     if attachments:
         for a in attachments:
-            ben = (a.get("benefit") or "").strip()
-            bf  = (a.get("best_for") or "").strip()
-            lines.append(f"- {a['name']} — {ben}" + (f"  \n  _Best used for:_ {bf}" if bf else ""))
+            lines.append(_line(a.get("name",""), a.get("benefit","")))
     else:
         lines.append("- Not specified")
 
-    lines.append("\n**Options (relevant picks)**")
+    # Options
+    lines.append("")
+    lines.append("Options (relevant):")
     if options:
         for o in options:
-            ben = (o.get("benefit") or "").strip()
-            bf  = (o.get("best_for") or "").strip()
-            lines.append(f"- {o['name']} — {ben}" + (f"  \n  _Best used for:_ {bf}" if bf else ""))
+            lines.append(_line(o.get("name",""), o.get("benefit","")))
     else:
         lines.append("- Not specified")
 
-    return "\n".join(lines)
+    return _plain("\n".join(lines))
 
 # ── load JSON once -------------------------------------------------------
 def _load_json(path: str):
