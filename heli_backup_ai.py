@@ -20,8 +20,9 @@ from ai_logic import (
     select_models_for_question,
     allowed_models_block,
     debug_parse_and_rank,   # keep this for your debug endpoint
-    top_pick_meta,         # promotions helper
+    top_pick_meta,          # promotions helper
     recommend_options_from_sheet,
+    generate_catalog_mode_response,   # <-- add this
 )
 
 # Admin usage tracking
@@ -768,7 +769,7 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────────────────────────────────
-# Chat API (Recommendation + Inquiry + Coach)
+# Chat API (Recommendation + Inquiry + Coach + Catalog)
 # ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -881,6 +882,15 @@ def chat():
         ai_reply = _strip_prompt_leak(ai_reply)
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
+    # Catalog (attachments + options + tires explainer)
+    if mode in ("attachments_options_catalog", "catalog", "attachments-catalog"):
+        # Tweak max_per_section to tighten/expand the list length
+        try:
+            text = generate_catalog_mode_response(user_q, max_per_section=6)
+        except Exception as e:
+            text = f"❌ Catalog error: {e}"
+        return jsonify({"response": text})
+
     # Recommendation (default)
     ai_reply = run_recommendation_flow(user_q)
 
@@ -919,6 +929,7 @@ def api_modes():
         {"id": "recommendation", "label": "Forklift Recommendation"},
         {"id": "inquiry",        "label": "Customer Inquiry"},
         {"id": "coach",          "label": "Sales Coach"},
+        {"id": "catalog",        "label": "Attachments/Options Catalog"},
     ])
 
 # ─────────────────────────────────────────────────────────────────────────
