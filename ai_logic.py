@@ -8,7 +8,7 @@ from __future__ import annotations
 import json, re, difflib
 from typing import List, Dict, Any, Tuple, Optional
 
-# --- Options loader (Step 2: read /data/forklift_options_benefits.xlsx) ---
+# --- Options / Attachments / Tires loader (Excel: ./data/forklift_options_benefits.xlsx) ---
 import os
 from functools import lru_cache
 
@@ -17,7 +17,11 @@ try:
 except Exception:
     _pd = None
 
-_OPTIONS_XLSX = os.path.join(os.path.dirname(__file__), "data", "forklift_options_benefits.xlsx")
+# Single source of truth: the typed catalog Excel
+_OPTIONS_XLSX = os.environ.get(
+    "HELI_CATALOG_XLSX",
+    os.path.join(os.path.dirname(__file__), "data", "forklift_options_benefits.xlsx")
+)
 
 def _make_code(name: str) -> str:
     s = (name or "").upper()
@@ -27,111 +31,147 @@ def _make_code(name: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s[:64] or "UNKNOWN_OPTION"
 
-@lru_cache(maxsize=1)
-def load_options() -> list[dict]:
+# ---------------- Core typed loader ----------------
+def _read_catalog_df():
     """
-    Returns a list of dicts: [{code, name, benefit}], read from Excel.
-    Requires columns: Option, Benefit (case-insensitive is OK).
-    """
-    if _pd is None:
-        return []
-    if not os.path.exists(_OPTIONS_XLSX):
-        return []
-    df = _pd.read_excel(_OPTIONS_XLSX)
-    # normalize headers
-    cols = {c.lower().strip(): c for c in df.columns}
-    opt_col = cols.get("option")
-    ben_col = cols.get("benefit")
-    if not opt_col or not ben_col:
-        return []
-    out = []
-    for _, r in df.iterrows():
-        name = str(r.get(opt_col, "")).strip()
-        if not name:
-            continue
-        benefit = str(r.get(ben_col, "")).strip()
-        out.append({"code": _make_code(name), "name": name, "benefit": benefit})
-    return out
-
-@lru_cache(maxsize=1)
-def options_lookup_by_name() -> dict:
-    """Lowercase name -> row dict, for quick lookups."""
-    return {o["name"].lower(): o for o in load_options()}
-
-def option_benefit(name: str) -> str | None:
-    """Convenience: get the benefit sentence for an exact option name."""
-    row = options_lookup_by_name().get((name or "").lower())
-    return row["benefit"] if row else None
-
-# === Typed catalog loader (options / attachments / tires) =====================
-# Uses the same Excel file path you already have in _OPTIONS_XLSX.
-# Accepts either "name" or "option" as the name column, plus required "type" and optional "benefit".
-
-def _read_typed_catalog_df():
-    """
-    Reads your Excel and normalizes columns:
-      - name:   from 'name' or 'option'
-      - type:   required; values: option | attachment | tire
-      - benefit: optional; defaults to ''
-    Returns a pandas DataFrame or None if missing/invalid.
+    Reads Excel and normalizes columns to:
+      - name    (from 'Name' or 'Option')
+      - benefit (from 'Benefit' or empty string)
+      - type    (from 'Type' or inferred; values: option | attachment | tire)
+    Returns a pandas DataFrame with columns ['name','benefit','type'] or None if missing.
     """
     if _pd is None or not os.path.exists(_OPTIONS_XLSX):
+        print(f"[ai_logic] Excel not found or pandas missing: {_OPTIONS_XLSX}")
         return None
-    # Use openpyxl for xlsx; falls back if not available
+
     try:
         df = _pd.read_excel(_OPTIONS_XLSX, engine="openpyxl")
     except Exception:
         df = _pd.read_excel(_OPTIONS_XLSX)
 
-    cols = {str(c).lower().strip(): c for c in df.columns}
-    name_col = cols.get("name") or cols.get("option")  # support your older sheet ("Option")
-    type_col = cols.get("type")
-    ben_col  = cols.get("benefit")
-
-    if not name_col or not type_col:
-        # We need at least name+type to build typed catalogs
+    if df is None or df.empty:
+        print("[ai_logic] Excel read but empty.")
         return None
 
-    use_cols = [name_col, type_col] + ([ben_col] if ben_col else [])
-    df = df[use_cols].copy()
-    rename_map = {name_col: "name", type_col: "type"}
-    if ben_col:
-        rename_map[ben_col] = "benefit"
-    df.rename(columns=rename_map, inplace=True)
+    cols = {str(c).lower().strip(): c for c in df.columns}
+    name_col    = cols.get("name") or cols.get("option")
+    benefit_col = cols.get("benefit") or cols.get("desc") or cols.get("description")
+    type_col    = cols.get("type") or cols.get("category")
 
-    # Normalize fields
-    df["name"]    = df["name"].astype(str).str.strip()
-    df["type"]    = df["type"].astype(str).str.strip().str.lower()
+    if not name_col:
+        print("[ai_logic] Excel must have a 'Name' or 'Option' column.")
+        return None
+
+    # Build a normalized frame
+    use_cols = [name_col]
+    if benefit_col: use_cols.append(benefit_col)
+    if type_col:    use_cols.append(type_col)
+    df = df[use_cols].copy()
+
+    rename = {name_col: "name"}
+    if benefit_col: rename[benefit_col] = "benefit"
+    if type_col:    rename[type_col]    = "type"
+    df.rename(columns=rename, inplace=True)
+
+    # Defaults & normalization
     if "benefit" not in df.columns:
         df["benefit"] = ""
-    else:
-        df["benefit"] = df["benefit"].astype(str).str.strip()
+    if "type" not in df.columns:
+        df["type"] = ""
 
-    # Keep only non-empty names
-    df = df[df["name"] != ""]
-    return df
+    df["name"]    = df["name"].astype(str).str.strip()
+    df["benefit"] = df["benefit"].astype(str).str.strip()
+    df["type"]    = df["type"].astype(str).str.strip().str.lower()
 
+    # Fill missing/unknown types
+    typed = []
+    for _, r in df.iterrows():
+        nm = r["name"].strip()
+        if not nm:
+            continue
+        tp = (r.get("type") or "").strip().lower()
+        if not tp:
+            ln = nm.lower()
+            if any(k in ln for k in ("clamp","sideshift","side shift","positioner","rotator","boom","pole","ram","fork extension","extensions","push/ pull","push/pull","slip-sheet","slipsheet","bale","carton","drum")):
+                tp = "attachment"
+            elif "tire" in ln or "pneumatic" in ln or "non-mark" in ln or "cushion" in ln or "dual" in ln:
+                tp = "tire"
+            else:
+                tp = "option"
+        else:
+            if tp in ("options","opt"): tp = "option"
+            if tp in ("attachments","att"): tp = "attachment"
+            if tp == "tires": tp = "tire"
+
+        typed.append({"name": nm, "benefit": r.get("benefit",""), "type": tp})
+
+    out = _pd.DataFrame(typed, columns=["name","benefit","type"])
+    out = out[out["name"] != ""]
+    return out
+
+@lru_cache(maxsize=1)
 def load_catalogs() -> tuple[dict, dict, dict]:
     """
     Returns three dictionaries keyed by exact 'name':
-      - options:     { name: benefit }
+      - options:     { name: benefit }    (includes tires when you use load_options() below)
       - attachments: { name: benefit }
       - tires:       { name: benefit }
-
-    These are built from your Excel 'type' column (option | attachment | tire).
     """
-    df = _read_typed_catalog_df()
+    df = _read_catalog_df()
     if df is None or df.empty:
+        print("[ai_logic] load_catalogs(): 0/0/0 (Excel missing or empty)")
         return {}, {}, {}
 
-    opts = df[df["type"] == "option"][["name", "benefit"]]
-    atts = df[df["type"] == "attachment"][["name", "benefit"]]
-    tirs = df[df["type"] == "tire"][["name", "benefit"]]
+    opts_df = df[df["type"] == "option"][["name","benefit"]]
+    atts_df = df[df["type"] == "attachment"][["name","benefit"]]
+    tire_df = df[df["type"] == "tire"][["name","benefit"]]
 
-    options = {r["name"]: (r.get("benefit") or "") for _, r in opts.iterrows()}
-    attachments = {r["name"]: (r.get("benefit") or "") for _, r in atts.iterrows()}
-    tires = {r["name"]: (r.get("benefit") or "") for _, r in tirs.iterrows()}
+    options     = {r["name"]: (r["benefit"] or "") for _, r in opts_df.iterrows()}
+    attachments = {r["name"]: (r["benefit"] or "") for _, r in atts_df.iterrows()}
+    tires       = {r["name"]: (r["benefit"] or "") for _, r in tire_df.iterrows()}
+
+    print(f"[ai_logic] load_catalogs(): options={len(options)} attachments={len(attachments)} tires={len(tires)}")
     return options, attachments, tires
+
+# ---------------- Legacy-compatible helpers (used by endpoints/router) --------
+@lru_cache(maxsize=1)
+def load_options() -> List[dict]:
+    """
+    Legacy shape used by /api/options:
+      Returns list of dicts: [{code, name, benefit}]
+      NOTE: This includes both Options and Tires so your UI can categorize tires
+            with your existing 'infer_category' logic.
+    """
+    options, _, tires = load_catalogs()
+    rows = []
+    for name, ben in {**options, **tires}.items():
+        rows.append({"code": _make_code(name), "name": name, "benefit": ben})
+    return rows
+
+@lru_cache(maxsize=1)
+def load_attachments() -> List[dict]:
+    """List of attachments as [{name, benefit}] for the router."""
+    _, attachments, _ = load_catalogs()
+    return [{"name": n, "benefit": b} for n, b in attachments.items()]
+
+@lru_cache(maxsize=1)
+def load_tires_as_options() -> List[dict]:
+    """Tires shaped like options so the router can merge them if needed."""
+    _, _, tires = load_catalogs()
+    return [{"code": _make_code(n), "name": n, "benefit": b} for n, b in tires.items()]
+
+# Some versions of the router import load_tires(), so keep a thin alias:
+load_tires = load_tires_as_options
+
+@lru_cache(maxsize=1)
+def options_lookup_by_name() -> dict:
+    """Lowercase name -> row dict, for quick lookups across options+tires."""
+    return {o["name"].lower(): o for o in load_options()}
+
+def option_benefit(name: str) -> Optional[str]:
+    """Convenience: get the benefit sentence for an exact option/tire name."""
+    row = options_lookup_by_name().get((name or "").lower())
+    return row["benefit"] if row else None
 
 # === Sales Catalog helpers ===============================================
 
