@@ -377,7 +377,7 @@ def respond_options_attachments(user_text: str) -> str:
                 temperature=0.2,
             )
             content = _strip_md_bold_headers(content)  # only strips ** around the headers
-            return _decorate_headers(content, title=f"{key} — Deep Dive}")
+            return _decorate_headers(content, title=f"{key} — Deep Dive")
         except Exception:
             # Friendly fallback if model hiccups
             fallback = (
@@ -394,7 +394,7 @@ def respond_options_attachments(user_text: str) -> str:
                 "Trade-offs:\n"
                 "- Higher upfront cost and modest maintenance."
             )
-            return _decorate_headers(fallback, title=f"{key} — Deep Dive}")
+            return _decorate_headers(fallback, title=f"{key} — Deep Dive")
 
     # Fallback clarifier
     if "attachment" in t and "option" in t:
