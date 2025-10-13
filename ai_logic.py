@@ -787,7 +787,7 @@ _BOTH_PAT = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+
 _OPT_PAT  = re.compile(r'\b(options?\s+only|options?)\b', re.I)
 _ATT_PAT  = re.compile(r'\b(attachments?\s+only|attachments?)\b', re.I)
 
-# Plain-text normalizer (define once)
+# Plain-text cleaner (ASCII punctuation, no markdown)
 if "_plain" not in globals():
     def _plain(s: str) -> str:
         if not isinstance(s, str):
@@ -821,16 +821,21 @@ def parse_catalog_intent(user_q: str) -> dict:
     elif _OPT_PAT.search(t):
         which = "options"
 
-    # “list/show/give/display all …”, “full/complete … list/catalog”, or explicit “all X”
+    # Treat “list/show/give/display all …” as list_all
     list_all = (
         bool(re.search(r'\b(list|show|give|display)\b.*\ball\b', t)) or
         bool(re.search(r'\b(full|complete)\b.*\b(list|catalog)\b', t)) or
         "all attachments" in t or "all options" in t or "all tires" in t
     )
+
     return {"which": which, "list_all": list_all}
 
-# --- Helper to render only the sections the user asked for ---------------
 def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
+    """
+    If the user explicitly asks for attachments/options/both (or to list *all*),
+    render exactly those sections from your Excel-driven catalog. Otherwise,
+    return the scenario-aware compact recommendation (Tires, Attachments, Options).
+    """
     intent = parse_catalog_intent(user_q)
     which = intent["which"]
     want_all = intent["list_all"]
@@ -839,10 +844,11 @@ def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
         b = (b or "").strip()
         return f"- {n}" + (f" — {b}" if b else "")
 
-    # If the user said "both"/"attachments"/"options" OR asked to list all, render exactly that.
+    # If the user said "both"/"attachments"/"options" or asked to list all:
     if which in ("both", "attachments", "options") or want_all:
+        # Group via existing helpers: _options_iter() & _is_attachment()
         tires, atts, opts = [], [], []
-        for o in _options_iter():  # uses your existing helper
+        for o in _options_iter():  # yields: {code,name,benefit,category,lname}
             nm = o["name"]; ben = o.get("benefit", ""); nl = o["lname"]
             if "tire" in nl:
                 tires.append((nm, ben))
@@ -862,13 +868,14 @@ def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
         elif which == "options":
             out.append("Options:")
             out.extend([_line(n, b) for n, b in opts] or ["- None found in catalog"])
-        else:  # both OR list_all
+        else:  # both or list_all
             out.append("Attachments:")
             out.extend([_line(n, b) for n, b in atts] or ["- None found in catalog"])
             out.append("")
             out.append("Options:")
             out.extend([_line(n, b) for n, b in opts] or ["- None found in catalog"])
-            if want_all:  # only include Tires when explicitly listing all
+            # Only include Tires if user said "all" explicitly
+            if want_all:
                 out.append("")
                 out.append("Tires:")
                 out.extend([_line(n, b) for n, b in tires] or ["- None found in catalog"])
@@ -876,7 +883,9 @@ def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
         return _plain("\n".join(out))
 
     # ---------- Scenario-aware compact output (no markdown) ----------
-    # Fall back to the Excel-driven recommender when not explicitly asked for a section
+    # Guard against missing flagger; only call if defined.
+    flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
+
     rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
     tire_pick   = rec.get("tire")
     attachments = rec.get("attachments", [])[:max_per_section]
@@ -912,6 +921,10 @@ def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
         lines.append("- Not specified")
 
     return _plain("\n".join(lines))
+
+# --- Back-compat export for heli_backup_ai.py ----------------------------
+# Keep the old name so imports don't break.
+generate_catalog_mode_response = render_catalog_sections
 
 # ── load JSON once -------------------------------------------------------
 def _load_json(path: str):
