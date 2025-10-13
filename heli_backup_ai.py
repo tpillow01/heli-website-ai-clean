@@ -66,21 +66,23 @@ except Exception as e:
     print("⚠️ Could not load locations at startup:", e)
 
 # -------------------------------------------------------------------------
-# Flask & OpenAI client
-app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "dev-insecure")
+# Flask & OpenAI client  (reuse the existing app; DO NOT create a new one)
+# You can override secrets via env without re-instantiating Flask.
+app.secret_key = os.getenv("SECRET_KEY", app.secret_key or "dev-insecure")
 app.permanent_session_lifetime = timedelta(days=7)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=bool(os.getenv("SESSION_COOKIE_SECURE", "1") == "1"),
 )
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # -------------------------------------------------------------------------
 # Admin usage tracking bootstrap (creates DB + coarse per-request logging)
-init_admin_usage(app)
-app.register_blueprint(admin_bp)  # /admin/login, /admin, /admin/usage.json
+# Enable only if you actually use the admin panel
+# init_admin_usage(app)
+# app.register_blueprint(admin_bp)  # /admin/login, /admin, /admin/usage.json
 
 # ─────────────────────────────────────────────────────────────────────────
 # USERS DB (simple SQLite) + VISITS
