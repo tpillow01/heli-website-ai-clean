@@ -19,10 +19,10 @@ from ai_logic import (
     generate_forklift_context,
     select_models_for_question,
     allowed_models_block,
-    debug_parse_and_rank,   # keep this for your debug endpoint
-    top_pick_meta,          # promotions helper
+    debug_parse_and_rank,         # keep this for your debug endpoint
+    top_pick_meta,                # promotions helper
     recommend_options_from_sheet,
-    generate_catalog_mode_response,   # keep if you use catalog mode elsewhere
+    generate_catalog_mode_response,  # catalog renderer (no follow-up prompts)
 )
 
 # Admin usage tracking (optional)
@@ -33,6 +33,7 @@ from api_options import bp_options  # import ONCE
 
 # Promotions
 from promotions import promos_for_context, render_promo_lines
+
 
 # -----------------------------------------------------------------------------
 # App init

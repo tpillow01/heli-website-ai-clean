@@ -782,6 +782,138 @@ def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
 
     return {"tire": tire, "attachments": attachments, "options": options}
 
+# --- Catalog intent parser + renderer (no follow-up prompts) -------------
+# Safe plain-text normalizer (ASCII, no markdown)
+if "_plain" not in globals():
+    def _plain(s: str) -> str:
+        if not isinstance(s, str):
+            return s
+        s = (s
+             .replace("“", '"').replace("”", '"')
+             .replace("‘", "'").replace("’", "'")
+             .replace("—", "-").replace("–", "-")
+             .replace("\u00a0", " "))
+        s = s.replace("**", "").replace("__", "")
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r" ?\n ?", "\n", s)
+        return s.strip()
+
+# Stop the “both lists?” loop: infer intent from the user text
+_BOTH_PAT = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+and\s+attachments)\b', re.I)
+_OPT_PAT  = re.compile(r'\b(options?\s+only|options?)\b', re.I)
+_ATT_PAT  = re.compile(r'\b(attachments?\s+only|attachments?)\b', re.I)
+
+def parse_catalog_intent(user_q: str) -> dict:
+    """
+    Returns:
+      { 'which': 'attachments' | 'options' | 'both' | None,
+        'list_all': bool }
+    """
+    t = (user_q or "").strip().lower()
+    which = None
+    if _BOTH_PAT.search(t):
+        which = "both"
+    elif "attachments" in t and "options" in t:
+        which = "both"
+    elif _ATT_PAT.search(t):
+        which = "attachments"
+    elif _OPT_PAT.search(t):
+        which = "options"
+
+    list_all = (
+        bool(re.search(r'\b(list|show|give|display)\b.*\ball\b', t)) or
+        bool(re.search(r'\b(full|complete)\b.*\b(list|catalog)\b', t)) or
+        "all attachments" in t or "all options" in t or "all tires" in t
+    )
+    return {"which": which, "list_all": list_all}
+
+def _line(n, b):
+    b = (b or "").strip()
+    return f"- {n}" + (f" — {b}" if b else "")
+
+def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
+    """
+    Never asks clarifying questions. Either:
+    - Renders exactly the sections the user asked for (attachments/options/both; tires only if 'all'),
+    - Or returns the scenario-aware compact output (Tires, Attachments, Options).
+    """
+    intent = parse_catalog_intent(user_q)
+    which = intent["which"]
+    want_all = intent["list_all"]
+
+    # If explicit request or 'all' → render directly from catalog
+    if which in ("both", "attachments", "options") or want_all:
+        tires, atts, opts = [], [], []
+        for o in _options_iter():  # uses existing helpers
+            nm = o["name"]; ben = o.get("benefit",""); nl = o["lname"]
+            if "tire" in nl:
+                tires.append((nm, ben))
+            elif _is_attachment(nl):
+                atts.append((nm, ben))
+            else:
+                opts.append((nm, ben))
+        tires.sort(key=lambda x: x[0].lower())
+        atts.sort(key=lambda x: x[0].lower())
+        opts.sort(key=lambda x: x[0].lower())
+
+        out = []
+        if which == "attachments":
+            out.append("Attachments:")
+            out.extend([_line(n,b) for n,b in atts] or ["- None found in catalog"])
+        elif which == "options":
+            out.append("Options:")
+            out.extend([_line(n,b) for n,b in opts] or ["- None found in catalog"])
+        else:  # both or list_all
+            out.append("Attachments:")
+            out.extend([_line(n,b) for n,b in atts] or ["- None found in catalog"])
+            out.append("")
+            out.append("Options:")
+            out.extend([_line(n,b) for n,b in opts] or ["- None found in catalog"])
+            if want_all:  # include Tires only when explicitly listing all
+                out.append("")
+                out.append("Tires:")
+                out.extend([_line(n,b) for n,b in tires] or ["- None found in catalog"])
+
+        return _plain("\n".join(out))
+
+    # Otherwise: scenario-aware compact output (no prompts)
+    rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
+    tire_pick   = rec.get("tire")
+    attachments = rec.get("attachments", [])[:max_per_section]
+    options     = rec.get("options", [])[:max_per_section]
+
+    lines: list[str] = []
+    lines.append("Tires (recommended):")
+    if tire_pick:
+        best_for = ", ".join(_env_tags_for_name(tire_pick.get("name", ""))) or "General use"
+        lines.append(_line(tire_pick.get("name",""), tire_pick.get("benefit","")))
+        lines.append(f"  Best used for: {best_for}")
+    else:
+        lines.append("- Not specified")
+
+    lines.append("")
+    lines.append("Attachments (relevant):")
+    if attachments:
+        for a in attachments:
+            lines.append(_line(a.get("name",""), a.get("benefit","")))
+    else:
+        lines.append("- Not specified")
+
+    lines.append("")
+    lines.append("Options (relevant):")
+    if options:
+        for o in options:
+            lines.append(_line(o.get("name",""), o.get("benefit","")))
+    else:
+        lines.append("- Not specified")
+
+    return _plain("\n".join(lines))
+
+# --- Back-compat shim so old imports keep working ------------------------
+def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:
+    """Compatibility wrapper. Old code imports this name; route to non-prompting renderer."""
+    return render_catalog_sections(user_q, max_per_section=max_per_section)
+
 # --- Catalog intent parser: stop the endless "both lists?" loop ---------
 _BOTH_PAT = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+and\s+attachments)\b', re.I)
 _OPT_PAT  = re.compile(r'\b(options?\s+only|options?)\b', re.I)
