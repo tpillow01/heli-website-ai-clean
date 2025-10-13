@@ -782,15 +782,13 @@ def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
 
     return {"tire": tire, "attachments": attachments, "options": options}
 
-def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:
-    """
-    Clean, plain-text "catalog" answer (no markdown/italics/bold quotes).
-    - If the user asks to "list all" options/attachments/tires, show the FULL catalog
-      from the Excel (grouped) with one-line benefits.
-    - Otherwise: concise, scenario-aware picks (Tires, Attachments, Options).
-    """
+# --- Catalog intent parser: stop the endless "both lists?" loop ---------
+_BOTH_PAT = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+and\s+attachments)\b', re.I)
+_OPT_PAT  = re.compile(r'\b(options?\s+only|options?)\b', re.I)
+_ATT_PAT  = re.compile(r'\b(attachments?\s+only|attachments?)\b', re.I)
 
-    # ---------- text cleaners (ASCII, no fancy punctuation / markdown) ----------
+# (Optional but recommended) define _plain once globally
+if "_plain" not in globals():
     def _plain(s: str) -> str:
         if not isinstance(s, str):
             return s
@@ -804,80 +802,82 @@ def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str
         s = re.sub(r" ?\n ?", "\n", s)
         return s.strip()
 
-    # ---------- detect "list all" intent ----------
-    t = (user_q or "").lower()
-    list_all = bool(re.search(r"\b(list|show|give|display)\b.*\ball\b", t)) or \
-               bool(re.search(r"\b(all|every)\b.*\b(option|attachment|tire)s?\b", t)) or \
-               bool(re.search(r"\b(full|complete)\b.*\b(list|catalog)\b", t))
+def parse_catalog_intent(user_q: str) -> dict:
+    """
+    Returns:
+      { 'which': 'attachments' | 'options' | 'both' | None,
+        'list_all': bool }
+    """
+    t = (user_q or "").strip().lower()
+    which = None
+    if _BOTH_PAT.search(t):
+        which = "both"
+    elif "attachments" in t and "options" in t:
+        which = "both"
+    elif _ATT_PAT.search(t):
+        which = "attachments"
+    elif _OPT_PAT.search(t):
+        which = "options"
 
-    # ---------- load rows once ----------
-    try:
-        rows = load_options()
-    except Exception:
-        rows = []
+    list_all = (
+        bool(re.search(r'\b(list|show|give|display)\b.*\ball\b', t)) or
+        bool(re.search(r'\b(full|complete)\b.*\b(list|catalog)\b', t)) or
+        "all attachments" in t or "all options" in t or "all tires" in t
+    )
+    return {"which": which, "list_all": list_all}
 
-    # quick lookup by normalized name
-    lut = { _norm(r.get("name") or r.get("option") or ""): r for r in rows }
+# --- Helper to render only the sections the user asked for ---------------
+def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
+    intent = parse_catalog_intent(user_q)
+    which = intent["which"]
+    want_all = intent["list_all"]
 
-    def _row(nm: str) -> dict | None:
-        return lut.get(_norm(nm))
+    # define once so both branches can use it
+    def _line(n, b):
+        b = (b or "").strip()
+        return f"- {n}" + (f" — {b}" if b else "")
 
-    def _benefit(nm: str, default: str) -> str:
-        r = _row(nm)
-        ben = (r.get("benefit") if r else "") or default
-        return ben.strip()
-
-    def _line(name: str, benefit: str | None) -> str:
-        name = _plain(name or "")
-        ben  = _plain((benefit or "").strip())
-        return f"- {name}" + (f" - {ben}" if ben else "")
-
-    # ---------- FULL CATALOG OUTPUT ----------
-    if list_all:
+    # If the user said "both"/"attachments"/"options" or asked to list all
+    if which in ("both", "attachments", "options") or want_all:
+        # group via your existing helpers
         tires, atts, opts = [], [], []
-        for o in _options_iter():  # yields: {code,name,benefit,category,lname}
-            nm = o["name"]
-            ben = o.get("benefit", "")
-            nl = o["lname"]
+        for o in _options_iter():
+            nm = o["name"]; ben = o.get("benefit",""); nl = o["lname"]
             if "tire" in nl:
                 tires.append((nm, ben))
             elif _is_attachment(nl):
                 atts.append((nm, ben))
             else:
                 opts.append((nm, ben))
-
         tires.sort(key=lambda x: x[0].lower())
         atts.sort(key=lambda x: x[0].lower())
         opts.sort(key=lambda x: x[0].lower())
 
-        out: list[str] = []
-        out.append("Catalog (All Available)")
-        out.append("")
-        out.append("Tires:")
-        if tires:
-            out.extend([_line(n, b) for n, b in tires])
-        else:
-            out.append("- None found in catalog")
-        out.append("")
-        out.append("Attachments:")
-        if atts:
-            out.extend([_line(n, b) for n, b in atts])
-        else:
-            out.append("- None found in catalog")
-        out.append("")
-        out.append("Options:")
-        if opts:
-            out.extend([_line(n, b) for n, b in opts])
-        else:
-            out.append("- None found in catalog")
+        out = []
+        if which == "attachments":
+            out.append("Attachments:")
+            out.extend([_line(n,b) for n,b in atts] or ["- None found in catalog"])
+        elif which == "options":
+            out.append("Options:")
+            out.extend([_line(n,b) for n,b in opts] or ["- None found in catalog"])
+        else:  # both or list_all
+            out.append("Attachments:")
+            out.extend([_line(n,b) for n,b in atts] or ["- None found in catalog"])
+            out.append("")
+            out.append("Options:")
+            out.extend([_line(n,b) for n,b in opts] or ["- None found in catalog"])
+            if want_all:  # only include Tires when explicitly listing all
+                out.append("")
+                out.append("Tires:")
+                out.extend([_line(n,b) for n,b in tires] or ["- None found in catalog"])
 
-        return _plain("\n".join(out))
+        return "\n".join(out)
 
     # ---------- SCENARIO-AWARE COMPACT OUTPUT (no markdown) ----------
     flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
 
     rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
-    tire_pick = rec.get("tire")
+    tire_pick  = rec.get("tire")
     attachments = rec.get("attachments", [])[:max_per_section]
     options     = rec.get("options", [])[:max_per_section]
 
