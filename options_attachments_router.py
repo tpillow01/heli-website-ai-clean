@@ -1,16 +1,17 @@
 # options_attachments_router.py
 # Excel-backed, AI-selected router for "Options & Attachments"
 # - Pulls from ai_logic.load_options(), load_attachments(), and (optionally) load_tires_*()
-# - Uses AI to SELECT relevant items by general forklift knowledge + scenario/industry hints (never invents names)
-# - NO global cap on list size; TIRES are curated to the top 1–2 for the scenario (unless user says "all")
-# - Heuristic fallbacks for scenario-specific attachments/options when selector returns nothing
+# - Uses AI to SELECT relevant items (never invents names not in your Excel)
+# - NO global cap on list size; TIRES are curated to the top 1–2 unless user says "all"
+# - Industry/environment profiles guide selection (e.g., lumber yard, indoor warehouse, construction, cold storage)
+# - Heuristic fallbacks for outdoor/long-load scenarios when selector returns nothing
 # - Strips all markdown emphasis (** __ *) from responses
 # - Styles headers via <span class="section-label">…</span>
 
 import os
 import re
 import json
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List
 from openai import OpenAI
 
 # ----------------------------- OpenAI setup ----------------------------------
@@ -179,103 +180,53 @@ CLASSIFIER_INSTRUCTION = (
     "User: {user_text}\n"
 )
 
-# ---------------------- Scenario/industry profiles ---------------------------
-# These hints help the selector choose items that fit the environment/industry.
+# Scenario profiles: positive/negative hints to steer selection
 _SCENARIO_PROFILES = {
-    # Outdoor + long bundles: lumber yards / timber
+    # Outdoor + long bundles (e.g., lumber yards)
     "lumber": {
         "positive": [
-            "pneumatic", "solid pneumatic", "dual", "traction",
-            "outdoor", "rough", "debris", "puncture",
+            "pneumatic", "solid pneumatic", "dual tire", "dual", "traction",
+            "outdoor", "rough terrain", "debris", "puncture",
             "visibility", "work light", "led", "beacon",
-            "protection", "guard", "radiator", "screen", "belly pan",
-            "long fork", "fork extension", "load backrest", "positioner", "sideshift", "carpet pole"
+            "protection", "guard", "radiator screen", "belly pan",
+            "long fork", "fork length", "load backrest",
+            "fork extension", "positioner", "sideshift", "carpet pole", "ram"
         ],
-        "avoid": ["cold storage", "freezer", "non-marking", "paper roll", "slip-sheet"],
-        "attachments": ["fork extension", "positioner", "sideshift", "carpet pole", "load backrest"],
+        "avoid": ["cold storage", "freezer", "non-marking", "indoor only", "paper roll"],
     },
     # Indoor warehouse with finished floors
-    "warehouse": {
-        "positive": ["non-marking", "cushion", "visibility", "led", "blue light", "beacon", "positioner", "sideshift"],
+    "indoor": {
+        "positive": ["non-marking", "cushion", "visibility", "led", "blue light", "compact"],
         "avoid": ["pneumatic", "solid pneumatic", "dual"],
-        "attachments": ["positioner", "sideshift", "fork extensions"],
     },
-    # Cold storage / freezer
-    "cold storage": {
-        "positive": ["cold", "freezer", "low-temp", "heater", "defroster", "enclosed cab", "non-marking cold"],
-        "avoid": ["pneumatic", "dual"],
-        "attachments": ["positioner", "sideshift"],  # general-purpose ones still apply
-    },
-    # Construction / debris / rough ground
+    # Construction / rough debris
     "construction": {
-        "positive": ["pneumatic", "solid pneumatic", "dual", "traction", "protection", "guard", "radiator", "screen", "belly pan", "led", "beacon"],
-        "avoid": ["non-marking"],
-        "attachments": ["fork extensions", "positioner", "sideshift", "carpet pole"],
+        "positive": ["solid pneumatic", "pneumatic", "dual", "belly pan", "guard", "radiator", "beacon"],
+        "avoid": ["non-marking", "cushion"],
     },
-    # Food & Beverage (indoor, hygiene, visibility)
-    "food": {
-        "positive": ["non-marking", "enclosed cab", "stainless", "anti-corrosion", "visibility", "led", "beacon", "positioner"],
-        "avoid": ["pneumatic", "dual"],
-        "attachments": ["positioner", "sideshift"],
+    # Cold storage
+    "cold storage": {
+        "positive": ["cold", "freezer", "low-temp", "heater", "defroster", "enclosed cab", "non-marking"],
+        "avoid": ["radiator", "hot", "cooling fan only"],
     },
-    "beverage": {
-        "positive": ["non-marking", "enclosed cab", "stainless", "anti-corrosion", "visibility", "led", "beacon", "positioner"],
-        "avoid": ["pneumatic", "dual"],
-        "attachments": ["positioner", "sideshift"],
-    },
-    # Paper Mill / Printing
-    "paper": {
-        "positive": ["roll", "clamp", "non-marking", "visibility", "led"],
+    # Pipe / tubing / long
+    "pipe": {
+        "positive": ["fork extension", "carpet pole", "ram", "positioner", "sideshift", "load backrest", "long fork"],
         "avoid": [],
-        "attachments": ["roll clamp", "sideshift", "positioner"],
-    },
-    # Foundry / Steel / Heavy industry
-    "foundry": {
-        "positive": ["solid pneumatic", "dual", "protection", "belly pan", "radiator", "heat", "led", "beacon"],
-        "avoid": ["non-marking"],
-        "attachments": ["fork extensions", "positioner", "sideshift"],
-    },
-    "steel": {
-        "positive": ["solid pneumatic", "dual", "protection", "belly pan", "radiator", "heat", "led", "beacon"],
-        "avoid": ["non-marking"],
-        "attachments": ["fork extensions", "positioner", "sideshift", "carpet pole"],
-    },
-    # Port / Yard / Outdoor logistics
-    "port": {
-        "positive": ["pneumatic", "solid pneumatic", "dual", "protection", "visibility", "led", "beacon"],
-        "avoid": ["non-marking"],
-        "attachments": ["fork extensions", "positioner", "sideshift"],
-    },
-    # Recycling / Waste
-    "recycling": {
-        "positive": ["solid pneumatic", "puncture", "debris", "protection", "belly pan", "radiator", "led", "beacon"],
-        "avoid": ["non-marking"],
-        "attachments": ["fork extensions", "positioner", "sideshift"],
     },
 }
 
-def _match_scenario_key(query: str) -> Optional[str]:
+def _scenario_hints(query: str):
     q = (query or "").lower()
-    for key in _SCENARIO_PROFILES.keys():
+    pos: List[str] = []
+    neg: List[str] = []
+    for key, profile in _SCENARIO_PROFILES.items():
         if key in q:
-            return key
-    # map synonyms
-    if "warehouse" in q:
-        return "warehouse"
-    if "freezer" in q:
-        return "cold storage"
-    if "yard" in q and "lumber" in q:
-        return "lumber"
-    return None
+            pos.extend(profile.get("positive", []))
+            neg.extend(profile.get("avoid", []))
+    return list(dict.fromkeys(pos)), list(dict.fromkeys(neg))  # de-dupe, keep order
 
-def _scenario_hints(query: str) -> Tuple[List[str], List[str], Optional[str]]:
-    key = _match_scenario_key(query)
-    if not key:
-        return [], [], None
-    prof = _SCENARIO_PROFILES.get(key, {})
-    return prof.get("positive", []), prof.get("avoid", []), key
-
-# ------------------------------- Selector prompt -----------------------------
+# Selector prompt: pick relevant items ONLY from provided candidates
 SELECTOR_INSTRUCTION = (
     "You are selecting relevant forklift {kind} for the user's scenario.\n"
     "You can ONLY choose items from the CANDIDATES list provided. Do NOT invent anything.\n"
@@ -336,7 +287,7 @@ def _select_relevant(d: Dict[str, str], kind: str, query: str) -> List[str]:
     if not d:
         return []
     candidates_text = _format_candidates(d)
-    pos, neg, _key = _scenario_hints(query)
+    pos, neg = _scenario_hints(query)
     try:
         out = _llm(
             [
@@ -355,19 +306,67 @@ def _select_relevant(d: Dict[str, str], kind: str, query: str) -> List[str]:
         )
         data = json.loads(out)
         names = [n for n in data.get("items", []) if isinstance(n, str)]
+        # Keep only exact names that exist in d
         set_keys = {k.strip() for k in d.keys()}
         safe = [n for n in names if n.strip() in set_keys]
         return safe
     except Exception:
         return []
 
-# ----------------------------- Tire curation ---------------------------------
-_TIRE_WORDS = ("tire", "tyre")
+# -------------------------- Output formatting --------------------------------
+_HEADER_MAP = {
+    "Purpose:":                        '<span class="section-label">Purpose:</span>',
+    "Benefits:":                       '<span class="section-label">Benefits:</span>',
+    "When to use:":                    '<span class="section-label">When to use:</span>',
+    "Prerequisites/Valving:":          '<span class="section-label">Prerequisites/Valving:</span>',
+    "Compatibility/Capacity impacts:": '<span class="section-label">Compatibility/Capacity impacts:</span>',
+    "Trade-offs:":                     '<span class="section-label">Trade-offs:</span>',
+}
+_HEADER_PATTERN = re.compile(
+    r'(?im)^(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*$'
+)
 
+# Strip bold/italics markers (**, __, *) anywhere in the final text
+_MD_EMPH_ALL = re.compile(r"(\*\*|__|\*)(.*?)\1")
+
+def _strip_all_md_emphasis(text: str) -> str:
+    if not text:
+        return text
+    # Remove any paired emphasis markers
+    s = re.sub(_MD_EMPH_ALL, r"\2", text)
+    # Also clean stray single asterisks/underscores around words
+    s = re.sub(r"(?<!\S)[*_]+|[*_]+(?!\S)", "", s)
+    return s
+
+# Strip **/__ around deep-dive headers specifically (before decorating)
+_MD_BOLD_HEADERS = re.compile(
+    r'(?im)^\s*[*_]{1,3}\s*(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*[*_]{1,3}\s*$'
+)
+def _strip_md_bold_headers(text: str) -> str:
+    if not text:
+        return text
+    s = text.replace("\r\n", "\n").replace("\r", "\n")
+    s = _MD_BOLD_HEADERS.sub(lambda m: m.group(1), s)
+    return s
+
+def _decorate_headers(text: str, title: str = "") -> str:
+    if not text:
+        return text
+    s = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if title:
+        s = f'<span class="section-label">{title}</span>\n{s}'
+    def repl(m):
+        hdr = m.group(1)
+        return _HEADER_MAP.get(hdr, hdr)
+    s = _HEADER_PATTERN.sub(repl, s)
+    return s
+
+# ------------------------------ Tire curation --------------------------------
+_TIRE_WORDS = ("tire", "tyre", "pneumatic", "cushion")
 def _is_tire(name: str, blurb: str = "") -> bool:
     s = f"{name} {blurb}".lower()
     return any(w in s for w in _TIRE_WORDS) or any(k in s for k in [
-        "pneumatic", "cushion", "solid pneumatic", "non-marking", "dual"
+        "solid pneumatic", "non-marking", "dual"
     ])
 
 def _score_tire(name: str, blurb: str, query: str) -> float:
@@ -375,63 +374,218 @@ def _score_tire(name: str, blurb: str, query: str) -> float:
     q = (query or "").lower()
     s = f"{name} {blurb}".lower()
     score = 0.0
-
-    # Outdoor / rough / debris / lumber → favor pneumatic / solid pneumatic / dual
-    if any(k in q for k in ["lumber", "outdoor", "rough", "debris", "yard", "construction", "steel", "port", "recycling"]):
+    # Outdoor / rough / debris / lumber
+    if any(k in q for k in ["lumber", "outdoor", "rough", "debris", "yard", "construction"]):
         if "solid pneumatic" in s: score += 5
-        if "pneumatic" in s:       score += 4
-        if "dual" in s:            score += 3
-        if "non-marking" in s:     score -= 4
-        if "cushion" in s:         score -= 3
-
-    # Indoor / finished floors / food-bev → favor non-marking / cushion
-    if any(k in q for k in ["indoor", "finished floor", "epoxy", "polished", "food", "beverage", "warehouse"]):
-        if "non-marking" in s:     score += 5
-        if "cushion" in s:         score += 4
-        if "pneumatic" in s:       score -= 3
-        if "solid pneumatic" in s: score -= 3
-        if "dual" in s:            score -= 1
-
-    # Cold storage: non-marking cold-rated gets a bump (if present in your sheet text)
-    if any(k in q for k in ["cold", "freezer"]):
-        if "cold" in s or "low-temp" in s: score += 2
-        if "pneumatic" in s:               score -= 1
-
+        if "pneumatic" in s:      score += 4
+        if "dual" in s:           score += 3
+        if "non-marking" in s:    score -= 3
+        if "cushion" in s:        score -= 2
+    # Indoor / finished floors
+    if any(k in q for k in ["indoor", "finished floor", "epoxy", "polished", "warehouse"]):
+        if "non-marking" in s:    score += 5
+        if "cushion" in s:        score += 4
+        if "pneumatic" in s:      score -= 2
+        if "solid pneumatic" in s:score -= 1
+        if "dual" in s:           score -= 1
+    # Cold storage: prefer non-marking compounds if present in catalog
+    if "cold storage" in q or "freezer" in q:
+        if "non-marking" in s:    score += 2
     return score
 
-def _curate_tires(names: List[str], pool: Dict[str, str], query: str, asked_all: bool) -> List[str]:
+def _curate_tires(names: List[str], pool: Dict[str, str], query: str, list_all: bool) -> List[str]:
     """
-    Keep non-tire items as-is. For tires:
-      - If asked_all=True, keep all.
-      - Else, keep only the top 1–2 most relevant by _score_tire.
+    Keep only the 1–2 most relevant tire choices unless user asked for ALL.
+    Everything else (non-tires) is left untouched by this function.
     """
-    if asked_all:
+    if list_all:
         return names
+    tires = [(n, _score_tire(n, pool.get(n, ""), query)) for n in names if _is_tire(n, pool.get(n, ""))]
+    non_tires = [n for n in names if not _is_tire(n, pool.get(n, ""))]
+    # Pick the top 2 tires if any
+    tires_sorted = [n for n, _ in sorted(tires, key=lambda x: (-x[1], _normalize(x[0])))]
+    top_tires = tires_sorted[:2]
+    # Preserve original relative order where possible
+    result = [n for n in names if n in non_tires or n in top_tires]
+    return result
 
-    tire_names = []
-    non_tire = []
-    for n in names:
-        if _is_tire(n, pool.get(n, "")):
-            tire_names.append(n)
-        else:
-            non_tire.append(n)
+# ------------------------------ Heuristics -----------------------------------
+def _heuristic_options_for_outdoor_long(pool: Dict[str, str]) -> List[str]:
+    picks = []
+    for name, blurb in pool.items():
+        lower = f"{name} {blurb}".lower()
+        if any(k in lower for k in [
+            "solid pneumatic", "pneumatic", "dual", "traction",
+            "work light", "led", "beacon",
+            "protection", "guard", "radiator", "screen", "belly pan",
+            "long fork", "fork length", "load backrest"
+        ]):
+            picks.append(name)
+    return sorted(set(picks), key=lambda k: _normalize(k))
 
-    if not tire_names:
-        return names
+def _heuristic_attachments_for_outdoor_long(pool: Dict[str, str]) -> List[str]:
+    picks = []
+    for name, blurb in pool.items():
+        lower = f"{name} {blurb}".lower()
+        if any(k in lower for k in [
+            "fork extension", "extension",            # long loads
+            "fork positioner", "positioner",          # mixed widths
+            "sideshift", "side shift", "sideshifter", # placement/aisle positioning
+            "load backrest", "lbr",                   # tall/long bundle support
+            "carpet pole", "ram", "pole"              # long round materials
+        ]):
+            picks.append(name)
+    return sorted(set(picks), key=lambda k: _normalize(k))
 
-    scored = sorted(
-        [(n, _score_tire(n, pool.get(n, ""), query)) for n in tire_names],
-        key=lambda x: x[1],
-        reverse=True
+# ------------------------------ List builders --------------------------------
+def _build_list(kind_name: str, names: List[str], d: Dict[str, str]) -> str:
+    header_html = f'<span class="section-label">{kind_name}:</span>'
+    if not names:
+        typename = kind_name.lower()
+        return (
+            f'{header_html}\n'
+            f'- No {typename} matched your scenario. '
+            f'Try asking more specifically (e.g., "{typename} for long loads", "{typename} for cold storage"), '
+            f'or say "all {typename}".'
+        )
+    # Plain names; no markdown emphasis
+    lines = [f"- {n} — {d.get(n, '') or '—'}" for n in names]
+    out = header_html + "\n" + "\n".join(lines)
+    return _strip_all_md_emphasis(out)
+
+def _detail_prompt(name: str, seed_blurb: str) -> str:
+    return (
+        "Give a concise deep-dive on this SINGLE item.\n"
+        "Use the exact headers below and bullet points. Do NOT use bold or italics.\n\n"
+        f"Item: {name}\n\n"
+        "Purpose:\n"
+        "- \n\n"
+        "Benefits:\n"
+        "- \n- \n- \n\n"
+        "When to use:\n"
+        "- \n- \n\n"
+        "Prerequisites/Valving:\n"
+        "- \n- \n\n"
+        "Compatibility/Capacity impacts:\n"
+        "- \n- \n\n"
+        "Trade-offs:\n"
+        "- \n- \n\n"
+        f"Helpful context: {seed_blurb}\n"
     )
-    keep = [n for n, _s in scored[:2]]  # top 1–2 tires
-    # Preserve original relative order for readability: non-tires first, then curated tires
-    final = non_tire + [n for n in names if n in keep]
-    # De-duplicate while preserving order
-    seen = set()
-    dedup = []
-    for n in final:
-        if n not in seen:
-            seen.add(n)
-            dedup.append(n)
-    return
+
+# ------------------------------- Public entry --------------------------------
+def respond_options_attachments(user_text: str) -> str:
+    if not (user_text or "").strip():
+        return "Ask about options, attachments, or a specific item (e.g., Fork Positioner)."
+
+    c = _classify(user_text)
+    intent = c.get("intent", "unknown")
+    item   = (c.get("item") or "").strip()
+
+    t = _normalize(user_text)
+    asked_all = any(w in t for w in [" all ", "catalog", "everything", "full list", "complete"])
+
+    # BOTH lists
+    if intent == "both_lists":
+        opt_pool = _merged_options()
+        att_pool = ATTACHMENTS
+
+        if asked_all:
+            opt_names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
+            att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
+        else:
+            # AI picks relevant items
+            opt_names = _select_relevant(opt_pool, "options (incl. tires)", user_text)
+            att_names = _select_relevant(att_pool, "attachments", user_text)
+
+            # Heuristic fallbacks for outdoor/long if nothing selected
+            pos, _neg = _scenario_hints(user_text)
+            if (("lumber" in user_text.lower()) or pos) and not opt_names:
+                opt_names = _heuristic_options_for_outdoor_long(opt_pool)
+            if (("lumber" in user_text.lower()) or pos) and not att_names:
+                att_names = _heuristic_attachments_for_outdoor_long(att_pool)
+
+            # Curate tires within options unless "all"
+            opt_names = _curate_tires(opt_names, opt_pool, user_text, list_all=False)
+
+        if not asked_all and not opt_names and not att_names:
+            return "Do you want both lists, or details on a specific item?"
+
+        parts = []
+        parts.append(_build_list("Options", opt_names, opt_pool))
+        parts.append(_build_list("Attachments", att_names, att_pool))
+        return "\n\n".join(parts)
+
+    # ALL for type(s)
+    if intent == "list_all":
+        if "option" in t and "attachment" in t:
+            opt_names = sorted(_merged_options().keys(), key=lambda k: _normalize(k))
+            att_names = sorted(ATTACHMENTS.keys(),       key=lambda k: _normalize(k))
+            out = _build_list("Options", opt_names, _merged_options()) + "\n\n" + _build_list("Attachments", att_names, ATTACHMENTS)
+            return _strip_all_md_emphasis(out)
+        if "option" in t:
+            names = sorted(_merged_options().keys(), key=lambda k: _normalize(k))
+            return _build_list("Options", names, _merged_options())
+        if "attachment" in t or "catalog" in t or "everything" in t:
+            names = sorted(ATTACHMENTS.keys(), key=lambda k: _normalize(k))
+            return _build_list("Attachments", names, ATTACHMENTS)
+        return "Do you want all options, all attachments, or both?"
+
+    # Options-only
+    if intent == "list_options":
+        pool = _merged_options()
+        names = sorted(pool.keys(), key=lambda k: _normalize(k)) if asked_all else _select_relevant(pool, "options (incl. tires)", user_text)
+        if not asked_all:
+            names = _curate_tires(names, pool, user_text, list_all=False)
+        return _build_list("Options", names, pool)
+
+    # Attachments-only
+    if intent == "list_attachments":
+        pool = ATTACHMENTS
+        names = sorted(pool.keys(), key=lambda k: _normalize(k)) if asked_all else _select_relevant(pool, "attachments", user_text)
+        return _build_list("Attachments", names, pool)
+
+    # Single item deep dive
+    if intent == "detail_item":
+        kind, key, blurb = fuzzy_lookup(item or user_text)
+        if not key:
+            return "Which specific item do you mean (e.g., Fork Positioner, Sideshifter, Paper Roll Clamp)?"
+        try:
+            content = _llm(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": _detail_prompt(key, blurb)},
+                ],
+                model=MODEL_RESPONDER,
+                temperature=0.2,
+            )
+            content = _strip_md_bold_headers(content)
+            content = _decorate_headers(content, title=f"{key} — Deep Dive")
+            return _strip_all_md_emphasis(content)
+        except Exception:
+            # Friendly fallback if model hiccups
+            fallback = (
+                "Purpose:\n"
+                f"- {blurb or 'Attachment/option for specialized handling.'}\n\n"
+                "Benefits:\n"
+                "- Faster handling.\n- Safer adjustments.\n- Better load fit.\n\n"
+                "When to use:\n"
+                "- Mixed load profiles or frequent changes.\n\n"
+                "Prerequisites/Valving:\n"
+                "- May require 3rd/4th hydraulic function.\n\n"
+                "Compatibility/Capacity impacts:\n"
+                "- Minor capacity derate; verify on data plate.\n\n"
+                "Trade-offs:\n"
+                "- Higher upfront cost and modest maintenance."
+            )
+            fallback = _decorate_headers(fallback, title=f"{key} — Deep Dive")
+            return _strip_all_md_emphasis(fallback)
+
+    # Clarifiers
+    if "attachment" in t and "option" in t:
+        return "Do you want both lists, or details on a specific item?"
+    if "attachment" in t:
+        return "Do you want a list of attachments or details on a specific attachment?"
+    if "option" in t:
+        return "Do you want a list of options or details on a specific option?"
+    return "Do you want options, attachments, or details on a specific item (e.g., Fork Positioner)?"
