@@ -360,9 +360,24 @@ def _classify_llm(user_text: str) -> Dict[str, str]:
             "item":   str(data.get("item", "") or "")}
 
 # ----------------------- LOOP-PROOF robust classifier ------------------------
+def _is_short_reply(text: str) -> str:
+    t = _normalize(text)
+    shorts = {
+        "both": "both_lists",
+        "both list": "both_lists",
+        "both lists": "both_lists",
+        "options": "list_options",
+        "options only": "list_options",
+        "attachments": "list_attachments",
+        "attachments only": "list_attachments",
+        "specific item": "detail_item",
+        "detail": "detail_item",
+    }
+    return shorts.get(t, "")
+
 def _classify(user_text: str) -> Dict[str, str]:
     """
-    Typo-tolerant + environment-aware classifier that avoids loops.
+    Typo/short-reply tolerant + environment-aware classifier that avoids loops.
     - 'both', 'both list(s)', 'bith', 'both please', 'options and attachments' => both_lists
     - 'options only', 'just options', 'show options' => list_options
     - 'attachments only', 'just attachments', 'show attachments' => list_attachments
@@ -374,8 +389,14 @@ def _classify(user_text: str) -> Dict[str, str]:
     t = f" {t_raw.lower()} "
     t_norm = _normalize(t_raw)
 
-    # 1) direct short answers to a clarifier
-    if re.search(r"\bboth( lists?)?\b", t) or " bith " in t or " bothlist " in t or " bothlists " in t or " options and attachments " in t or " attachments and options " in t:
+    # 0) exact short replies (no clarifier loops)
+    sr = _is_short_reply(t_raw)
+    if sr:
+        return {"intent": sr, "item": ""}
+
+    # 1) direct short answers to a clarifier (typo-friendly)
+    if re.search(r"\bboth( lists?)?\b", t) or " bith " in t or " bothlist " in t or " bothlists " in t \
+       or " options and attachments " in t or " attachments and options " in t:
         return {"intent":"both_lists","item":""}
     if re.search(r"\boptions( only)?\b", t) or " just options " in t or " show options " in t:
         return {"intent":"list_options","item":""}
@@ -574,8 +595,50 @@ def respond_options_attachments(user_text: str) -> str:
             opt_names = _curate_tires(opt_names, opt_pool, cues, list_all=False)
 
             if not opt_names and not att_names:
-                # Single clarifier (no loop): choose one of three
-                return 'Do you want options, attachments, or both lists? (e.g., "options only", "attachments only", "both lists")'
+                # HARD FALLBACK: build sensible environment-aware defaults from the Excel catalogs
+                def pick_where(pool: Dict[str, str], keywords: List[str], limit: int) -> List[str]:
+                    out = []
+                    for name, blurb in pool.items():
+                        s = f"{name} {blurb}".lower()
+                        if any(k in s for k in keywords):
+                            out.append(name)
+                    seen, uniq = set(), []
+                    for n in out:
+                        if n not in seen:
+                            seen.add(n)
+                            uniq.append(n)
+                    return uniq[:limit]
+
+                # If pedestrians/indoor are present, emphasize visibility & operator-assist
+                if cues.get("indoor") or cues.get("pedestrians"):
+                    opt_keywords = [
+                        "camera", "rear camera", "backup radar", "radar", "proximity", "collision",
+                        "ops", "operator presence", "speed control", "speed limiter", "finger control", "fine control",
+                        "blue light", "blue spot", "beacon", "horn", "backup handle", "mirror", "led",
+                        "non-marking", "cushion"
+                    ]
+                    att_keywords = [
+                        "sideshift", "side shift", "sideshifter",
+                        "positioner", "fork positioner",
+                        "load backrest"
+                    ]
+                else:
+                    # Generic fallback keywords
+                    opt_keywords = ["led", "beacon", "mirror", "camera", "radar", "guard", "belly", "non-marking", "pneumatic", "cushion"]
+                    att_keywords = ["sideshift", "positioner", "clamp", "extension", "load backrest", "carpet pole", "ram", "pole"]
+
+                opt_names = pick_where(opt_pool, opt_keywords, limit=8)
+                att_names = pick_where(att_pool, att_keywords, limit=5)
+
+                # Curate tires within the option picks
+                opt_names = _curate_tires(opt_names, opt_pool, cues, list_all=False)
+
+                # If STILL empty, return a finished response (no more clarifiers)
+                if not opt_names and not att_names:
+                    parts = []
+                    parts.append(_build_list("Options", [], opt_pool))
+                    parts.append(_build_list("Attachments", [], att_pool))
+                    return "\n\n".join(parts)
 
         parts = []
         parts.append(_build_list("Options", opt_names, opt_pool))
@@ -611,6 +674,7 @@ def respond_options_attachments(user_text: str) -> str:
             names = _llm_pick_from(pref, opt_pool, "options (incl. tires)", user_text)
             names = _curate_tires(names, opt_pool, cues, list_all=False)
             if not names:
+                # Don't loop—offer a direct path, but still answer if user replies shortly
                 return 'Want me to include attachments too, or show all options? (say "both lists" or "all options")'
         return _build_list("Options", names, opt_pool)
 
