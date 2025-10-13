@@ -1,13 +1,14 @@
 # options_attachments_router.py
-# Excel-backed, AI-selected router for "Options & Attachments":
+# Excel-backed, AI-selected router for "Options & Attachments"
 # - Lists ONLY options when asked for options
 # - Lists ONLY attachments when asked for attachments
 # - "attachments and options" can include tires (if loaded) when relevant
 # - Deep-dive when a single item is named
 # - Uses AI to SELECT relevant items from your Excel catalogs by general forklift knowledge
 # - NEVER invents items not present in your catalogs
-# - NO list-size cap: returns all items the AI deems relevant
-# - Styles headers via <span class="section-label">…</span>, keeps other **bold** intact
+# - NO list-size cap
+# - Strips all markdown emphasis (** __ *) from responses
+# - Styles headers via <span class="section-label">…</span>
 
 import os
 import re
@@ -19,7 +20,7 @@ from openai import OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL_CLASSIFIER = os.getenv("OA_CLASSIFIER_MODEL", "gpt-4o-mini")
 MODEL_RESPONDER  = os.getenv("OA_RESPONDER_MODEL",  "gpt-4o-mini")
-MODEL_SELECTOR   = os.getenv("OA_SELECTOR_MODEL",   "gpt-4o-mini")  # used to pick relevant items from your catalog
+MODEL_SELECTOR   = os.getenv("OA_SELECTOR_MODEL",   "gpt-4o-mini")
 
 # ----------------------- Excel-backed loaders (ai_logic) ---------------------
 # Required: load_options()
@@ -63,9 +64,9 @@ FALLBACK_ATTACHMENTS = {
     "Carpet Pole":            "Ram/pole for carpet, coils, and tubing.",
 }
 FALLBACK_TIRES = {
-    "Non-Marking Tires":  "Prevents scuffing on indoor finished floors.",
+    "Non-Marking Tires":    "Prevents scuffing on indoor finished floors.",
     "Dual Pneumatic Tires": "Wider footprint and flotation on soft ground.",
-    "Solid Pneumatic Tires": "Puncture resistance in debris-prone areas.",
+    "Solid Pneumatic Tires":"Puncture resistance in debris-prone areas.",
 }
 
 # ------------------------------ Catalog hydrate ------------------------------
@@ -123,10 +124,8 @@ def _hydrate_catalogs() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]
 
 OPTIONS, ATTACHMENTS, TIRES = _hydrate_catalogs()
 
-# Consolidated options pool (options + tires)
 def _merged_options() -> Dict[str, str]:
     merged = dict(OPTIONS)
-    # Avoid duplicate keys; TIRES may contain names already present
     for k, v in TIRES.items():
         if k not in merged:
             merged[k] = v
@@ -185,20 +184,45 @@ CLASSIFIER_INSTRUCTION = (
     "User: {user_text}\n"
 )
 
+# Scenario profiles: positive/negative hints to steer selection
+_SCENARIO_PROFILES = {
+    # Outdoor + long bundles (e.g., lumber yards)
+    "lumber": {
+        "positive": [
+            "pneumatic", "solid pneumatic", "dual tire", "dual", "traction",
+            "outdoor", "rough terrain", "debris", "puncture",
+            "visibility", "work light", "led", "beacon",
+            "protection", "guard", "radiator screen", "belly pan",
+            "long fork", "fork length", "load backrest"
+        ],
+        "avoid": [
+            "cold storage", "freezer", "non-marking", "indoor only", "paper roll"
+        ],
+    },
+    # Extend with more scenarios if you want (cold storage, foundry, ports, etc.)
+}
+
+def _scenario_hints(query: str):
+    q = (query or "").lower()
+    for key, profile in _SCENARIO_PROFILES.items():
+        if key in q:
+            return profile.get("positive", []), profile.get("avoid", [])
+    return [], []
+
 # Selector prompt: pick relevant items ONLY from provided candidates
 SELECTOR_INSTRUCTION = (
     "You are selecting relevant forklift {kind} for the user's scenario.\n"
     "You can ONLY choose items from the CANDIDATES list provided. Do NOT invent anything.\n"
-    "Pick items that would practically help, using general forklift knowledge (industry context, environment, load type).\n"
-    "Return JSON only with exact names from the candidates: {{\"items\": [\"Name 1\", \"Name 2\", ...]}}\n"
-    "If nothing is relevant, return {{\"items\": []}}.\n"
+    "Use general forklift knowledge and the provided HINTS to select items that best fit.\n"
+    "Prefer items matching POSITIVE keywords; avoid items matching AVOID keywords.\n"
+    "Return JSON only with exact names from the candidates: {\"items\": [\"Name 1\", \"Name 2\", ...]}\n"
+    "If nothing is relevant, return {\"items\": []}.\n"
     "\nUSER SCENARIO:\n{query}\n"
+    "\nHINTS:\nPOSITIVE: {pos}\nAVOID: {neg}\n"
     "\nCANDIDATES ({count}):\n{candidates}\n"
 )
 
 def _format_candidates(d: Dict[str, str]) -> str:
-    # Compact, name-first lines so the model can anchor on names; blurbs help context.
-    # We deliberately keep it simple to reduce tokens.
     lines = []
     for name, blurb in d.items():
         if blurb:
@@ -243,18 +267,23 @@ def _classify(user_text: str) -> Dict[str, str]:
 def _select_relevant(d: Dict[str, str], kind: str, query: str) -> List[str]:
     """
     Ask the model to pick relevant item names from dict d for the given query.
-    Returns a list of names that MUST be subset of d.keys(). If parsing fails,
-    return [] (caller will ask a clarifier).
+    Returns a list of names that MUST be subset of d.keys().
     """
     if not d:
         return []
     candidates_text = _format_candidates(d)
+    pos, neg = _scenario_hints(query)
     try:
         out = _llm(
             [
                 {"role":"system","content":"Return JSON only. No explanations."},
                 {"role":"user","content": SELECTOR_INSTRUCTION.format(
-                    kind=kind, query=query, count=len(d), candidates=candidates_text
+                    kind=kind,
+                    query=query,
+                    pos=", ".join(pos) or "(none)",
+                    neg=", ".join(neg) or "(none)",
+                    count=len(d),
+                    candidates=candidates_text
                 )},
             ],
             model=MODEL_SELECTOR,
@@ -281,10 +310,23 @@ _HEADER_MAP = {
 _HEADER_PATTERN = re.compile(
     r'(?im)^(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*$'
 )
+
+# Strip bold/italics markers (**, __, *) anywhere in the final text
+_MD_EMPH_ALL = re.compile(r"(\*\*|__|\*)(.*?)\1")
+
+def _strip_all_md_emphasis(text: str) -> str:
+    if not text:
+        return text
+    # Remove any paired emphasis markers
+    s = re.sub(_MD_EMPH_ALL, r"\2", text)
+    # Also clean stray single asterisks/underscores around words
+    s = re.sub(r"(?<!\S)[*_]+|[*_]+(?!\S)", "", s)
+    return s
+
+# Strip **/__ around deep-dive headers specifically (before decorating)
 _MD_BOLD_HEADERS = re.compile(
     r'(?im)^\s*[*_]{1,3}\s*(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*[*_]{1,3}\s*$'
 )
-
 def _strip_md_bold_headers(text: str) -> str:
     if not text:
         return text
@@ -312,17 +354,19 @@ def _build_list(kind_name: str, names: List[str], d: Dict[str, str]) -> str:
         return (
             f'{header_html}\n'
             f'- No {typename} matched your scenario. '
-            f'Try asking more specifically (e.g., “{typename} for long loads”, “{typename} for cold storage”), '
-            f'or say “all {typename}”.'
+            f'Try asking more specifically (e.g., "{typename} for long loads", "{typename} for cold storage"), '
+            f'or say "all {typename}".'
         )
-    lines = [f"- **{n}** — {d.get(n, '') or '—'}" for n in names]
-    return header_html + "\n" + "\n".join(lines)
+    # IMPORTANT: no ** around names; keep it plain
+    lines = [f"- {n} — {d.get(n, '') or '—'}" for n in names]
+    out = header_html + "\n" + "\n".join(lines)
+    return _strip_all_md_emphasis(out)
 
 def _detail_prompt(name: str, seed_blurb: str) -> str:
-    # Ask the model for plain headers (no bold). We'll style them ourselves.
+    # Ask the model for plain headers (no bold/italics). We'll style headers, not content.
     return (
         "Give a concise deep-dive on this SINGLE item.\n"
-        "Use the exact headers below and bullet points. Do NOT use bold/italics.\n\n"
+        "Use the exact headers below and bullet points. Do NOT use bold or italics.\n\n"
         f"Item: {name}\n\n"
         "Purpose:\n"
         "- \n\n"
@@ -342,7 +386,7 @@ def _detail_prompt(name: str, seed_blurb: str) -> str:
 # ------------------------------- Public entry --------------------------------
 def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
-        return "Ask about **options**, **attachments**, or a **specific item** (e.g., Fork Positioner)."
+        return "Ask about options, attachments, or a specific item (e.g., Fork Positioner)."
 
     c = _classify(user_text)
     intent = c.get("intent", "unknown")
@@ -353,16 +397,23 @@ def respond_options_attachments(user_text: str) -> str:
 
     # BOTH lists
     if intent == "both_lists":
-        # Use AI selector to choose relevant items from each catalog
         opt_pool = _merged_options()
         att_pool = ATTACHMENTS
 
-        opt_names = sorted(opt_pool.keys(), key=lambda k: _normalize(k)) if asked_all else _select_relevant(opt_pool, "options (incl. tires)", user_text)
-        att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k)) if asked_all else _select_relevant(att_pool, "attachments", user_text)
+        if asked_all:
+            opt_names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
+            att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
+        else:
+            opt_names = _select_relevant(opt_pool, "options (incl. tires)", user_text)
+            att_names = _select_relevant(att_pool, "attachments", user_text)
 
-        # If the selector finds nothing for both, ask a single clarifier
+            # Heuristic fallback for outdoor/long scenarios if no options picked
+            pos, _neg = _scenario_hints(user_text)
+            if (("lumber" in user_text.lower()) or pos) and not opt_names:
+                opt_names = _heuristic_options_for_outdoor_long(opt_pool)
+
         if not asked_all and not opt_names and not att_names:
-            return "Do you want **all options**, **all attachments**, or details on a **specific item**?"
+            return "Do you want all options, all attachments, or details on a specific item?"
 
         parts = []
         parts.append(_build_list("Options", opt_names, opt_pool))
@@ -374,14 +425,15 @@ def respond_options_attachments(user_text: str) -> str:
         if "option" in t and "attachment" in t:
             opt_names = sorted(_merged_options().keys(), key=lambda k: _normalize(k))
             att_names = sorted(ATTACHMENTS.keys(),       key=lambda k: _normalize(k))
-            return _build_list("Options", opt_names, _merged_options()) + "\n\n" + _build_list("Attachments", att_names, ATTACHMENTS)
+            out = _build_list("Options", opt_names, _merged_options()) + "\n\n" + _build_list("Attachments", att_names, ATTACHMENTS)
+            return _strip_all_md_emphasis(out)
         if "option" in t:
             names = sorted(_merged_options().keys(), key=lambda k: _normalize(k))
             return _build_list("Options", names, _merged_options())
         if "attachment" in t or "catalog" in t or "everything" in t:
             names = sorted(ATTACHMENTS.keys(), key=lambda k: _normalize(k))
             return _build_list("Attachments", names, ATTACHMENTS)
-        return "Do you want **all options**, **all attachments**, or **both**?"
+        return "Do you want all options, all attachments, or both?"
 
     # Options-only
     if intent == "list_options":
@@ -409,8 +461,9 @@ def respond_options_attachments(user_text: str) -> str:
                 model=MODEL_RESPONDER,
                 temperature=0.2,
             )
-            content = _strip_md_bold_headers(content)  # only strips ** around section headers
-            return _decorate_headers(content, title=f"{key} — Deep Dive")
+            content = _strip_md_bold_headers(content)
+            content = _decorate_headers(content, title=f"{key} — Deep Dive")
+            return _strip_all_md_emphasis(content)
         except Exception:
             # Friendly fallback if model hiccups
             fallback = (
@@ -427,13 +480,32 @@ def respond_options_attachments(user_text: str) -> str:
                 "Trade-offs:\n"
                 "- Higher upfront cost and modest maintenance."
             )
-            return _decorate_headers(fallback, title=f"{key} — Deep Dive")
+            fallback = _decorate_headers(fallback, title=f"{key} — Deep Dive")
+            return _strip_all_md_emphasis(fallback)
 
     # Clarifiers
     if "attachment" in t and "option" in t:
-        return "Do you want **both lists**, or details on a **specific item**?"
+        return "Do you want both lists, or details on a specific item?"
     if "attachment" in t:
-        return "Do you want a **list of attachments** or details on a **specific attachment**?"
+        return "Do you want a list of attachments or details on a specific attachment?"
     if "option" in t:
-        return "Do you want a **list of options** or details on a **specific option**?"
-    return "Do you want **options**, **attachments**, or details on a specific item (e.g., Fork Positioner)?"
+        return "Do you want a list of options or details on a specific option?"
+    return "Do you want options, attachments, or details on a specific item (e.g., Fork Positioner)?"
+
+# ------------------- Heuristic fallback: outdoor/long loads -------------------
+def _heuristic_options_for_outdoor_long(pool: Dict[str, str]) -> List[str]:
+    """
+    If the selector returns nothing for outdoor/long-load scenarios (e.g., 'lumber'),
+    pick common-sense options from the actual catalog names/blurbs.
+    """
+    picks = []
+    for name, blurb in pool.items():
+        lower = f"{name} {blurb}".lower()
+        if any(k in lower for k in [
+            "pneumatic", "solid pneumatic", "dual", "traction",
+            "work light", "led", "beacon",
+            "protection", "guard", "radiator", "screen", "belly pan",
+            "long fork", "fork length", "load backrest"
+        ]):
+            picks.append(name)
+    return sorted(set(picks), key=lambda k: _normalize(k))
