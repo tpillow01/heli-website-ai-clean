@@ -5,6 +5,8 @@
 # - Deep-dive when a single item is named
 # - "attachments and options" prints both (short lists unless "all" is requested)
 # - Loads full catalogs from ai_logic loaders (Excel-backed), with safe fallbacks
+# - Filters list results to match user keywords (unless "all" is requested)
+# - Styles headers with <span class="section-label">…</span>, keeps other **bold** intact
 
 import os
 import re
@@ -38,9 +40,9 @@ except Exception:
 # Fallbacks (used only if loaders are missing or fail)
 # ------------------------------------------------------------
 FALLBACK_OPTIONS = {
-    "3 valve with handle": "Adds a third hydraulic circuit to power basic attachments.",
-    "4 valve with handle": "Two auxiliary circuits for multi-function attachments.",
-    "5 valve with handle": "Additional hydraulic circuits for complex attachments.",
+    "3 Valve with Handle": "Adds a third hydraulic circuit to power basic attachments.",
+    "4 Valve with Handle": "Two auxiliary circuits for multi-function attachments.",
+    "5 Valve with Handle": "Additional hydraulic circuits for complex attachments.",
     "Non-Marking Tires":  "Prevents scuffing on indoor finished floors.",
     "Dual Tires":         "Wider footprint for stability on soft or uneven ground.",
     "Dual Solid Tires":   "Puncture-resistant and stable in debris-prone areas.",
@@ -134,7 +136,7 @@ def fuzzy_lookup(item: str) -> Tuple[str, str, str]:
         k = next((kk for kk in ATTACHMENTS.keys() if "side" in _normalize(kk) and "shift" in _normalize(kk)), "Sideshifter")
         return ("attachment", k, ATTACHMENTS.get(k, ""))
     if "valve" in n or "aux" in n:
-        k = next((kk for kk in OPTIONS.keys() if "valve" in _normalize(kk)), "3 valve with handle")
+        k = next((kk for kk in OPTIONS.keys() if "valve" in _normalize(kk)), "3 Valve with Handle")
         return ("option", k, OPTIONS.get(k, ""))
 
     return ("", "", "")
@@ -203,7 +205,7 @@ def _classify(user_text: str) -> Dict[str, str]:
             return {"intent":"list_attachments","item":""}
         if "option" in t:
             return {"intent":"list_options","item":""}
-        if any(w in t for w in ["catalog","everything","all"]):
+        if any(w in t for w in ["catalog","everything","all","full list","complete"]):
             return {"intent":"list_all","item":""}
         return {"intent":"unknown","item":""}
 
@@ -222,6 +224,7 @@ _HEADER_PATTERN = re.compile(
     r'(?im)^(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*$'
 )
 
+# Strip ** or __ ONLY when used around the above headers (so your other **bold** stays intact)
 _MD_BOLD_HEADERS = re.compile(
     r'(?im)^\s*[*_]{1,3}\s*(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*[*_]{1,3}\s*$'
 )
@@ -245,11 +248,53 @@ def _decorate_headers(text: str, title: str = "") -> str:
     s = _HEADER_PATTERN.sub(repl, s)
     return s
 
-def _build_list_from_dict(kind_name: str, d: Dict[str, str], list_all: bool) -> str:
+# ------------------------------------------------------------
+# Keyword filtering for list results
+# ------------------------------------------------------------
+_STOPWORDS = {
+    "the","a","an","for","to","of","and","or","me","show","list","give","all",
+    "everything","full","complete","what","do","you","have","options","option",
+    "attachment","attachments","can","i","add","my","on","in"
+}
+
+def _keywords(text: str) -> List[str]:
+    words = re.findall(r"[a-z0-9\-]+", (text or "").lower())
+    return [w for w in words if w not in _STOPWORDS]
+
+def _filter_catalog(d: Dict[str, str], query: str) -> List[Tuple[str, str]]:
+    """
+    Returns a filtered list of (name, blurb) pairs from the given catalog
+    that contain at least one keyword from the query in either name or blurb.
+    If no matches, returns [].
+    """
+    kws = _keywords(query)
+    if not kws:
+        return []
+    hits: List[Tuple[str, str]] = []
+    for name, blurb in d.items():
+        hay = f"{name} {blurb}".lower()
+        if any(k in hay for k in kws):
+            hits.append((name, blurb))
+    return hits
+
+def _build_list_from_dict(kind_name: str, d: Dict[str, str], list_all: bool, query: str) -> str:
     header_html = f'<span class="section-label">{kind_name}:</span>'
-    items = sorted(d.items(), key=lambda kv: _normalize(kv[0]))
-    if not list_all:
-        items = items[:12]  # short list unless explicitly asked for "all"
+
+    # If user asked for ALL, skip filtering and show everything (sorted)
+    if list_all:
+        items = sorted(d.items(), key=lambda kv: _normalize(kv[0]))
+        lines = [f"- {name} — {blurb or '—'}" for name, blurb in items]
+        return header_html + "\n" + "\n".join(lines)
+
+    # Otherwise, try to filter by their words (e.g., "cold storage", "paper rolls")
+    filtered = _filter_catalog(d, query)
+
+    if filtered:
+        items = sorted(filtered, key=lambda kv: _normalize(kv[0]))[:12]
+    else:
+        # No keyword match — fall back to a short, general list (still from catalog)
+        items = sorted(d.items(), key=lambda kv: _normalize(kv[0]))[:12]
+
     lines = [f"- {name} — {blurb or '—'}" for name, blurb in items]
     return header_html + "\n" + "\n".join(lines)
 
@@ -291,31 +336,31 @@ def respond_options_attachments(user_text: str) -> str:
     # BOTH lists (short unless explicitly "all")
     if intent == "both_lists":
         parts = []
-        parts.append(_build_list_from_dict("Options", OPTIONS, list_all=asked_all))
-        parts.append(_build_list_from_dict("Attachments", ATTACHMENTS, list_all=asked_all))
+        parts.append(_build_list_from_dict("Options", OPTIONS, list_all=asked_all, query=user_text))
+        parts.append(_build_list_from_dict("Attachments", ATTACHMENTS, list_all=asked_all, query=user_text))
         return "\n\n".join(parts)
 
-    # Explicit "all" for one type
+    # Explicit "all" for one/both types
     if intent == "list_all":
         if "option" in t and "attachment" in t:
             return (
-                _build_list_from_dict("Options", OPTIONS, list_all=True) + "\n\n" +
-                _build_list_from_dict("Attachments", ATTACHMENTS, list_all=True)
+                _build_list_from_dict("Options", OPTIONS, list_all=True, query=user_text) + "\n\n" +
+                _build_list_from_dict("Attachments", ATTACHMENTS, list_all=True, query=user_text)
             )
         if "option" in t:
-            return _build_list_from_dict("Options", OPTIONS, list_all=True)
+            return _build_list_from_dict("Options", OPTIONS, list_all=True, query=user_text)
         if "attachment" in t or "catalog" in t or "everything" in t:
-            return _build_list_from_dict("Attachments", ATTACHMENTS, list_all=True)
+            return _build_list_from_dict("Attachments", ATTACHMENTS, list_all=True, query=user_text)
         # ambiguous "all"
         return "Do you want **all options**, **all attachments**, or **both**?"
 
     # Options-only list
     if intent == "list_options":
-        return _build_list_from_dict("Options", OPTIONS, list_all=asked_all)
+        return _build_list_from_dict("Options", OPTIONS, list_all=asked_all, query=user_text)
 
     # Attachments-only list
     if intent == "list_attachments":
-        return _build_list_from_dict("Attachments", ATTACHMENTS, list_all=asked_all)
+        return _build_list_from_dict("Attachments", ATTACHMENTS, list_all=asked_all, query=user_text)
 
     # Single item deep dive
     if intent == "detail_item":
@@ -331,8 +376,8 @@ def respond_options_attachments(user_text: str) -> str:
                 model=MODEL_RESPONDER,
                 temperature=0.2,
             )
-            content = _strip_md_bold_headers(content)
-            return _decorate_headers(content, title=f"{key} — Deep Dive")
+            content = _strip_md_bold_headers(content)  # only strips ** around the headers
+            return _decorate_headers(content, title=f"{key} — Deep Dive}")
         except Exception:
             # Friendly fallback if model hiccups
             fallback = (
@@ -349,7 +394,7 @@ def respond_options_attachments(user_text: str) -> str:
                 "Trade-offs:\n"
                 "- Higher upfront cost and modest maintenance."
             )
-            return _decorate_headers(fallback, title=f"{key} — Deep Dive")
+            return _decorate_headers(fallback, title=f"{key} — Deep Dive}")
 
     # Fallback clarifier
     if "attachment" in t and "option" in t:
