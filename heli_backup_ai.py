@@ -9,12 +9,19 @@ from flask import (
 )
 
 # Optional helpers for other features you already had
-from csv_locations import load_csv_locations, to_geojson  # ok if unused
+try:
+    from csv_locations import load_csv_locations, to_geojson  # ok if unused
+except Exception:
+    load_csv_locations = lambda: []  # fallback
+    to_geojson = lambda *args, **kwargs: {}
 
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 
+# ---------------------------------------------------------------------
 # Grounding helpers from your ai_logic.py
+# (⚠️ Do NOT import generate_catalog_mode_response to avoid ImportError)
+# ---------------------------------------------------------------------
 from ai_logic import (
     generate_forklift_context,
     select_models_for_question,
@@ -22,22 +29,34 @@ from ai_logic import (
     debug_parse_and_rank,          # keep this for your debug endpoint
     top_pick_meta,                 # promotions helper
     recommend_options_from_sheet,  # Excel-driven recs
-    # NEW: direct, no-followup catalog helpers
-    render_catalog_sections,
-    parse_catalog_intent,
-    # (Optional) keep if you still call it elsewhere
-    generate_catalog_mode_response,
+    render_catalog_sections,       # no-followup catalog renderer
+    parse_catalog_intent,          # intent helper
 )
 
+# ---------------------------------------------------------------------
 # Admin usage tracking (optional)
-from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+# ---------------------------------------------------------------------
+try:
+    from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+except Exception:
+    admin_bp = None
+    init_admin_usage = None
+    record_event = lambda *a, **k: None
+    log_model_usage = lambda *a, **k: None
 
-# Options & Attachments API (includes the new focused chat endpoint)
+# ---------------------------------------------------------------------
+# Options & Attachments API (includes the focused chat endpoints)
+# ---------------------------------------------------------------------
 from api_options import bp_options  # import ONCE
 
-# Promotions
-from promotions import promos_for_context, render_promo_lines
-
+# ---------------------------------------------------------------------
+# Promotions (optional)
+# ---------------------------------------------------------------------
+try:
+    from promotions import promos_for_context, render_promo_lines
+except Exception:
+    promos_for_context = lambda *a, **k: []
+    render_promo_lines = lambda *a, **k: []
 
 # -----------------------------------------------------------------------------
 # App init
@@ -45,24 +64,45 @@ from promotions import promos_for_context, render_promo_lines
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")  # set env in prod
 app.permanent_session_lifetime = timedelta(days=14)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1",
+)
 
-# -----------------------------------------------------------------------------
+# Healthcheck so Render stops 502 on cold starts
+@app.get("/healthz")
+def healthz():
+    return jsonify({"ok": True})
+
+# Basic index (serve template if present; otherwise plain OK)
+@app.get("/")
+def index():
+    try:
+        return render_template("index.html")
+    except Exception:
+        return "OK", 200
+
+# ---------------------------------------------------------------------
 # Blueprints
-# -----------------------------------------------------------------------------
-# Optional admin usage (enable if you actively track this)
-# init_admin_usage(app)
-# app.register_blueprint(admin_bp)
+# ---------------------------------------------------------------------
+if admin_bp and init_admin_usage:
+    try:
+        init_admin_usage(app)
+        app.register_blueprint(admin_bp)
+    except Exception:
+        pass
 
 # Register Options/Attachments endpoints:
 #   - GET  /api/options
 #   - POST /api/recommend
-#   - POST /api/options_attachments_chat   <-- focused chat behavior
+#   - POST /api/catalog_text
+#   - POST /api/options_attachments_chat   (legacy alias)
 app.register_blueprint(bp_options)
-
-# (rest of your routes and logic continue below…)
 
 # -------------------------------------------------------------------------
 # Data boot (safe if the CSV is missing — load_csv_locations should handle)
+# -------------------------------------------------------------------------
 try:
     locations_index = load_csv_locations()
     print(f"✅ Loaded {len(locations_index)} locations from customer_location.csv")
@@ -71,23 +111,9 @@ except Exception as e:
     print("⚠️ Could not load locations at startup:", e)
 
 # -------------------------------------------------------------------------
-# Flask & OpenAI client  (reuse the existing app; DO NOT create a new one)
-# You can override secrets via env without re-instantiating Flask.
-app.secret_key = os.getenv("SECRET_KEY", app.secret_key or "dev-insecure")
-app.permanent_session_lifetime = timedelta(days=7)
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=bool(os.getenv("SESSION_COOKIE_SECURE", "1") == "1"),
-)
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+# OpenAI client
 # -------------------------------------------------------------------------
-# Admin usage tracking bootstrap (creates DB + coarse per-request logging)
-# Enable only if you actually use the admin panel
-# init_admin_usage(app)
-# app.register_blueprint(admin_bp)  # /admin/login, /admin, /admin/usage.json
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ─────────────────────────────────────────────────────────────────────────
 # USERS DB (simple SQLite) + VISITS
@@ -910,7 +936,7 @@ def chat():
     if mode in ("attachments_options_catalog", "catalog", "attachments-catalog"):
         # Tweak max_per_section to tighten/expand the list length
         try:
-            text = generate_catalog_mode_response(user_q, max_per_section=6)
+            text = render_catalog_sections(user_q, max_per_section=6)
         except Exception as e:
             text = f"❌ Catalog error: {e}"
         return jsonify({"response": text})
