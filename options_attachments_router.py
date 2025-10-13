@@ -1,12 +1,16 @@
 # options_attachments_router.py
 # Environment-aware, Excel-grounded Options & Attachments router
-# Strategy:
-#   1) Semantic prefilter (OpenAI embeddings) over your Excel names/blurbs
-#   2) Auto cue extraction (indoor/outdoor, pedestrians, long loads, dust/debris, temp, precision)
-#   3) Light scoring nudges from cues (no giant hand lists)
-#   4) LLM final pick from candidates ONLY (never invents)
-#   5) Tire curation (top 1–2 unless "all")
-#   6) No markdown emphasis; HTML labels for section headers
+# Loop-proof clarifier logic:
+#  - Robust, typo-tolerant classifier
+#  - If user describes an environment (indoor/outdoor/etc.) but not a type, default to BOTH LISTS
+#  - Short replies to clarifiers (“both”, “options”, “attachments”, “specific item”) are handled directly
+# Selection pipeline:
+#  1) Semantic prefilter (embeddings) over Excel names/blurbs
+#  2) Auto environment cue extraction (indoor/outdoor/pedestrians/long loads/dust/cold/precision/wet)
+#  3) Light scoring nudges from cues (no giant hand lists)
+#  4) LLM final pick from candidates ONLY (never invents)
+#  5) Tire curation (top 1–2 unless "all")
+# Formatting: no markdown emphasis; section headers are HTML-styled
 
 import os
 import re
@@ -185,7 +189,6 @@ CLASSIFIER_INSTRUCTION = (
 )
 
 # ---------------------- Automatic environment cue extraction ------------------
-# (General forklift knowledge via keywords — broad, not exhaustive)
 _CUES = {
     "indoor":        ["indoor", "warehouse", "finished floor", "epoxy", "polished"],
     "outdoor":       ["outdoor", "yard", "rough", "gravel", "pothole", "construction", "lumber", "timber", "debris"],
@@ -196,7 +199,6 @@ _CUES = {
     "precision":     ["precision", "fine", "tight aisle", "narrow aisle", "delicate"],
     "wet":           ["wet", "washdown", "rain", "condensation"],
 }
-
 def _extract_cues(q: str) -> Dict[str, bool]:
     t = (q or "").lower()
     return {k: any(w in t for w in words) for k, words in _CUES.items()}
@@ -246,7 +248,11 @@ def _cue_score_nudge(name: str, blurb: str, cues: Dict[str, bool], kind: str) ->
 
     # Pedestrians — visibility & operator assistance
     if cues["pedestrians"]:
-        if any(k in s for k in ["blue light", "blue spot", "beacon", "horn", "backup handle", "mirror", "camera", "rear camera", "radar", "backup radar", "proximity", "collision", "ops", "operator presence", "speed control", "speed limiter", "finger control", "fine control"]):
+        if any(k in s for k in [
+            "blue light", "blue spot", "beacon", "horn", "backup handle", "mirror",
+            "camera", "rear camera", "radar", "backup radar", "proximity", "collision",
+            "ops", "operator presence", "speed control", "speed limiter", "finger control", "fine control"
+        ]):
             score += 3.0
 
     # Long loads — positioning & support
@@ -282,15 +288,12 @@ def _cue_score_nudge(name: str, blurb: str, cues: Dict[str, bool], kind: str) ->
     return score
 
 def _apply_cue_nudges(names: List[str], pool: Dict[str, str], cues: Dict[str, bool], kind: str, min_keep: int = 8) -> List[str]:
-    # Re-rank by small cue nudges; keep reasonably broad set
     scored = []
     for n in names:
         scored.append((n, _cue_score_nudge(n, pool.get(n, ""), cues, kind)))
     scored.sort(key=lambda x: (-x[1], _normalize(x[0])))
-    # keep all if few; otherwise keep boosted ones + some tail
     if len(scored) <= min_keep:
         return [n for n,_ in scored]
-    # take boosted (>0) plus top up to min_keep
     boosted = [n for n,s in scored if s > 0]
     if len(boosted) >= min_keep:
         return boosted[:min_keep]
@@ -306,7 +309,7 @@ def _is_tire(name: str, blurb: str = "") -> bool:
         "solid pneumatic", "non-marking", "dual"
     ])
 
-def _score_tire(name: str, blurb: str, query: str, cues: Dict[str, bool]) -> float:
+def _score_tire(name: str, blurb: str, cues: Dict[str, bool]) -> float:
     s = f"{name} {blurb}".lower()
     score = 0.0
     if cues["outdoor"]:
@@ -328,10 +331,10 @@ def _score_tire(name: str, blurb: str, query: str, cues: Dict[str, bool]) -> flo
 def _curate_tires(names: List[str], pool: Dict[str, str], cues: Dict[str, bool], list_all: bool) -> List[str]:
     if list_all:
         return names
-    tires = [(n, _score_tire(n, pool.get(n, ""), "", cues)) for n in names if _is_tire(n, pool.get(n, ""))]
+    tires = [(n, _score_tire(n, pool.get(n, ""), cues)) for n in names if _is_tire(n, pool.get(n, ""))]
     non_tires = [n for n in names if not _is_tire(n, pool.get(n, ""))]
     tires_sorted = [n for n, _ in sorted(tires, key=lambda x: (-x[1], _normalize(x[0])))]
-    top_tires = tires_sorted[:2]  # show only top 1–2
+    top_tires = tires_sorted[:2]
     return [n for n in names if n in non_tires or n in top_tires]
 
 # ------------------------------- LLM helpers ---------------------------------
@@ -343,27 +346,86 @@ def _llm(messages, model: str, temperature: float = 0.2) -> str:
     )
     return resp.choices[0].message.content
 
+def _classify_llm(user_text: str) -> Dict[str, str]:
+    out = _llm(
+        [
+            {"role": "system", "content": "Return JSON only. No prose."},
+            {"role": "user", "content": CLASSIFIER_INSTRUCTION.format(user_text=user_text)},
+        ],
+        model=MODEL_CLASSIFIER,
+        temperature=0.1,
+    )
+    data = json.loads(out)
+    return {"intent": str(data.get("intent", "unknown") or "unknown"),
+            "item":   str(data.get("item", "") or "")}
+
+# ----------------------- LOOP-PROOF robust classifier ------------------------
 def _classify(user_text: str) -> Dict[str, str]:
-    try:
-        out = _llm(
-            [
-                {"role": "system", "content": "Return JSON only. No prose."},
-                {"role": "user", "content": CLASSIFIER_INSTRUCTION.format(user_text=user_text)},
-            ],
-            model=MODEL_CLASSIFIER,
-            temperature=0.1,
-        )
-        data = json.loads(out)
-        return {"intent": str(data.get("intent", "unknown") or "unknown"),
-                "item":   str(data.get("item", "") or "")}
-    except Exception:
-        t = _normalize(user_text)
-        if "attachment" in t and "option" in t: return {"intent":"both_lists","item":""}
-        if "attachment" in t:                  return {"intent":"list_attachments","item":""}
-        if "option" in t:                      return {"intent":"list_options","item":""}
-        if any(w in t for w in ["catalog","everything","all","full list","complete"]):
+    """
+    Typo-tolerant + environment-aware classifier that avoids loops.
+    - 'both', 'both list(s)', 'bith', 'both please', 'options and attachments' => both_lists
+    - 'options only', 'just options', 'show options' => list_options
+    - 'attachments only', 'just attachments', 'show attachments' => list_attachments
+    - 'all', 'catalog', 'everything', 'full list', 'complete list' => list_all (for mentioned type, else both)
+    - If a known item name appears, => detail_item
+    - If the user describes an environment (indoor/outdoor/etc.) but not a type => both_lists
+    """
+    t_raw = (user_text or "").strip()
+    t = f" {t_raw.lower()} "
+    t_norm = _normalize(t_raw)
+
+    # 1) direct short answers to a clarifier
+    if re.search(r"\bboth( lists?)?\b", t) or " bith " in t or " bothlist " in t or " bothlists " in t or " options and attachments " in t or " attachments and options " in t:
+        return {"intent":"both_lists","item":""}
+    if re.search(r"\boptions( only)?\b", t) or " just options " in t or " show options " in t:
+        return {"intent":"list_options","item":""}
+    if re.search(r"\battachments( only)?\b", t) or " just attachments " in t or " show attachments " in t:
+        return {"intent":"list_attachments","item":""}
+    if re.search(r"\bspecific item\b", t) or re.search(r"\bdetail\b", t):
+        # Try to extract an item if present; else fallback handled by caller
+        k = fuzzy_lookup(t_raw)[1]
+        if k: return {"intent":"detail_item","item":k}
+
+    # 2) explicit ALL
+    if any(sig in t for sig in [" catalog", " everything", " all ", " full list", " complete list"]):
+        has_opt = " option" in t
+        has_att = " attachment" in t
+        if has_opt and has_att:
             return {"intent":"list_all","item":""}
-        return {"intent":"unknown","item":""}
+        if has_opt:
+            return {"intent":"list_all","item":"options"}
+        if has_att:
+            return {"intent":"list_all","item":"attachments"}
+        return {"intent":"list_all","item":""}
+
+    # 3) specific item heuristic
+    kind, key, _ = fuzzy_lookup(t_raw)
+    if key:
+        return {"intent":"detail_item","item":key}
+
+    # 4) explicit mentions
+    has_opt = " option" in t
+    has_att = " attachment" in t
+    if has_opt and has_att:
+        return {"intent":"both_lists","item":""}
+    if has_opt:
+        return {"intent":"list_options","item":""}
+    if has_att:
+        return {"intent":"list_attachments","item":""}
+
+    # 5) environment cues => default BOTH LISTS (prevents clarifier loops)
+    cues = _extract_cues(t_raw)
+    if any(cues.values()):
+        return {"intent":"both_lists","item":""}
+
+    # 6) fallback to LLM classifier once; if still unknown, default BOTH
+    try:
+        llm_guess = _classify_llm(t_raw)
+        if llm_guess.get("intent") and llm_guess["intent"] != "unknown":
+            return llm_guess
+    except Exception:
+        pass
+    return {"intent":"both_lists","item":""}
 
 # Final grounded selector (never invents names)
 _SELECTOR_INSTRUCTION = (
@@ -483,9 +545,9 @@ def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
         return "Ask about options, attachments, or a specific item (e.g., Fork Positioner)."
 
-    # Intent
+    # Intent (loop-proof)
     c = _classify(user_text)
-    intent = c.get("intent", "unknown")
+    intent = c.get("intent", "both_lists")  # defaulted to BOTH_LISTS already for safety
     item   = (c.get("item") or "").strip()
     t = _normalize(user_text)
     asked_all = any(w in t for w in [" all ", "catalog", "everything", "full list", "complete"])
@@ -495,29 +557,25 @@ def respond_options_attachments(user_text: str) -> str:
 
     # BOTH lists
     if intent == "both_lists":
+        cues = _extract_cues(user_text)
         if asked_all:
             opt_names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
             att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
         else:
-            # 1) Semantic prefilter (top-K) for each pool
-            cues = _extract_cues(user_text)
             opt_pref = _rank_semantic(opt_pool, user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
             att_pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
 
-            # 2) Cue nudges (environment, pedestrians, long loads, etc.)
             opt_pref = _apply_cue_nudges(opt_pref, opt_pool, cues, kind="options",     min_keep=10)
             att_pref = _apply_cue_nudges(att_pref, att_pool, cues, kind="attachments", min_keep=8)
 
-            # 3) Final LLM pick (from candidates ONLY)
             opt_names = _llm_pick_from(opt_pref, opt_pool, "options (incl. tires)", user_text)
             att_names = _llm_pick_from(att_pref, att_pool, "attachments", user_text)
 
-            # 4) Tire curation (unless "all")
             opt_names = _curate_tires(opt_names, opt_pool, cues, list_all=False)
 
-            # 5) If both empty, ask a clarifier
             if not opt_names and not att_names:
-                return "Do you want both lists, or details on a specific item?"
+                # Single clarifier (no loop): choose one of three
+                return 'Do you want options, attachments, or both lists? (e.g., "options only", "attachments only", "both lists")'
 
         parts = []
         parts.append(_build_list("Options", opt_names, opt_pool))
@@ -531,42 +589,53 @@ def respond_options_attachments(user_text: str) -> str:
             att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
             out = _build_list("Options", opt_names, opt_pool) + "\n\n" + _build_list("Attachments", att_names, att_pool)
             return _strip_all_md_emphasis(out)
-        if "option" in t:
+        if c.get("item") == "options" or "option" in t:
             names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
             return _build_list("Options", names, opt_pool)
-        if "attachment" in t or "catalog" in t or "everything" in t:
+        if c.get("item") == "attachments" or "attachment" in t:
             names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
             return _build_list("Attachments", names, att_pool)
-        return "Do you want all options, all attachments, or both?"
+        # default both
+        opt_names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
+        att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
+        return _build_list("Options", opt_names, opt_pool) + "\n\n" + _build_list("Attachments", att_names, att_pool)
 
     # Options-only
     if intent == "list_options":
+        cues = _extract_cues(user_text)
         if asked_all:
             names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
-            return _build_list("Options", names, opt_pool)
-        cues = _extract_cues(user_text)
-        pref = _rank_semantic(opt_pool, user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
-        pref = _apply_cue_nudges(pref, opt_pool, cues, kind="options", min_keep=10)
-        names = _llm_pick_from(pref, opt_pool, "options (incl. tires)", user_text)
-        names = _curate_tires(names, opt_pool, cues, list_all=False)
+        else:
+            pref = _rank_semantic(opt_pool, user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
+            pref = _apply_cue_nudges(pref, opt_pool, cues, kind="options", min_keep=10)
+            names = _llm_pick_from(pref, opt_pool, "options (incl. tires)", user_text)
+            names = _curate_tires(names, opt_pool, cues, list_all=False)
+            if not names:
+                return 'Want me to include attachments too, or show all options? (say "both lists" or "all options")'
         return _build_list("Options", names, opt_pool)
 
     # Attachments-only
     if intent == "list_attachments":
+        cues = _extract_cues(user_text)
         if asked_all:
             names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
-            return _build_list("Attachments", names, att_pool)
-        cues = _extract_cues(user_text)
-        pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
-        pref = _apply_cue_nudges(pref, att_pool, cues, kind="attachments", min_keep=8)
-        names = _llm_pick_from(pref, att_pool, "attachments", user_text)
+        else:
+            pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
+            pref = _apply_cue_nudges(pref, att_pool, cues, kind="attachments", min_keep=8)
+            names = _llm_pick_from(pref, att_pool, "attachments", user_text)
+            if not names:
+                return 'Want me to include options too, or show all attachments? (say "both lists" or "all attachments")'
         return _build_list("Attachments", names, att_pool)
 
     # Single item deep dive
     if intent == "detail_item":
-        kind, key, blurb = fuzzy_lookup(item or user_text)
+        # If classifier didn't extract an item but user wrote "specific item", try fuzzy
+        if not item:
+            kind, key, blurb = fuzzy_lookup(user_text)
+        else:
+            kind, key, blurb = fuzzy_lookup(item)
         if not key:
-            return "Which specific item do you mean (e.g., Fork Positioner, Sideshifter, Paper Roll Clamp)?"
+            return "Which item do you want details on? (e.g., Fork Positioner, Sideshifter)"
         try:
             content = _llm(
                 [
@@ -597,11 +666,9 @@ def respond_options_attachments(user_text: str) -> str:
             fallback = _decorate_headers(fallback, title=f"{key} — Deep Dive")
             return _strip_all_md_emphasis(fallback)
 
-    # Clarifiers
-    if "attachment" in t and "option" in t:
-        return "Do you want both lists, or details on a specific item?"
-    if "attachment" in t:
-        return "Do you want a list of attachments or details on a specific attachment?"
-    if "option" in t:
-        return "Do you want a list of options or details on a specific option?"
-    return "Do you want options, attachments, or details on a specific item (e.g., Fork Positioner)?"
+    # Absolute fallback (never loop): assume BOTH LISTS for described scenarios; else one clarifier
+    cues = _extract_cues(user_text)
+    if any(cues.values()):
+        # act as both_lists
+        return respond_options_attachments(user_text + " (both lists)")
+    return 'Do you want options, attachments, or both lists? (e.g., "options only", "attachments only", "both lists")'
