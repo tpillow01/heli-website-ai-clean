@@ -92,17 +92,16 @@ STRICT RULES:
 - Call out capacity/visibility/turning/maintenance impacts when relevant.
 """
 
-CLASSIFIER_INSTRUCTION = """Classify the user request for forklift options/attachments into exactly one of:
-- list_options
-- list_attachments
-- detail_item
-- list_all
-- unknown
-
-Return JSON only: {"intent":"...", "item": "<named item or ''>"}
-
-User: {user_text}
-"""
+CLASSIFIER_INSTRUCTION = (
+    "Classify the user request for forklift options/attachments into exactly one of:\n"
+    "- list_options\n"
+    "- list_attachments\n"
+    "- detail_item\n"
+    "- list_all\n"
+    "- unknown\n\n"
+    "Return JSON only: {{\"intent\":\"...\", \"item\": \"<named item or ''>\"}}\n\n"
+    "User: {user_text}\n"
+)
 
 def _llm(messages, model="gpt-5.1-mini", temperature=0.2) -> str:
     return client.chat.completions.create(
