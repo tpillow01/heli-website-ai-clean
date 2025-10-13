@@ -4,6 +4,7 @@
 # - Lists ONLY attachments when asked for attachments
 # - Deep-dive when a single item is named
 # - Never dumps the full catalog unless explicitly asked
+# - Formats section headers with <span class="section-label">…</span> to match site styling
 
 import os
 import re
@@ -132,10 +133,6 @@ CLASSIFIER_INSTRUCTION = (
 # LLM helper
 # ---------------------------------------------------------------------
 def _llm(messages, model: str, temperature: float = 0.2) -> str:
-    """
-    Wrap OpenAI call with minimal error protection.
-    On error, raise so callers can decide fallback behavior.
-    """
     resp = client.chat.completions.create(
         model=model,
         temperature=temperature,
@@ -170,30 +167,69 @@ def _classify(user_text: str) -> Dict[str, str]:
 # ---------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------
+# Map of plain headers -> HTML-decorated headers that your CSS styles (bold + dark red)
+_HEADER_MAP = {
+    "Purpose:":                       '<span class="section-label">Purpose:</span>',
+    "Benefits:":                      '<span class="section-label">Benefits:</span>',
+    "When to use:":                   '<span class="section-label">When to use:</span>',
+    "Prerequisites/Valving:":         '<span class="section-label">Prerequisites/Valving:</span>',
+    "Compatibility/Capacity impacts:":'<span class="section-label">Compatibility/Capacity impacts:</span>',
+    "Trade-offs:":                    '<span class="section-label">Trade-offs:</span>',
+}
+
+_HEADER_PATTERN = re.compile(
+    r'(?im)^(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*$'
+)
+
+def _decorate_headers(text: str, title: str = "") -> str:
+    """Wrap known headers with <span class="section-label"> and optionally add a title line."""
+    if not text:
+        return text
+    # Ensure consistent line breaks
+    s = text.replace('\r\n', '\n').replace('\r', '\n').strip()
+    # Inject title at top if provided
+    if title:
+        s = f'<span class="section-label">{title}</span>\n{s}'
+    # Replace headers
+    def repl(m):
+        hdr = m.group(1)
+        return _HEADER_MAP.get(hdr, hdr)
+    s = _HEADER_PATTERN.sub(repl, s)
+    return s
+
 def _build_list(kind: str, list_all: bool = False) -> str:
     if kind == "options":
         items = list(OPTIONS.items())
-        header = "Options you can add:"
+        header_html = '<span class="section-label">Options:</span>'
     else:
         items = list(ATTACHMENTS.items())
-        header = "Attachments you can use:"
+        header_html = '<span class="section-label">Attachments:</span>'
 
     if not list_all:
         items = items[:10]  # sensible default slice
 
-    lines = [f"- **{name}** — {blurb or '—'}" for name, blurb in items]
-    return header + "\n" + "\n".join(lines)
+    lines = [f"- {name} — {blurb or '—'}" for name, blurb in items]
+    return header_html + "\n" + "\n".join(lines)
 
 def _detail_prompt(name: str, seed_blurb: str) -> str:
+    # Ask the model to use our exact plain-text headers; we’ll decorate after.
     return (
-        f"Give a concise deep-dive on **{name}** ONLY.\n"
-        f"Seed context: {seed_blurb}\n\n"
-        "- Purpose:\n"
-        "- Benefits:\n"
-        "- When to use:\n"
-        "- Prerequisites/Valving:\n"
-        "- Compatibility/Capacity impacts:\n"
-        "- Trade-offs:\n"
+        "Give a concise deep-dive on this SINGLE item.\n"
+        "Use the exact headers below and bullet points. Keep it brief.\n\n"
+        f"Item: {name}\n\n"
+        "Purpose:\n"
+        "- \n\n"
+        "Benefits:\n"
+        "- \n- \n- \n\n"
+        "When to use:\n"
+        "- \n- \n\n"
+        "Prerequisites/Valving:\n"
+        "- \n- \n\n"
+        "Compatibility/Capacity impacts:\n"
+        "- \n- \n\n"
+        "Trade-offs:\n"
+        "- \n- \n\n"
+        f"Helpful context: {seed_blurb}\n"
     )
 
 # ---------------------------------------------------------------------
@@ -238,23 +274,30 @@ def respond_options_attachments(user_text: str) -> str:
             content = _llm(
                 [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": _detail_prompt(key, blurb)},
+                    {"role": "user",   "content": _detail_prompt(key, blurb)},
                 ],
                 model=MODEL_RESPONDER,
                 temperature=0.2,
             )
-            return content
+            # Decorate headers and add a title line matching your style
+            return _decorate_headers(content, title=f"{key} — Deep Dive")
         except Exception:
             # Friendly fallback if model hiccups
-            return (
-                f"**{key}**\n"
-                f"- Purpose: {blurb or '—'}\n"
-                "- Benefits: Improved handling for the intended use-case.\n"
-                "- When to use: When your load profile matches this attachment.\n"
-                "- Prerequisites/Valving: May require 3rd/4th valve depending on functions.\n"
-                "- Compatibility/Capacity impacts: Check capacity derate and visibility.\n"
-                "- Trade-offs: Cost, weight, and turning radius can be affected."
+            fallback = (
+                f"{_HEADER_MAP['Purpose:']}\n"
+                f"- {blurb or 'Attachment/option for specialized handling.'}\n\n"
+                f"{_HEADER_MAP['Benefits:']}\n"
+                "- Faster handling.\n- Safer adjustments.\n- Better load fit.\n\n"
+                f"{_HEADER_MAP['When to use:']}\n"
+                "- Mixed load profiles or frequent changes.\n\n"
+                f"{_HEADER_MAP['Prerequisites/Valving:']}\n"
+                "- May require 3rd/4th hydraulic function.\n\n"
+                f"{_HEADER_MAP['Compatibility/Capacity impacts:']}\n"
+                "- Minor capacity derate; verify on data plate.\n\n"
+                f"{_HEADER_MAP['Trade-offs:']}\n"
+                "- Higher upfront cost and modest maintenance."
             )
+            return _decorate_headers(fallback, title=f"{key} — Deep Dive")
 
     # Fallback clarifier
     if "attachment" in t:
