@@ -1,92 +1,147 @@
 # options_attachments_router.py
-# Router for "Options & Attachments" chat behavior:
+# Router for "Options & Attachments":
 # - Lists ONLY options when asked for options
 # - Lists ONLY attachments when asked for attachments
 # - Deep-dive when a single item is named
-# - Never dumps the full catalog unless explicitly asked
-# - Formats headers using <span class="section-label">…</span> and strips any ** the model emits
+# - "attachments and options" prints both (short lists unless "all" is requested)
+# - Loads full catalogs from ai_logic loaders (Excel-backed), with safe fallbacks
 
 import os
 import re
 import json
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 from openai import OpenAI
 
-# ---------------------------------------------------------------------
-# OpenAI setup (defaults are widely available; override via env)
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------
+# OpenAI setup (override via env if desired)
+# ------------------------------------------------------------
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL_CLASSIFIER = os.getenv("OA_CLASSIFIER_MODEL", "gpt-4o-mini")
 MODEL_RESPONDER  = os.getenv("OA_RESPONDER_MODEL",  "gpt-4o-mini")
 
-# ---------------------------------------------------------------------
-# Catalog loading (external file optional) + safe fallbacks
-# ---------------------------------------------------------------------
-BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.join(BASE_DIR, "data", "forklift_options_benefits.json")
+# ------------------------------------------------------------
+# Try to import your real loaders from ai_logic
+# (We know load_options() exists from your /api/options endpoint.)
+# If load_attachments() doesn't exist, we fall back gracefully.
+# ------------------------------------------------------------
+try:
+    from ai_logic import load_options as _load_options_catalog  # returns list[dict]
+except Exception:
+    _load_options_catalog = None
 
+try:
+    from ai_logic import load_attachments as _load_attachments_catalog  # optional
+except Exception:
+    _load_attachments_catalog = None
+
+# ------------------------------------------------------------
+# Fallbacks (used only if loaders are missing or fail)
+# ------------------------------------------------------------
 FALLBACK_OPTIONS = {
     "3 valve with handle": "Adds a third hydraulic circuit to power basic attachments.",
     "4 valve with handle": "Two auxiliary circuits for multi-function attachments.",
     "5 valve with handle": "Additional hydraulic circuits for complex attachments.",
-    "non-marking tires":  "Prevents scuffing on indoor finished floors.",
-    "dual tires":         "Wider footprint for stability on soft or uneven ground.",
-    "dual solid tires":   "Puncture-proof with extra stability in debris-prone areas.",
+    "Non-Marking Tires":  "Prevents scuffing on indoor finished floors.",
+    "Dual Tires":         "Wider footprint for stability on soft or uneven ground.",
+    "Dual Solid Tires":   "Puncture-resistant and stable in debris-prone areas.",
 }
-
 FALLBACK_ATTACHMENTS = {
-    "sideshifter":            "Shift load left/right without moving the truck.",
-    "fork positioner":        "Adjust fork spread from the seat for mixed pallet widths.",
-    "fork extensions":        "Temporarily lengthen forks for long/oversized loads.",
-    "paper roll clamp":       "Securely handle paper rolls without core damage.",
-    "push/pull (slip-sheet)": "Use slip-sheets instead of pallets to cut cost/weight.",
-    "carpet pole":            "Ram/pole for carpet, coils, and tubing.",
+    "Sideshifter":            "Shift load left/right without moving the truck.",
+    "Fork Positioner":        "Adjust fork spread from the seat for mixed pallet widths.",
+    "Fork Extensions":        "Temporarily lengthen forks for long/oversized loads.",
+    "Paper Roll Clamp":       "Securely handle paper rolls without core damage.",
+    "Push/Pull (Slip-Sheet)": "Use slip-sheets instead of pallets to cut cost/weight.",
+    "Carpet Pole":            "Ram/pole for carpet, coils, and tubing.",
 }
 
 def _normalize(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
-def _load_catalog() -> Tuple[Dict[str, str], Dict[str, str]]:
-    if not os.path.exists(DATA_FILE):
-        return FALLBACK_OPTIONS, FALLBACK_ATTACHMENTS
+def _to_dict_by_name(rows: List[dict], name_key="name", blurb_key="benefit") -> Dict[str, str]:
+    """
+    Turn a list of rows from your loader into {name: blurb}.
+    Keeps only rows with a non-empty name. Trims whitespace. De-dupes by last write wins.
+    """
+    out = {}
+    for r in rows or []:
+        name = (r.get(name_key) or "").strip()
+        if not name:
+            continue
+        blurb = (r.get(blurb_key) or r.get("desc") or r.get("description") or "").strip()
+        out[name] = blurb
+    return out
+
+def _hydrate_catalogs() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Attempts to load from ai_logic loaders first; falls back to hard-coded sets.
+    - OPTIONS comes from load_options()  -> expects fields: name, benefit
+    - ATTACHMENTS comes from load_attachments() if present; otherwise fallback
+    """
+    # OPTIONS
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        opts = {i["name"]: i.get("blurb", "") for i in data.get("options", []) if i.get("name")}
-        atts = {i["name"]: i.get("blurb", "") for i in data.get("attachments", []) if i.get("name")}
-        if not opts: opts = FALLBACK_OPTIONS
-        if not atts: atts = FALLBACK_ATTACHMENTS
-        return opts, atts
+        if _load_options_catalog:
+            opt_rows = _load_options_catalog()  # expected list[dict] with 'name' and 'benefit'
+            options = _to_dict_by_name(opt_rows, name_key="name", blurb_key="benefit")
+            if not options:
+                options = FALLBACK_OPTIONS
+        else:
+            options = FALLBACK_OPTIONS
     except Exception:
-        return FALLBACK_OPTIONS, FALLBACK_ATTACHMENTS
+        options = FALLBACK_OPTIONS
 
-OPTIONS, ATTACHMENTS = _load_catalog()
+    # ATTACHMENTS (only if you have a loader; otherwise fallback)
+    try:
+        if _load_attachments_catalog:
+            att_rows = _load_attachments_catalog()  # expected list[dict] with 'name' and 'benefit'/desc
+            attachments = _to_dict_by_name(att_rows, name_key="name", blurb_key="benefit")
+            if not attachments:
+                attachments = FALLBACK_ATTACHMENTS
+        else:
+            attachments = FALLBACK_ATTACHMENTS
+    except Exception:
+        attachments = FALLBACK_ATTACHMENTS
 
-# ---------------------------------------------------------------------
-# Light fuzzy lookup for single-item deep dives
-# ---------------------------------------------------------------------
+    return options, attachments
+
+OPTIONS, ATTACHMENTS = _hydrate_catalogs()
+
+# ------------------------------------------------------------
+# Fuzzy lookup for single-item deep dives (works with full catalogs)
+# ------------------------------------------------------------
 def fuzzy_lookup(item: str) -> Tuple[str, str, str]:
+    """
+    Return (kind, canonical_name, blurb), where kind in {'option','attachment',''}.
+    """
     n = _normalize(item)
+
+    # Exact or contains match across loaded catalogs
     for k, v in OPTIONS.items():
         if n == _normalize(k) or n in _normalize(k):
             return ("option", k, v)
     for k, v in ATTACHMENTS.items():
         if n == _normalize(k) or n in _normalize(k):
             return ("attachment", k, v)
+
+    # Keyword hints (kept minimal)
     if "clamp" in n:
-        k = next((kk for kk in ATTACHMENTS if "clamp" in _normalize(kk)), "paper roll clamp")
-        return ("attachment", k, ATTACHMENTS.get(k, "Clamp attachment"))
+        k = next((kk for kk in ATTACHMENTS.keys() if "clamp" in _normalize(kk)), "Paper Roll Clamp")
+        return ("attachment", k, ATTACHMENTS.get(k, "Clamp attachment."))
     if "position" in n or "positioner" in n:
-        return ("attachment", "fork positioner", ATTACHMENTS.get("fork positioner", ""))
-    if "side shift" in n or "sideshift" in n:
-        return ("attachment", "sideshifter", ATTACHMENTS.get("sideshifter", ""))
-    if "valve" in n:
-        return ("option", "3 valve with handle", OPTIONS.get("3 valve with handle", ""))
+        # prefer exact catalog name if it exists
+        k = next((kk for kk in ATTACHMENTS.keys() if "position" in _normalize(kk)), "Fork Positioner")
+        return ("attachment", k, ATTACHMENTS.get(k, ""))
+    if "side shift" in n or "sideshift" in n or "side-shift" in n:
+        k = next((kk for kk in ATTACHMENTS.keys() if "side" in _normalize(kk) and "shift" in _normalize(kk)), "Sideshifter")
+        return ("attachment", k, ATTACHMENTS.get(k, ""))
+    if "valve" in n or "aux" in n:
+        k = next((kk for kk in OPTIONS.keys() if "valve" in _normalize(kk)), "3 valve with handle")
+        return ("option", k, OPTIONS.get(k, ""))
+
     return ("", "", "")
 
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------
 # Prompts
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------
 SYSTEM_PROMPT = (
     "You are the Options & Attachments expert for Heli forklifts.\n"
     "STRICT RULES:\n"
@@ -107,14 +162,15 @@ CLASSIFIER_INSTRUCTION = (
     "- list_attachments\n"
     "- detail_item\n"
     "- list_all\n"
+    "- both_lists\n"
     "- unknown\n\n"
+    "Rules:\n"
+    "- If the user clearly wants BOTH (e.g., 'attachments and options', 'everything I can add'), use both_lists.\n"
+    "- 'all', 'everything', or 'catalog' implies list_all for the relevant type(s) mentioned.\n\n"
     "Return JSON only: {{\"intent\":\"...\", \"item\": \"<named item or ''>\"}}\n\n"
     "User: {user_text}\n"
 )
 
-# ---------------------------------------------------------------------
-# LLM helper
-# ---------------------------------------------------------------------
 def _llm(messages, model: str, temperature: float = 0.2) -> str:
     resp = client.chat.completions.create(
         model=model,
@@ -123,9 +179,6 @@ def _llm(messages, model: str, temperature: float = 0.2) -> str:
     )
     return resp.choices[0].message.content
 
-# ---------------------------------------------------------------------
-# Classifier
-# ---------------------------------------------------------------------
 def _classify(user_text: str) -> Dict[str, str]:
     try:
         out = _llm(
@@ -142,26 +195,21 @@ def _classify(user_text: str) -> Dict[str, str]:
             "item":   str(data.get("item", "") or "")
         }
     except Exception:
-        return {"intent": "unknown", "item": ""}
+        # Simple keyword fallback if classifier hiccups
+        t = _normalize(user_text)
+        if "attachment" in t and "option" in t:
+            return {"intent":"both_lists","item":""}
+        if "attachment" in t:
+            return {"intent":"list_attachments","item":""}
+        if "option" in t:
+            return {"intent":"list_options","item":""}
+        if any(w in t for w in ["catalog","everything","all"]):
+            return {"intent":"list_all","item":""}
+        return {"intent":"unknown","item":""}
 
-# ---------------------------------------------------------------------
-# Formatting helpers
-# ---------------------------------------------------------------------
-# 1) Strip any markdown bold/italics the model might emit (e.g., **Purpose:**)
-_MD_BOLD_HEADERS = re.compile(
-    r'(?im)^\s*[*_]{1,3}\s*(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*[*_]{1,3}\s*$'
-)
-
-def _strip_md_bold_headers(text: str) -> str:
-    if not text:
-        return text
-    s = text.replace("\r\n", "\n").replace("\r", "\n")
-    s = _MD_BOLD_HEADERS.sub(lambda m: m.group(1), s)
-    # Also remove any remaining stray ** or __ around words
-    s = re.sub(r"(\*\*|__)(.*?)\1", r"\2", s)
-    return s
-
-# 2) Decorate headers with your site’s section-label span (bold/dark red via CSS)
+# ------------------------------------------------------------
+# Output formatting (uses your .section-label CSS class)
+# ------------------------------------------------------------
 _HEADER_MAP = {
     "Purpose:":                        '<span class="section-label">Purpose:</span>',
     "Benefits:":                       '<span class="section-label">Benefits:</span>',
@@ -173,6 +221,17 @@ _HEADER_MAP = {
 _HEADER_PATTERN = re.compile(
     r'(?im)^(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*$'
 )
+
+_MD_BOLD_HEADERS = re.compile(
+    r'(?im)^\s*[*_]{1,3}\s*(Purpose:|Benefits:|When to use:|Prerequisites/Valving:|Compatibility/Capacity impacts:|Trade-offs:)\s*[*_]{1,3}\s*$'
+)
+
+def _strip_md_bold_headers(text: str) -> str:
+    if not text:
+        return text
+    s = text.replace("\r\n", "\n").replace("\r", "\n")
+    s = _MD_BOLD_HEADERS.sub(lambda m: m.group(1), s)
+    return s
 
 def _decorate_headers(text: str, title: str = "") -> str:
     if not text:
@@ -186,15 +245,11 @@ def _decorate_headers(text: str, title: str = "") -> str:
     s = _HEADER_PATTERN.sub(repl, s)
     return s
 
-def _build_list(kind: str, list_all: bool = False) -> str:
-    if kind == "options":
-        items = list(OPTIONS.items())
-        header_html = '<span class="section-label">Options:</span>'
-    else:
-        items = list(ATTACHMENTS.items())
-        header_html = '<span class="section-label">Attachments:</span>'
+def _build_list_from_dict(kind_name: str, d: Dict[str, str], list_all: bool) -> str:
+    header_html = f'<span class="section-label">{kind_name}:</span>'
+    items = sorted(d.items(), key=lambda kv: _normalize(kv[0]))
     if not list_all:
-        items = items[:10]
+        items = items[:12]  # short list unless explicitly asked for "all"
     lines = [f"- {name} — {blurb or '—'}" for name, blurb in items]
     return header_html + "\n" + "\n".join(lines)
 
@@ -219,9 +274,9 @@ def _detail_prompt(name: str, seed_blurb: str) -> str:
         f"Helpful context: {seed_blurb}\n"
     )
 
-# ---------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------
+# Public entry
+# ------------------------------------------------------------
 def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
         return "Ask about **options**, **attachments**, or a **specific item** (e.g., Fork Positioner)."
@@ -231,21 +286,38 @@ def respond_options_attachments(user_text: str) -> str:
     item   = (c.get("item") or "").strip()
 
     t = _normalize(user_text)
-    asked_all = any(w in t for w in [" all ", "catalog", "everything"])
+    asked_all = any(w in t for w in [" all ", "catalog", "everything", "full list", "complete"])
 
+    # BOTH lists (short unless explicitly "all")
+    if intent == "both_lists":
+        parts = []
+        parts.append(_build_list_from_dict("Options", OPTIONS, list_all=asked_all))
+        parts.append(_build_list_from_dict("Attachments", ATTACHMENTS, list_all=asked_all))
+        return "\n\n".join(parts)
+
+    # Explicit "all" for one type
     if intent == "list_all":
+        if "option" in t and "attachment" in t:
+            return (
+                _build_list_from_dict("Options", OPTIONS, list_all=True) + "\n\n" +
+                _build_list_from_dict("Attachments", ATTACHMENTS, list_all=True)
+            )
         if "option" in t:
-            return _build_list("options", list_all=True)
+            return _build_list_from_dict("Options", OPTIONS, list_all=True)
         if "attachment" in t or "catalog" in t or "everything" in t:
-            return _build_list("attachments", list_all=True)
-        return "Do you want **all options** or **all attachments**?"
+            return _build_list_from_dict("Attachments", ATTACHMENTS, list_all=True)
+        # ambiguous "all"
+        return "Do you want **all options**, **all attachments**, or **both**?"
 
+    # Options-only list
     if intent == "list_options":
-        return _build_list("options", list_all=asked_all)
+        return _build_list_from_dict("Options", OPTIONS, list_all=asked_all)
 
+    # Attachments-only list
     if intent == "list_attachments":
-        return _build_list("attachments", list_all=asked_all)
+        return _build_list_from_dict("Attachments", ATTACHMENTS, list_all=asked_all)
 
+    # Single item deep dive
     if intent == "detail_item":
         kind, key, blurb = fuzzy_lookup(item or user_text)
         if not key:
@@ -259,7 +331,6 @@ def respond_options_attachments(user_text: str) -> str:
                 model=MODEL_RESPONDER,
                 temperature=0.2,
             )
-            # 1) strip any ** the model used; 2) wrap headers; 3) add a styled title
             content = _strip_md_bold_headers(content)
             return _decorate_headers(content, title=f"{key} — Deep Dive")
         except Exception:
@@ -280,6 +351,9 @@ def respond_options_attachments(user_text: str) -> str:
             )
             return _decorate_headers(fallback, title=f"{key} — Deep Dive")
 
+    # Fallback clarifier
+    if "attachment" in t and "option" in t:
+        return "Do you want **both lists**, or details on a **specific item**?"
     if "attachment" in t:
         return "Do you want a **list of attachments** or details on a **specific attachment**?"
     if "option" in t:
