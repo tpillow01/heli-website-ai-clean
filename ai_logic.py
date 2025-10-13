@@ -63,6 +63,76 @@ def option_benefit(name: str) -> str | None:
     row = options_lookup_by_name().get((name or "").lower())
     return row["benefit"] if row else None
 
+# === Typed catalog loader (options / attachments / tires) =====================
+# Uses the same Excel file path you already have in _OPTIONS_XLSX.
+# Accepts either "name" or "option" as the name column, plus required "type" and optional "benefit".
+
+def _read_typed_catalog_df():
+    """
+    Reads your Excel and normalizes columns:
+      - name:   from 'name' or 'option'
+      - type:   required; values: option | attachment | tire
+      - benefit: optional; defaults to ''
+    Returns a pandas DataFrame or None if missing/invalid.
+    """
+    if _pd is None or not os.path.exists(_OPTIONS_XLSX):
+        return None
+    # Use openpyxl for xlsx; falls back if not available
+    try:
+        df = _pd.read_excel(_OPTIONS_XLSX, engine="openpyxl")
+    except Exception:
+        df = _pd.read_excel(_OPTIONS_XLSX)
+
+    cols = {str(c).lower().strip(): c for c in df.columns}
+    name_col = cols.get("name") or cols.get("option")  # support your older sheet ("Option")
+    type_col = cols.get("type")
+    ben_col  = cols.get("benefit")
+
+    if not name_col or not type_col:
+        # We need at least name+type to build typed catalogs
+        return None
+
+    use_cols = [name_col, type_col] + ([ben_col] if ben_col else [])
+    df = df[use_cols].copy()
+    rename_map = {name_col: "name", type_col: "type"}
+    if ben_col:
+        rename_map[ben_col] = "benefit"
+    df.rename(columns=rename_map, inplace=True)
+
+    # Normalize fields
+    df["name"]    = df["name"].astype(str).str.strip()
+    df["type"]    = df["type"].astype(str).str.strip().str.lower()
+    if "benefit" not in df.columns:
+        df["benefit"] = ""
+    else:
+        df["benefit"] = df["benefit"].astype(str).str.strip()
+
+    # Keep only non-empty names
+    df = df[df["name"] != ""]
+    return df
+
+def load_catalogs() -> tuple[dict, dict, dict]:
+    """
+    Returns three dictionaries keyed by exact 'name':
+      - options:     { name: benefit }
+      - attachments: { name: benefit }
+      - tires:       { name: benefit }
+
+    These are built from your Excel 'type' column (option | attachment | tire).
+    """
+    df = _read_typed_catalog_df()
+    if df is None or df.empty:
+        return {}, {}, {}
+
+    opts = df[df["type"] == "option"][["name", "benefit"]]
+    atts = df[df["type"] == "attachment"][["name", "benefit"]]
+    tirs = df[df["type"] == "tire"][["name", "benefit"]]
+
+    options = {r["name"]: (r.get("benefit") or "") for _, r in opts.iterrows()}
+    attachments = {r["name"]: (r.get("benefit") or "") for _, r in atts.iterrows()}
+    tires = {r["name"]: (r.get("benefit") or "") for _, r in tirs.iterrows()}
+    return options, attachments, tires
+
 # === Sales Catalog helpers ===============================================
 
 def _env_tags_for_name(nl: str) -> list[str]:

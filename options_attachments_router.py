@@ -1,14 +1,14 @@
 # options_attachments_router.py
-# Excel-grounded Options & Attachments router with robust "ALL" handling and loop-proof clarifiers.
-# - "all ..." returns complete catalog from Excel (no filtering/curation).
-# - Normal queries are environment-aware (indoor/outdoor/pedestrians/long loads/etc.).
-# - Short replies like "both lists", "options only", "attachments only" are supported.
-# - No markdown bold/italics; uses <span class="section-label">...</span> headers.
+# Excel-typed Options & Attachments router with:
+# - True "ALL" handling (full lists from Excel on request)
+# - Environment-aware curation for normal queries
+# - Loop-proof clarifiers (asks at most once)
+# - Clean HTML section headers (no markdown **)
 
+from __future__ import annotations
 import os
 import re
 import json
-from math import sqrt
 from typing import Dict, Tuple, List
 from openai import OpenAI
 
@@ -20,128 +20,51 @@ MODEL_RESPONDER  = os.getenv("OA_RESPONDER_MODEL",  "gpt-4o-mini")
 MODEL_SELECTOR   = os.getenv("OA_SELECTOR_MODEL",   "gpt-4o-mini")
 EMBED_MODEL      = os.getenv("OA_EMBED_MODEL",      "text-embedding-3-small")
 
-# ---------------- Excel loaders from ai_logic ----------------
-try:
-    from ai_logic import load_options as _load_options_catalog
-except Exception:
-    _load_options_catalog = None
+# ---------------- Load typed catalogs (option / attachment / tire) ----------------
+from ai_logic import load_catalogs  # requires 'type' column in your Excel
 
-try:
-    from ai_logic import load_attachments as _load_attachments_catalog
-except Exception:
-    _load_attachments_catalog = None
-
-# Tires may be separate
-try:
-    from ai_logic import load_tires_as_options as _load_tires_catalog
-except Exception:
-    _load_tires_catalog = None
-try:
-    if _load_tires_catalog is None:
-        from ai_logic import load_tires as _load_tires_catalog
-except Exception:
-    _load_tires_catalog = None
-
-# ---------------- Fallbacks (safety only) ----------------
-FALLBACK_OPTIONS = {
-    "3 Valve with Handle": "Adds a third hydraulic circuit to power basic attachments.",
-    "4 Valve with Handle": "Two auxiliary circuits for multi-function attachments.",
-    "5 Valve with Handle": "Additional hydraulic circuits for complex attachments.",
-}
-FALLBACK_ATTACHMENTS = {
-    "Sideshifter":     "Shift load left/right without moving the truck.",
-    "Fork Positioner": "Adjust fork spread from the seat for mixed pallet widths.",
-}
-FALLBACK_TIRES = {
-    "Non-Marking Tires":     "Prevents scuffing on indoor finished floors.",
-    "Solid Pneumatic Tires": "Puncture resistance in debris-prone areas.",
-}
-
-# ---------------- Small utils ----------------
-def _normalize(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
-
-def _to_dict_by_name(rows: List[dict], name_key="name", blurb_key="benefit") -> Dict[str, str]:
-    out = {}
-    for r in rows or []:
-        name = (r.get(name_key) or "").strip()
-        if not name:
-            continue
-        blurb = (r.get(blurb_key) or r.get("desc") or r.get("description") or "").strip()
-        out[name] = blurb
-    return out
-
-# ---------------- Catalog hydrate + hot reload ----------------
 OPTIONS: Dict[str, str] = {}
 ATTACHMENTS: Dict[str, str] = {}
 TIRES: Dict[str, str] = {}
 
 def _hydrate_catalogs() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
-    # OPTIONS
     try:
-        if _load_options_catalog:
-            opt_rows = _load_options_catalog()
-            options = _to_dict_by_name(opt_rows, name_key="name", blurb_key="benefit")
-            if not options:
-                options = FALLBACK_OPTIONS
-        else:
-            options = FALLBACK_OPTIONS
+        options, attachments, tires = load_catalogs()
+        return options or {}, attachments or {}, tires or {}
     except Exception:
-        options = FALLBACK_OPTIONS
-
-    # ATTACHMENTS
-    try:
-        if _load_attachments_catalog:
-            att_rows = _load_attachments_catalog()
-            attachments = _to_dict_by_name(att_rows, name_key="name", blurb_key="benefit")
-            if not attachments:
-                attachments = FALLBACK_ATTACHMENTS
-        else:
-            attachments = FALLBACK_ATTACHMENTS
-    except Exception:
-        attachments = FALLBACK_ATTACHMENTS
-
-    # TIRES
-    try:
-        if _load_tires_catalog:
-            tire_rows = _load_tires_catalog()
-            tires = _to_dict_by_name(tire_rows, name_key="name", blurb_key="benefit")
-            if not tires:
-                tires = FALLBACK_TIRES
-        else:
-            tires = FALLBACK_TIRES
-    except Exception:
-        tires = FALLBACK_TIRES
-
-    return options, attachments, tires
+        return {}, {}, {}
 
 def reload_catalogs() -> None:
-    """Hot-reload catalogs from Excel (call this from an endpoint after updating your sheet)."""
     global OPTIONS, ATTACHMENTS, TIRES
     OPTIONS, ATTACHMENTS, TIRES = _hydrate_catalogs()
 
-# initial load
+# Initial load
 reload_catalogs()
 
 def _merged_options() -> Dict[str, str]:
-    # "Options" + Tires unified for selection; in ALL mode we still list everything.
+    """Expose tires under Options for selection (normal/curated)."""
     merged = dict(OPTIONS)
     for k, v in (TIRES or {}).items():
-        if k not in merged:
-            merged[k] = v
+        merged.setdefault(k, v)
     return merged
+
+# ---------------- Small utils ----------------
+def _normalize(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 # ---------------- Fuzzy item lookup (deep dives) ----------------
 def fuzzy_lookup(item: str):
     n = _normalize(item)
+    # Check options+tires first
     merged = _merged_options()
     for k, v in merged.items():
         if n == _normalize(k) or n in _normalize(k):
             return ("option", k, v)
+    # Then attachments
     for k, v in ATTACHMENTS.items():
         if n == _normalize(k) or n in _normalize(k):
             return ("attachment", k, v)
-    # loose hints
+    # Loose hints for common items
     if "position" in n or "positioner" in n:
         k = next((kk for kk in ATTACHMENTS if "position" in _normalize(kk)), "Fork Positioner")
         return ("attachment", k, ATTACHMENTS.get(k, ""))
@@ -162,13 +85,6 @@ SYSTEM_PROMPT = (
     "- If they name a specific item, give a concise deep-dive with labeled sections.\n"
     "- Never output the full catalog unless they explicitly ask for 'all', 'catalog', or 'everything'.\n"
     "- Bullets > paragraphs.\n"
-)
-
-CLASSIFIER_INSTRUCTION = (
-    "Classify the request into exactly one of:\n"
-    "- list_options | list_attachments | detail_item | list_all | both_lists | unknown\n\n"
-    "Return JSON only: {\"intent\":\"...\", \"item\":\"<name or ''>\"}\n\n"
-    "User: {user_text}\n"
 )
 
 # ---------------- Environment cues (normal queries) ----------------
@@ -250,20 +166,7 @@ def _llm(messages, model: str, temperature: float = 0.2) -> str:
     resp = client.chat.completions.create(model=model, temperature=temperature, messages=messages)
     return resp.choices[0].message.content
 
-def _classify_llm(user_text: str) -> Dict[str, str]:
-    out = _llm(
-        [
-            {"role": "system", "content": "Return JSON only. No prose."},
-            {"role": "user", "content": CLASSIFIER_INSTRUCTION.format(user_text=user_text)},
-        ],
-        model=MODEL_CLASSIFIER,
-        temperature=0.1,
-    )
-    data = json.loads(out)
-    return {"intent": str(data.get("intent", "unknown") or "unknown"),
-            "item":   str(data.get("item", "") or "")}
-
-# ---- Final grounded selector (choose only from given candidates) ----
+# Grounded selector (choose only from candidate names)
 _SELECTOR_INSTRUCTION = (
     "Choose the most relevant forklift {kind} for the user's scenario, using general forklift knowledge. "
     "You MUST select only from the CANDIDATES provided. Do NOT invent new items.\n"
@@ -271,14 +174,10 @@ _SELECTOR_INSTRUCTION = (
     "SCENARIO:\n{query}\n\n"
     "CANDIDATES ({count}):\n{candidates}\n"
 )
-
 def _format_candidates_list(names: List[str], pool: Dict[str, str]) -> str:
     return "\n".join(f"- {n}: {pool.get(n, '')}" for n in names)
 
 def _llm_pick_from(names: List[str], pool: Dict[str, str], kind: str, query: str) -> List[str]:
-    """
-    Ask the model to choose from 'names' only. Returns a filtered list of selected names.
-    """
     if not names:
         return []
     try:
@@ -300,10 +199,9 @@ def _llm_pick_from(names: List[str], pool: Dict[str, str], kind: str, query: str
         allowed = {n.strip() for n in names}
         return [n for n in sel if n.strip() in allowed]
     except Exception:
-        # On any error, return empty and let the caller use its fallback
         return []
 
-# ---------------- Loop-proof classifier ----------------
+# ---------------- Classifier (loop-proof) ----------------
 def _is_short_reply(text: str) -> str:
     t = _normalize(text)
     shorts = {
@@ -316,27 +214,50 @@ def _is_short_reply(text: str) -> str:
         "attachments only": "list_attachments",
         "specific item": "detail_item",
         "detail": "detail_item",
+        "all": "list_all",
+        "all options": "list_all",
+        "all attachments": "list_all",
     }
     return shorts.get(t, "")
+
+def _classify_llm(user_text: str) -> Dict[str, str]:
+    out = _llm(
+        [
+            {"role": "system", "content": "Return JSON only. No prose."},
+            {"role": "user", "content": (
+                "Classify into one of: list_options | list_attachments | detail_item | list_all | both_lists | unknown. "
+                "Return JSON only as {\"intent\":\"...\",\"item\":\"<name or ''>\"}.\n\n"
+                f"User: {user_text}"
+            )},
+        ],
+        model=MODEL_CLASSIFIER,
+        temperature=0.1,
+    )
+    try:
+        data = json.loads(out)
+        return {"intent": str(data.get("intent", "unknown") or "unknown"),
+                "item":   str(data.get("item", "") or "")}
+    except Exception:
+        return {"intent":"unknown", "item":""}
 
 def _classify(user_text: str) -> Dict[str, str]:
     traw = (user_text or "").strip()
     t = f" {traw.lower()} "
 
-    # short replies
+    # direct short replies
     sr = _is_short_reply(traw)
     if sr:
         return {"intent": sr, "item": ""}
 
-    # "both" style
-    if re.search(r"\bboth( lists?)?\b", t) or " bith " in t or " options and attachments " in t or " attachments and options " in t:
+    # both lists keywording
+    if re.search(r"\bboth( lists?)?\b", t) or " options and attachments " in t or " attachments and options " in t:
         return {"intent":"both_lists","item":""}
 
-    # explicit ALL (covers "all attachments and options" etc.)
+    # explicit 'ALL'
     if any(sig in t for sig in [" catalog", " everything", " all ", " full list", " complete list"]):
         has_opt = " option" in t
         has_att = " attachment" in t
-        if has_opt and has_att:  # “all attachments and options”
+        if has_opt and has_att:
             return {"intent":"list_all","item":"both"}
         if has_opt:
             return {"intent":"list_all","item":"options"}
@@ -359,12 +280,12 @@ def _classify(user_text: str) -> Dict[str, str]:
     if has_att:
         return {"intent":"list_attachments","item":""}
 
-    # scenario → both by default
+    # scenario cues → both lists
     cues = _extract_cues(traw)
     if any(cues.values()):
         return {"intent":"both_lists","item":""}
 
-    # last resort
+    # fallback to LLM once
     try:
         guess = _classify_llm(traw)
         if guess.get("intent") and guess["intent"] != "unknown":
@@ -446,9 +367,8 @@ def _detail_prompt(name: str, seed_blurb: str) -> str:
 # ---------------- Public entry point ----------------
 def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
-        return "Ask about options, attachments, or a specific item (e.g., Fork Positioner)."
+        return "Ask about options, attachments, all items, or a specific item (e.g., Fork Positioner)."
 
-    # Detect "all" from RAW text
     raw = f" {(user_text or '').lower()} "
     asked_all = any(sig in raw for sig in [" all ", " catalog", " everything", " full list", " complete list"])
 
@@ -459,10 +379,10 @@ def respond_options_attachments(user_text: str) -> str:
     opt_pool = _merged_options()
     att_pool = ATTACHMENTS
 
-    # -------- LIST ALL (true full dump from Excel) --------
+    # -------- LIST ALL (full lists from Excel) --------
     if intent == "list_all" or asked_all:
-        show_opts = (which_all in ("options","both","")) and (" attachment" not in raw or " option" in raw or which_all != "attachments")
-        show_atts = (which_all in ("attachments","both","")) and (" option" not in raw or " attachment" in raw or which_all != "options")
+        show_opts = (which_all in ("options","both","")) and not ("all attachments" in raw and which_all == "attachments")
+        show_atts = (which_all in ("attachments","both","")) and not ("all options" in raw and which_all == "options")
 
         parts = []
         if show_opts:
@@ -481,14 +401,14 @@ def respond_options_attachments(user_text: str) -> str:
             ]
         return "\n\n".join(parts)
 
-    # -------- BOTH LISTS (environment-aware) --------
+    # -------- BOTH LISTS (environment-aware curation) --------
     if intent == "both_lists":
         cues = _extract_cues(user_text)
 
         opt_pref = _rank_semantic(opt_pool, user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
         att_pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
 
-        # Lightweight nudges
+        # Light nudges for common environments
         def _nudge(names: List[str], pool: Dict[str, str], kind: str) -> List[str]:
             if kind == "options" and (cues.get("indoor") or cues.get("pedestrians")):
                 pri = ["camera", "radar", "ops", "operator presence", "speed", "finger", "blue", "beacon", "horn", "mirror", "non-marking", "cushion", "led"]
@@ -505,32 +425,15 @@ def respond_options_attachments(user_text: str) -> str:
         opt_pref = _nudge(opt_pref, opt_pool, "options")
         att_pref = _nudge(att_pref, att_pool, "attachments")
 
-        # Final LLM choose from candidates
         opt_names = _llm_pick_from(opt_pref, opt_pool, "options (incl. tires)", user_text)
         att_names = _llm_pick_from(att_pref, att_pool, "attachments", user_text)
 
-        # Curate tire count for normal answers
         if opt_names:
-            opt_names = _curate_tires(opt_names, opt_pool, _extract_cues(user_text))
+            opt_names = _curate_tires(opt_names, opt_pool, cues)
 
-        # Hard fallback if empty (no loops)
         if not opt_names and not att_names:
-            opt_keywords = ["camera", "radar", "ops", "operator presence", "speed", "finger", "blue", "beacon", "horn", "mirror", "non-marking", "cushion", "led"]
-            att_keywords = ["sideshift", "positioner", "load backrest"]
-
-            def pick(pool: Dict[str,str], keys: List[str], limit: int) -> List[str]:
-                out = []
-                for n,b in pool.items():
-                    s = f"{n} {b}".lower()
-                    if any(k in s for k in keys): out.append(n)
-                seen, uniq = set(), []
-                for n in out:
-                    if n not in seen:
-                        seen.add(n); uniq.append(n)
-                return uniq[:limit]
-
-            opt_names = pick(opt_pool, opt_keywords, 8)
-            att_names = pick(att_pool, att_keywords, 5)
+            # One-time clarifier (no loop)
+            return 'Do you want options, attachments, or both lists? (e.g., "options only", "attachments only", "both lists")'
 
         parts = [
             _build_list("Options", opt_names, opt_pool),
@@ -538,7 +441,7 @@ def respond_options_attachments(user_text: str) -> str:
         ]
         return "\n\n".join(parts)
 
-    # -------- OPTIONS ONLY (normal) --------
+    # -------- OPTIONS ONLY (curated unless "all") --------
     if intent == "list_options":
         if asked_all:
             names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
@@ -552,7 +455,7 @@ def respond_options_attachments(user_text: str) -> str:
             return 'Want me to include attachments too, or show all options? (say "both lists" or "all options")'
         return _build_list("Options", names, opt_pool)
 
-    # -------- ATTACHMENTS ONLY (normal) --------
+    # -------- ATTACHMENTS ONLY (curated unless "all") --------
     if intent == "list_attachments":
         if asked_all:
             names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
@@ -596,5 +499,5 @@ def respond_options_attachments(user_text: str) -> str:
             fallback = _decorate_headers(fallback, title=f"{key} — Deep Dive")
             return _strip_all_md_emphasis(fallback)
 
-    # final fallback: both lists (no loop)
+    # Final fallback: treat as both_lists once (no loop)
     return respond_options_attachments(user_text + " (both lists)")

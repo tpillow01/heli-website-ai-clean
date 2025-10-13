@@ -6,4 +6,4 @@ openpyxl==3.1.5
 folium
 pgeocode
 tiktoken
-gunicorn
+gunicorn>=21.2
