@@ -2,11 +2,17 @@
 from flask import Blueprint, jsonify, request
 from typing import Dict, Any
 
-# Your existing helpers
-from ai_logic import load_options, recommend_options_from_sheet
-
-# Router + hot-reload for catalogs
-from options_attachments_router import respond_options_attachments, reload_catalogs
+# Pull everything from ai_logic only (no external router)
+from ai_logic import (
+    load_options,
+    recommend_options_from_sheet,
+    render_catalog_sections,  # no-followup, plain-text catalog renderer
+    parse_catalog_intent,     # optional: debug/inspect intent
+    # for hot-reload, we'll clear LRU caches directly:
+    load_catalogs,
+    load_attachments,
+    load_tires_as_options,
+)
 
 bp_options = Blueprint("bp_options", __name__)
 
@@ -52,7 +58,7 @@ def list_options():
 def recommend():
     """
     Body: { "query": "<free text about customer needs>" }
-    Returns: { "tire": {...} | null, "others": [{...}, ...] }
+    Returns: { "tire": {...} | null, "attachments": [...], "options": [...] }
     """
     data: Dict[str, Any] = request.get_json(silent=True) or {}
     q = (data.get("query") or "").strip()
@@ -62,28 +68,27 @@ def recommend():
     except Exception as e:
         return jsonify({"error": f"Failed to recommend: {e}"}), 500
 
-@bp_options.post("/api/options_attachments_chat")
-def options_attachments_chat():
+@bp_options.post("/api/catalog_text")
+def catalog_text():
     """
-    Focused chat for Options & Attachments mode.
+    Focused "catalog mode" text response WITHOUT follow-up prompts.
 
     Body: { "message": "<user text>" }
 
     Behavior:
-      - If user asks for options -> returns options only.
-      - If user asks for attachments -> returns attachments only.
-      - If user asks for "all" -> returns the full catalog (no filtering).
-      - If user names a specific item -> returns a concise deep-dive with labeled sections.
-      - Otherwise -> environment-aware curated lists.
-
-    Returns: { "answer": "<html/text>" }
+      - If user asks for "options only", returns only the Options section
+      - If "attachments only", returns only Attachments
+      - If "both" or "attachments and options", returns those two sections
+      - If "list all", includes Tires as well (full catalog)
+      - Otherwise, returns scenario-aware curated (Tires, Attachments, Options)
     """
     data: Dict[str, Any] = request.get_json(silent=True) or {}
     user_text = (data.get("message") or "").strip()
     if not user_text:
-        return jsonify({"answer": "Ask about options, attachments, all items, or a specific item (e.g., Fork Positioner)."})
+        return jsonify({"answer": "Ask about options, attachments, both lists, or say 'list all'."})
+
     try:
-        answer = respond_options_attachments(user_text)
+        answer = render_catalog_sections(user_text, max_per_section=6)
         return jsonify({"answer": answer})
     except Exception as e:
         return jsonify({"answer": f"Error generating response: {e}"}), 500
@@ -92,10 +97,29 @@ def options_attachments_chat():
 def api_reload_catalogs():
     """
     Hot-reload the Excel-backed catalogs (options, attachments, tires).
-    Call this after you edit the spreadsheet, so the API reflects updates without a restart.
+    Clears the LRU caches inside ai_logic so fresh spreadsheet edits show up.
     """
     try:
-        reload_catalogs()
+        # Clear all relevant caches
+        try:
+            load_catalogs.cache_clear()
+        except Exception:
+            pass
+        try:
+            load_options.cache_clear()
+        except Exception:
+            pass
+        try:
+            load_attachments.cache_clear()
+        except Exception:
+            pass
+        try:
+            load_tires_as_options.cache_clear()
+        except Exception:
+            pass
+
+        # Touch once to log/prime after clear (optional)
+        _ = load_options()
         return jsonify({"ok": True, "message": "Catalogs reloaded from Excel."})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Failed to reload catalogs: {e}"}), 500

@@ -19,10 +19,14 @@ from ai_logic import (
     generate_forklift_context,
     select_models_for_question,
     allowed_models_block,
-    debug_parse_and_rank,         # keep this for your debug endpoint
-    top_pick_meta,                # promotions helper
-    recommend_options_from_sheet,
-    generate_catalog_mode_response,  # catalog renderer (no follow-up prompts)
+    debug_parse_and_rank,          # keep this for your debug endpoint
+    top_pick_meta,                 # promotions helper
+    recommend_options_from_sheet,  # Excel-driven recs
+    # NEW: direct, no-followup catalog helpers
+    render_catalog_sections,
+    parse_catalog_intent,
+    # (Optional) keep if you still call it elsewhere
+    generate_catalog_mode_response,
 )
 
 # Admin usage tracking (optional)
