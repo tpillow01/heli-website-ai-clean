@@ -1,25 +1,28 @@
 # options_attachments_router.py
-# Excel-backed, environment-aware router for "Options & Attachments"
-# - Pulls from ai_logic.load_options(), load_attachments(), and (optionally) load_tires_*()
-# - Hybrid selection:
-#     1) Deterministic relevance scoring from your Excel names/blurbs + scenario hints
-#     2) If no strong matches, LLM selector that NEVER invents items
-# - NO global cap; TIRES curated to top 1–2 unless user says "all"
-# - Industry/environment & pedestrian-aware profiles (indoor, lumber yard, cold storage, construction)
-# - Strips all markdown emphasis (** __ *) from outputs; section headers are HTML-styled
-# - Deep-dive supported
+# Environment-aware, Excel-grounded Options & Attachments router
+# Strategy:
+#   1) Semantic prefilter (OpenAI embeddings) over your Excel names/blurbs
+#   2) Auto cue extraction (indoor/outdoor, pedestrians, long loads, dust/debris, temp, precision)
+#   3) Light scoring nudges from cues (no giant hand lists)
+#   4) LLM final pick from candidates ONLY (never invents)
+#   5) Tire curation (top 1–2 unless "all")
+#   6) No markdown emphasis; HTML labels for section headers
 
 import os
 import re
 import json
 from typing import Dict, Tuple, List
+from math import sqrt
 from openai import OpenAI
 
 # ----------------------------- OpenAI setup ----------------------------------
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Models (override via env if you want)
 MODEL_CLASSIFIER = os.getenv("OA_CLASSIFIER_MODEL", "gpt-4o-mini")
 MODEL_RESPONDER  = os.getenv("OA_RESPONDER_MODEL",  "gpt-4o-mini")
 MODEL_SELECTOR   = os.getenv("OA_SELECTOR_MODEL",   "gpt-4o-mini")
+EMBED_MODEL      = os.getenv("OA_EMBED_MODEL",      "text-embedding-3-small")
 
 # ----------------------- Excel-backed loaders (ai_logic) ---------------------
 try:
@@ -181,146 +184,157 @@ CLASSIFIER_INSTRUCTION = (
     "User: {user_text}\n"
 )
 
-# ------------------------ Scenario profiles & scoring ------------------------
-# Each profile has positive keywords (boost), avoid keywords (penalize).
-# We split some boosts specific to options vs attachments for finer control.
-_PROFILES = {
-    "lumber": {
-        "pos_any": [],  # shared
-        "avoid_any": ["non-marking", "indoor only", "cold storage", "freezer", "paper roll"],
-        "options_pos": [
-            "pneumatic", "solid pneumatic", "dual", "traction",
-            "work light", "led", "beacon",
-            "protection", "guard", "radiator", "screen", "belly pan",
-            "load backrest", "long fork", "fork length",
-        ],
-        "attachments_pos": [
-            "fork extension", "extension",
-            "fork positioner", "positioner",
-            "sideshift", "side shift", "sideshifter",
-            "carpet pole", "ram", "pole",
-            "load backrest",
-        ],
-    },
-    "indoor": {
-        "pos_any": ["warehouse", "aisle"],
-        "avoid_any": ["pneumatic", "solid pneumatic", "dual", "belly pan", "radiator"],
-        "options_pos": ["non-marking", "cushion", "visibility", "led", "blue light", "beacon"],
-        "attachments_pos": ["sideshift", "positioner"],
-    },
-    "construction": {
-        "pos_any": ["debris", "outdoor", "rough", "yard"],
-        "avoid_any": ["non-marking", "cushion"],
-        "options_pos": ["solid pneumatic", "pneumatic", "dual", "belly pan", "guard", "radiator", "beacon"],
-        "attachments_pos": ["sideshift", "positioner", "fork extension", "load backrest"],
-    },
-    "cold storage": {
-        "pos_any": ["cold", "freezer", "low-temp", "low temp"],
-        "avoid_any": ["radiator only", "hot"],
-        "options_pos": ["cold", "freezer", "low-temp", "heater", "defroster", "enclosed cab", "non-marking"],
-        "attachments_pos": ["sideshift", "positioner"],  # generic helpers; sheet-driven
-    },
-    "pipe": {
-        "pos_any": ["pipe", "tubing"],
-        "avoid_any": [],
-        "options_pos": ["pneumatic", "solid pneumatic", "dual", "visibility"],
-        "attachments_pos": ["carpet pole", "ram", "pole", "fork extension", "positioner", "load backrest"],
-    },
+# ---------------------- Automatic environment cue extraction ------------------
+# (General forklift knowledge via keywords — broad, not exhaustive)
+_CUES = {
+    "indoor":        ["indoor", "warehouse", "finished floor", "epoxy", "polished"],
+    "outdoor":       ["outdoor", "yard", "rough", "gravel", "pothole", "construction", "lumber", "timber", "debris"],
+    "pedestrians":   ["busy", "people", "pedestrian", "foot traffic", "crowded"],
+    "long_loads":    ["long", "bundle", "lumber", "pipe", "tubing", "oversized"],
+    "dust":          ["dust", "sawdust", "powder", "grain", "cement"],
+    "cold":          ["cold storage", "freezer", "low-temp", "low temp", "freezing"],
+    "precision":     ["precision", "fine", "tight aisle", "narrow aisle", "delicate"],
+    "wet":           ["wet", "washdown", "rain", "condensation"],
 }
 
-# Pedestrian-heavy modifier (applies on top of profile)
-_PEDESTRIAN_HINTS = {
-    "pos": ["blue light", "blue spot", "pedestrian", "beacon", "horn", "backup handle", "mirror", "camera", "led"],
-    "avoid": [],
-}
+def _extract_cues(q: str) -> Dict[str, bool]:
+    t = (q or "").lower()
+    return {k: any(w in t for w in words) for k, words in _CUES.items()}
 
-def _active_profiles(query: str) -> List[str]:
-    q = (query or "").lower()
-    act = []
-    for key in _PROFILES:
-        if key in q:
-            act.append(key)
-    # heuristics
-    if "indoor" in q or "finished floor" in q or "warehouse" in q:
-        if "indoor" not in act: act.append("indoor")
-    if "cold storage" in q or "freezer" in q:
-        if "cold storage" not in act: act.append("cold storage")
-    if "construction" in q or "rough" in q or "yard" in q or "debris" in q or "outdoor" in q:
-        if "construction" not in act: act.append("construction")
-    if "lumber" in q or "timber" in q:
-        if "lumber" not in act: act.append("lumber")
-    if "pipe" in q or "tubing" in q:
-        if "pipe" not in act: act.append("pipe")
-    return act
+# ------------------------------ Embeddings & sim ------------------------------
+def _embed(texts: List[str]) -> List[List[float]]:
+    if not texts:
+        return []
+    resp = client.embeddings.create(model=EMBED_MODEL, input=texts)
+    return [d.embedding for d in resp.data]
 
-def _pedestrian_mode(query: str) -> bool:
-    q = (query or "").lower()
-    return any(k in q for k in ["people", "pedestrian", "busy", "foot traffic", "crowded"])
+def _cos(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x*y for x, y in zip(a, b))
+    na = sqrt(sum(x*x for x in a))
+    nb = sqrt(sum(y*y for y in b))
+    return dot / (na * nb + 1e-8)
 
-def _score_item(name: str, blurb: str, query: str, kind: str) -> float:
-    """Score an item for relevance given query and kind ('options' or 'attachments')."""
+def _rank_semantic(pool: Dict[str, str], query: str, extra_context: str = "", top_k: int = 30) -> List[str]:
+    if not pool:
+        return []
+    items = list(pool.items())
+    texts = [f"{n}. {pool.get(n,'')}" for n,_ in items]
+    qtext = query.strip()
+    if extra_context:
+        qtext += f" | context: {extra_context}"
+    vecs = _embed([qtext] + texts)
+    qv = vecs[0]
+    iv = vecs[1:]
+    sims = [(items[i][0], _cos(qv, iv[i])) for i in range(len(items))]
+    sims.sort(key=lambda x: (-x[1], _normalize(x[0])))
+    return [n for n,_ in sims[:top_k]]
+
+# -------------------------- Scoring nudges from cues --------------------------
+def _cue_score_nudge(name: str, blurb: str, cues: Dict[str, bool], kind: str) -> float:
     s = f"{name} {blurb}".lower()
-    profs = _active_profiles(query)
     score = 0.0
 
-    # Base boosts/penalties from profiles
-    for p in profs:
-        pd = _PROFILES[p]
-        for kw in pd.get("pos_any", []):
-            if kw in s: score += 1.0
-        for kw in pd.get("avoid_any", []):
-            if kw in s: score -= 1.0
-        for kw in pd.get(f"{kind}_pos", []):
-            if kw in s: score += 2.0
+    # Indoor vs outdoor surfaces
+    if cues["indoor"]:
+        if "non-marking" in s or "cushion" in s: score += 2.0
+        if any(k in s for k in ["pneumatic", "solid pneumatic", "dual", "belly pan", "radiator"]): score -= 0.5
+    if cues["outdoor"]:
+        if any(k in s for k in ["pneumatic", "solid pneumatic", "dual", "belly pan", "guard", "radiator"]): score += 1.5
+        if "non-marking" in s or "cushion" in s: score -= 0.5
 
-    # Pedestrian-heavy site: emphasize visibility/alerts/ergonomics; de-emphasize heavy-duty guards indoors
-    if _pedestrian_mode(query):
-        for kw in _PEDESTRIAN_HINTS["pos"]:
-            if kw in s: score += 2.0
-        if "belly pan" in s or "radiator" in s:
-            score -= 1.0
+    # Pedestrians — visibility & operator assistance
+    if cues["pedestrians"]:
+        if any(k in s for k in ["blue light", "blue spot", "beacon", "horn", "backup handle", "mirror", "camera", "rear camera", "radar", "backup radar", "proximity", "collision", "ops", "operator presence", "speed control", "speed limiter", "finger control", "fine control"]):
+            score += 3.0
 
-    # General sanity:
-    # Indoor: penalize heavy rough-terrain options; Outdoor: penalize indoor-only
-    ql = query.lower()
-    if any(k in ql for k in ["indoor", "finished", "warehouse"]):
-        if any(k in s for k in ["pneumatic", "solid pneumatic", "dual", "belly pan", "radiator"]):
-            score -= 1.0
-        if "non-marking" in s or "cushion" in s:
+    # Long loads — positioning & support
+    if cues["long_loads"]:
+        if any(k in s for k in ["fork extension", "extension", "positioner", "sideshift", "load backrest", "long fork", "fork length", "carpet pole", "ram", "pole"]):
+            score += 2.0
+
+    # Dust — filtration/cooling
+    if cues["dust"]:
+        if any(k in s for k in ["dual air filter", "air filter", "radiator screen", "cooling", "fan"]):
             score += 1.0
-    if any(k in ql for k in ["outdoor", "rough", "yard", "debris", "construction", "lumber", "timber"]):
-        if "non-marking" in s or "cushion" in s:
-            score -= 1.0
-        if any(k in s for k in ["pneumatic", "solid pneumatic", "dual", "belly pan", "guard", "radiator", "beacon"]):
+
+    # Cold — freezer/cab/low-temp
+    if cues["cold"]:
+        if any(k in s for k in ["cold", "freezer", "low-temp", "heater", "defroster", "enclosed cab", "non-marking"]):
+            score += 1.5
+
+    # Precision — controls & visibility
+    if cues["precision"]:
+        if any(k in s for k in ["finger control", "fine control", "camera", "rear camera", "sideshift", "positioner"]):
+            score += 1.5
+
+    # Wet — glass/wiper visibility
+    if cues["wet"]:
+        if any(k in s for k in ["windshield", "wiper", "rain-proof", "defroster"]):
             score += 1.0
+
+    # Light bias by kind
+    if kind == "attachments":
+        if any(k in s for k in ["sideshift", "positioner", "clamp", "extension", "load backrest", "carpet pole", "ram", "pole"]):
+            score += 0.5
 
     return score
 
-def _rank_by_score(pool: Dict[str, str], query: str, kind: str, min_score: float = 1.5) -> List[str]:
-    """Return all items with score >= min_score, sorted by score desc then name."""
+def _apply_cue_nudges(names: List[str], pool: Dict[str, str], cues: Dict[str, bool], kind: str, min_keep: int = 8) -> List[str]:
+    # Re-rank by small cue nudges; keep reasonably broad set
     scored = []
-    for n, b in pool.items():
-        sc = _score_item(n, b, query, kind)
-        if sc >= min_score:
-            scored.append((n, sc))
+    for n in names:
+        scored.append((n, _cue_score_nudge(n, pool.get(n, ""), cues, kind)))
     scored.sort(key=lambda x: (-x[1], _normalize(x[0])))
-    return [n for n, _ in scored]
+    # keep all if few; otherwise keep boosted ones + some tail
+    if len(scored) <= min_keep:
+        return [n for n,_ in scored]
+    # take boosted (>0) plus top up to min_keep
+    boosted = [n for n,s in scored if s > 0]
+    if len(boosted) >= min_keep:
+        return boosted[:min_keep]
+    need = min_keep - len(boosted)
+    tail = [n for n,_ in scored if n not in boosted][:need]
+    return boosted + tail
 
-# Selector prompt (fallback only)
-SELECTOR_INSTRUCTION = (
-    "You are selecting relevant forklift {kind} for the user's scenario.\n"
-    "You can ONLY choose items from the CANDIDATES list provided. Do NOT invent anything.\n"
-    "Use general forklift knowledge and HINTS.\n"
-    "Return JSON only with exact names from the candidates: {\"items\": [\"Name 1\", \"Name 2\", ...]}\n"
-    "If nothing is relevant, return {\"items\": []}.\n"
-    "\nUSER SCENARIO:\n{query}\n"
-    "\nHINTS:\n{hints}\n"
-    "\nCANDIDATES ({count}):\n{candidates}\n"
-)
+# ------------------------------- Tire curation --------------------------------
+_TIRE_WORDS = ("tire", "tyre", "pneumatic", "cushion")
+def _is_tire(name: str, blurb: str = "") -> bool:
+    s = f"{name} {blurb}".lower()
+    return any(w in s for w in _TIRE_WORDS) or any(k in s for k in [
+        "solid pneumatic", "non-marking", "dual"
+    ])
 
-def _format_candidates(d: Dict[str, str]) -> str:
-    return "\n".join(f"- {n}: {d.get(n,'')}" for n in d.keys())
+def _score_tire(name: str, blurb: str, query: str, cues: Dict[str, bool]) -> float:
+    s = f"{name} {blurb}".lower()
+    score = 0.0
+    if cues["outdoor"]:
+        if "solid pneumatic" in s: score += 5
+        if "pneumatic" in s:      score += 4
+        if "dual" in s:           score += 3
+        if "non-marking" in s:    score -= 3
+        if "cushion" in s:        score -= 2
+    if cues["indoor"]:
+        if "non-marking" in s:    score += 5
+        if "cushion" in s:        score += 4
+        if "pneumatic" in s:      score -= 2
+        if "solid pneumatic" in s:score -= 1
+        if "dual" in s:           score -= 1
+    if cues["cold"]:
+        if "non-marking" in s:    score += 2
+    return score
 
+def _curate_tires(names: List[str], pool: Dict[str, str], cues: Dict[str, bool], list_all: bool) -> List[str]:
+    if list_all:
+        return names
+    tires = [(n, _score_tire(n, pool.get(n, ""), "", cues)) for n in names if _is_tire(n, pool.get(n, ""))]
+    non_tires = [n for n in names if not _is_tire(n, pool.get(n, ""))]
+    tires_sorted = [n for n, _ in sorted(tires, key=lambda x: (-x[1], _normalize(x[0])))]
+    top_tires = tires_sorted[:2]  # show only top 1–2
+    return [n for n in names if n in non_tires or n in top_tires]
+
+# ------------------------------- LLM helpers ---------------------------------
 def _llm(messages, model: str, temperature: float = 0.2) -> str:
     resp = client.chat.completions.create(
         model=model,
@@ -351,28 +365,39 @@ def _classify(user_text: str) -> Dict[str, str]:
             return {"intent":"list_all","item":""}
         return {"intent":"unknown","item":""}
 
-def _llm_select(d: Dict[str, str], kind_label: str, query: str, hints: List[str]) -> List[str]:
-    if not d:
+# Final grounded selector (never invents names)
+_SELECTOR_INSTRUCTION = (
+    "Choose the most relevant forklift {kind} for the user's scenario, using general forklift knowledge. "
+    "You MUST select only from the CANDIDATES provided. Do NOT invent new items.\n"
+    "Return JSON only: {\"items\": [\"Exact Name 1\", \"Exact Name 2\", ...]}\n\n"
+    "SCENARIO:\n{query}\n\n"
+    "CANDIDATES ({count}):\n{candidates}\n"
+)
+
+def _format_candidates_list(names: List[str], pool: Dict[str, str]) -> str:
+    return "\n".join(f"- {n}: {pool.get(n,'')}" for n in names)
+
+def _llm_pick_from(names: List[str], pool: Dict[str, str], kind: str, query: str) -> List[str]:
+    if not names:
         return []
     try:
         out = _llm(
             [
                 {"role":"system","content":"Return JSON only. No explanations."},
-                {"role":"user","content": SELECTOR_INSTRUCTION.format(
-                    kind=kind_label,
+                {"role":"user","content": _SELECTOR_INSTRUCTION.format(
+                    kind=kind,
                     query=query,
-                    hints=", ".join(hints) or "(none)",
-                    count=len(d),
-                    candidates=_format_candidates(d)
+                    count=len(names),
+                    candidates=_format_candidates_list(names, pool)
                 )},
             ],
             model=MODEL_SELECTOR,
             temperature=0.1,
         )
         data = json.loads(out)
-        names = [n for n in data.get("items", []) if isinstance(n, str)]
-        set_keys = {k.strip() for k in d.keys()}
-        return [n for n in names if n.strip() in set_keys]
+        sel = [n for n in data.get("items", []) if isinstance(n, str)]
+        allowed = {n.strip() for n in names}
+        return [n for n in sel if n.strip() in allowed]
     except Exception:
         return []
 
@@ -419,76 +444,6 @@ def _decorate_headers(text: str, title: str = "") -> str:
     s = _HEADER_PATTERN.sub(repl, s)
     return s
 
-# ------------------------------ Tire curation --------------------------------
-_TIRE_WORDS = ("tire", "tyre", "pneumatic", "cushion")
-def _is_tire(name: str, blurb: str = "") -> bool:
-    s = f"{name} {blurb}".lower()
-    return any(w in s for w in _TIRE_WORDS) or any(k in s for k in [
-        "solid pneumatic", "non-marking", "dual"
-    ])
-
-def _score_tire(name: str, blurb: str, query: str) -> float:
-    q = (query or "").lower()
-    s = f"{name} {blurb}".lower()
-    score = 0.0
-    # Outdoor / rough / debris / lumber
-    if any(k in q for k in ["lumber", "outdoor", "rough", "debris", "yard", "construction"]):
-        if "solid pneumatic" in s: score += 5
-        if "pneumatic" in s:      score += 4
-        if "dual" in s:           score += 3
-        if "non-marking" in s:    score -= 3
-        if "cushion" in s:        score -= 2
-    # Indoor / finished floors
-    if any(k in q for k in ["indoor", "finished floor", "epoxy", "polished", "warehouse"]):
-        if "non-marking" in s:    score += 5
-        if "cushion" in s:        score += 4
-        if "pneumatic" in s:      score -= 2
-        if "solid pneumatic" in s:score -= 1
-        if "dual" in s:           score -= 1
-    # Cold storage: prefer non-marking if present
-    if "cold storage" in q or "freezer" in q:
-        if "non-marking" in s:    score += 2
-    return score
-
-def _curate_tires(names: List[str], pool: Dict[str, str], query: str, list_all: bool) -> List[str]:
-    if list_all:
-        return names
-    tires = [(n, _score_tire(n, pool.get(n, ""), query)) for n in names if _is_tire(n, pool.get(n, ""))]
-    non_tires = [n for n in names if not _is_tire(n, pool.get(n, ""))]
-    tires_sorted = [n for n, _ in sorted(tires, key=lambda x: (-x[1], _normalize(x[0])))]
-    top_tires = tires_sorted[:2]  # show only the top 1–2
-    result = [n for n in names if n in non_tires or n in top_tires]
-    return result
-
-# ------------------------------ Heuristics -----------------------------------
-def _heuristic_options_for_outdoor_long(pool: Dict[str, str]) -> List[str]:
-    picks = []
-    for name, blurb in pool.items():
-        lower = f"{name} {blurb}".lower()
-        if any(k in lower for k in [
-            "solid pneumatic", "pneumatic", "dual", "traction",
-            "work light", "led", "beacon",
-            "protection", "guard", "radiator", "screen", "belly pan",
-            "long fork", "fork length", "load backrest"
-        ]):
-            picks.append(name)
-    return sorted(set(picks), key=lambda k: _normalize(k))
-
-def _heuristic_attachments_for_outdoor_long(pool: Dict[str, str]) -> List[str]:
-    picks = []
-    for name, blurb in pool.items():
-        lower = f"{name} {blurb}".lower()
-        if any(k in lower for k in [
-            "fork extension", "extension",            # long loads
-            "fork positioner", "positioner",          # mixed widths
-            "sideshift", "side shift", "sideshifter", # placement
-            "load backrest", "lbr",                   # tall/long support
-            "carpet pole", "ram", "pole"              # long round materials
-        ]):
-            picks.append(name)
-    return sorted(set(picks), key=lambda k: _normalize(k))
-
-# ------------------------------ List builders --------------------------------
 def _build_list(kind_name: str, names: List[str], d: Dict[str, str]) -> str:
     header_html = f'<span class="section-label">{kind_name}:</span>'
     if not names:
@@ -499,7 +454,7 @@ def _build_list(kind_name: str, names: List[str], d: Dict[str, str]) -> str:
             f'Try asking more specifically (e.g., "{typename} for long loads", "{typename} for cold storage"), '
             f'or say "all {typename}".'
         )
-    lines = [f"- {n} — {d.get(n, '') or '—'}" for n in names]  # no ** styling
+    lines = [f"- {n} — {d.get(n, '') or '—'}" for n in names]  # no markdown styling
     out = header_html + "\n" + "\n".join(lines)
     return _strip_all_md_emphasis(out)
 
@@ -523,18 +478,18 @@ def _detail_prompt(name: str, seed_blurb: str) -> str:
         f"Helpful context: {seed_blurb}\n"
     )
 
-# ------------------------------- Public entry --------------------------------
+# --------------------------- Public entry point ------------------------------
 def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
         return "Ask about options, attachments, or a specific item (e.g., Fork Positioner)."
 
+    # Intent
     c = _classify(user_text)
     intent = c.get("intent", "unknown")
     item   = (c.get("item") or "").strip()
     t = _normalize(user_text)
     asked_all = any(w in t for w in [" all ", "catalog", "everything", "full list", "complete"])
 
-    # Build pools
     opt_pool = _merged_options()
     att_pool = ATTACHMENTS
 
@@ -544,34 +499,25 @@ def respond_options_attachments(user_text: str) -> str:
             opt_names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
             att_names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
         else:
-            # 1) Deterministic scoring
-            opt_names = _rank_by_score(opt_pool, user_text, "options", min_score=1.5)
-            att_names = _rank_by_score(att_pool, user_text, "attachments", min_score=1.5)
+            # 1) Semantic prefilter (top-K) for each pool
+            cues = _extract_cues(user_text)
+            opt_pref = _rank_semantic(opt_pool, user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
+            att_pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
 
-            # 2) If nothing strong, LLM selector with hints
-            hints = []
-            for p in _active_profiles(user_text):
-                pd = _PROFILES[p]
-                hints.extend(pd.get("pos_any", []) + pd.get("options_pos", []) + pd.get("attachments_pos", []))
-            if _pedestrian_mode(user_text):
-                hints.extend(_PEDESTRIAN_HINTS["pos"])
+            # 2) Cue nudges (environment, pedestrians, long loads, etc.)
+            opt_pref = _apply_cue_nudges(opt_pref, opt_pool, cues, kind="options",     min_keep=10)
+            att_pref = _apply_cue_nudges(att_pref, att_pool, cues, kind="attachments", min_keep=8)
 
-            if not opt_names:
-                opt_names = _llm_select(opt_pool, "options (incl. tires)", user_text, hints)
-            if not att_names:
-                att_names = _llm_select(att_pool, "attachments", user_text, hints)
+            # 3) Final LLM pick (from candidates ONLY)
+            opt_names = _llm_pick_from(opt_pref, opt_pool, "options (incl. tires)", user_text)
+            att_names = _llm_pick_from(att_pref, att_pool, "attachments", user_text)
 
-            # 3) Heuristic fallbacks for outdoor/long if still empty
-            if not opt_names and ("lumber" in user_text.lower() or "outdoor" in user_text.lower()):
-                opt_names = _heuristic_options_for_outdoor_long(opt_pool)
-            if not att_names and ("lumber" in user_text.lower() or "outdoor" in user_text.lower()):
-                att_names = _heuristic_attachments_for_outdoor_long(att_pool)
+            # 4) Tire curation (unless "all")
+            opt_names = _curate_tires(opt_names, opt_pool, cues, list_all=False)
 
-            # Curate tires within options unless "all"
-            opt_names = _curate_tires(opt_names, opt_pool, user_text, list_all=False)
-
-        if not asked_all and not opt_names and not att_names:
-            return "Do you want both lists, or details on a specific item?"
+            # 5) If both empty, ask a clarifier
+            if not opt_names and not att_names:
+                return "Do you want both lists, or details on a specific item?"
 
         parts = []
         parts.append(_build_list("Options", opt_names, opt_pool))
@@ -597,21 +543,23 @@ def respond_options_attachments(user_text: str) -> str:
     if intent == "list_options":
         if asked_all:
             names = sorted(opt_pool.keys(), key=lambda k: _normalize(k))
-        else:
-            names = _rank_by_score(opt_pool, user_text, "options", min_score=1.5)
-            if not names:
-                names = _llm_select(opt_pool, "options (incl. tires)", user_text, [])
-            names = _curate_tires(names, opt_pool, user_text, list_all=False)
+            return _build_list("Options", names, opt_pool)
+        cues = _extract_cues(user_text)
+        pref = _rank_semantic(opt_pool, user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
+        pref = _apply_cue_nudges(pref, opt_pool, cues, kind="options", min_keep=10)
+        names = _llm_pick_from(pref, opt_pool, "options (incl. tires)", user_text)
+        names = _curate_tires(names, opt_pool, cues, list_all=False)
         return _build_list("Options", names, opt_pool)
 
     # Attachments-only
     if intent == "list_attachments":
         if asked_all:
             names = sorted(att_pool.keys(), key=lambda k: _normalize(k))
-        else:
-            names = _rank_by_score(att_pool, user_text, "attachments", min_score=1.5)
-            if not names:
-                names = _llm_select(att_pool, "attachments", user_text, [])
+            return _build_list("Attachments", names, att_pool)
+        cues = _extract_cues(user_text)
+        pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
+        pref = _apply_cue_nudges(pref, att_pool, cues, kind="attachments", min_keep=8)
+        names = _llm_pick_from(pref, att_pool, "attachments", user_text)
         return _build_list("Attachments", names, att_pool)
 
     # Single item deep dive
