@@ -77,24 +77,25 @@
     const responseArea = document.getElementById('response-area');
     const forkliftAnim = document.getElementById('forklift-animation');
     const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
+    const modeSelect = document.getElementById('modeSelect');
     let animationInterval, isForward = true;
 
     async function loadModes() {
       try {
         const res = await fetch('/api/modes');
         const modes = await res.json();
-        document.getElementById('modeSelect').innerHTML =
+        modeSelect.innerHTML =
           modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
       } catch (e) { console.error('Failed to load modes', e); }
     }
     document.addEventListener('DOMContentLoaded', loadModes);
 
-  function formatLabels(text){
-    return text.replace(
-      /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
-      '<span class="section-label">$1</span>'
-    );
-  }
+    function formatLabels(text){
+      return text.replace(
+        /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
+        '<span class="section-label">$1</span>'
+      );
+    }
 
     function renderBubble(text, sender='ai'){
       if(sender==='ai') stopAnimation();
@@ -120,26 +121,62 @@
       forkliftAnim.style.display='none';
     }
 
+    // ------- NEW: helpers for Options & Attachments routing -------
+    function isOptionsAttachmentsMode() {
+      // We support either an explicit id or a label match to keep this robust.
+      const opt = modeSelect.options[modeSelect.selectedIndex];
+      const id = (opt?.value || '').toLowerCase();
+      const label = (opt?.textContent || '').toLowerCase();
+      return id === 'options_attachments'
+             || id === 'attachments_options'
+             || label.includes('option')
+             || label.includes('attachment');
+    }
+
+    async function askOptionsAttachments(userText) {
+      const res = await fetch("/api/options_attachments_chat", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ message: userText })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.answer || "(no response)";
+    }
+
+    async function askGeneralChat(userText, mode) {
+      const res = await fetch('/api/chat', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ question:userText, mode })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { response } = await res.json();
+      return response || '✓';
+    }
+    // -------------------------------------------------------------
+
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
       const q=input.value.trim(); if(!q) return;
-      const mode=document.getElementById('modeSelect')?.value || 'recommendation';
+      const mode=modeSelect?.value || 'recommendation';
 
       renderBubble(q,'user');
       input.value=''; startAnimationLoop();
 
       try{
-        const res = await fetch('/api/chat', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ question:q, mode })
-        });
-        if(res.ok){
-          const { response } = await res.json();
-          renderBubble(response || '✓','ai');
-        }else{
-          renderBubble('❌ Error contacting server.','ai');
+        let answer;
+        if (isOptionsAttachmentsMode()) {
+          // Route to new focused endpoint for this mode
+          answer = await askOptionsAttachments(q);
+        } else {
+          // Existing behavior for all other modes
+          answer = await askGeneralChat(q, mode);
         }
-      }catch(err){ renderBubble(`❌ Error: ${err.message}`,'ai'); }
+        renderBubble(answer,'ai');
+      }catch(err){
+        renderBubble(`❌ Error: ${err.message}`,'ai');
+      }
     });
 
     input.addEventListener('keydown', e=>{

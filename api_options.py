@@ -3,6 +3,9 @@ from flask import Blueprint, jsonify, request
 from typing import Dict, Any
 from ai_logic import load_options, recommend_options_from_sheet
 
+# NEW: import the router we added
+from options_attachments_router import respond_options_attachments
+
 bp_options = Blueprint("bp_options", __name__)
 
 @bp_options.get("/api/options")
@@ -44,3 +47,22 @@ def recommend():
     q = (data.get("query") or "").strip()
     rec = recommend_options_from_sheet(q or "mixed indoor/outdoor, 10000 lb")
     return jsonify(rec)
+
+# NEW: focused chat endpoint for Options & Attachments mode
+@bp_options.post("/api/options_attachments_chat")
+def options_attachments_chat():
+    """
+    Body: { "message": "<user text>" }
+    Behavior:
+      - If user asks for options -> returns options only (short list).
+      - If user asks for attachments -> returns attachments only (short list).
+      - If user names a single item -> returns a concise deep-dive (purpose, benefits, when to use, prerequisites/valving, capacity/visibility impacts, trade-offs).
+      - Never dumps full catalog unless user explicitly asks for "all"/"catalog"/"everything".
+    Returns: { "answer": "<markdown/text>" }
+    """
+    data: Dict[str, Any] = request.get_json(silent=True) or {}
+    user_text = (data.get("message") or "").strip()
+    if not user_text:
+        return jsonify({"answer": "Ask about **options**, **attachments**, or a **specific item** (e.g., Fork Positioner)."})
+    answer = respond_options_attachments(user_text)
+    return jsonify({"answer": answer})

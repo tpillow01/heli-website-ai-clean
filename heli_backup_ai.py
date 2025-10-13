@@ -1,4 +1,4 @@
-# app.py — cleaned & unified (simple per-user "Visited" pins)
+# app.py — cleaned & unified (simple per-user "Visited" pins")
 
 import os, json, difflib, sqlite3, re, time
 from datetime import timedelta
@@ -22,22 +22,39 @@ from ai_logic import (
     debug_parse_and_rank,   # keep this for your debug endpoint
     top_pick_meta,          # promotions helper
     recommend_options_from_sheet,
-    generate_catalog_mode_response,   # <-- add this
+    generate_catalog_mode_response,   # keep if you use catalog mode elsewhere
 )
 
-# Admin usage tracking
+# Admin usage tracking (optional)
 from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
-from api_options import bp_options
 
-# Admin usage tracking bootstrap (creates DB + coarse per-request logging)
-# init_admin_usage(app)
-# app.register_blueprint(admin_bp)
-# app.register_blueprint(bp_options)
+# Options & Attachments API (includes the new focused chat endpoint)
+from api_options import bp_options  # import ONCE
 
 # Promotions
 from promotions import promos_for_context, render_promo_lines
 
-from api_options import bp_options
+# -----------------------------------------------------------------------------
+# App init
+# -----------------------------------------------------------------------------
+app = Flask(__name__, static_folder="static", template_folder="templates")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")  # set env in prod
+app.permanent_session_lifetime = timedelta(days=14)
+
+# -----------------------------------------------------------------------------
+# Blueprints
+# -----------------------------------------------------------------------------
+# Optional admin usage (enable if you actively track this)
+# init_admin_usage(app)
+# app.register_blueprint(admin_bp)
+
+# Register Options/Attachments endpoints:
+#   - GET  /api/options
+#   - POST /api/recommend
+#   - POST /api/options_attachments_chat   <-- focused chat behavior
+app.register_blueprint(bp_options)
+
+# (rest of your routes and logic continue below…)
 
 # -------------------------------------------------------------------------
 # Data boot (safe if the CSV is missing — load_csv_locations should handle)
