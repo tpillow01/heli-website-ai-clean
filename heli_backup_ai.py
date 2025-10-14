@@ -1,65 +1,28 @@
-# app.py — cleaned & unified (simple per-user "Visited" pins")
+# app.py — minimal, safe boot header (no circular imports; lazy blueprint import)
 
-import os, json, difflib, sqlite3, re, time
+import os
+import json
+import sqlite3
+import re
+import time
+import difflib
 from datetime import timedelta
 from functools import wraps
+import logging
 
 from flask import (
     Flask, render_template, request, jsonify, redirect, url_for, session, Response
 )
-
-# Optional helpers for other features you already had
-try:
-    from csv_locations import load_csv_locations, to_geojson  # ok if unused
-except Exception:
-    load_csv_locations = lambda: []  # fallback
-    to_geojson = lambda *args, **kwargs: {}
-
 from werkzeug.security import generate_password_hash, check_password_hash
-from openai import OpenAI
 
-# ---------------------------------------------------------------------
-# Grounding helpers from your ai_logic.py
-# (⚠️ Do NOT import generate_catalog_mode_response to avoid ImportError)
-# ---------------------------------------------------------------------
-from ai_logic import (
-    generate_forklift_context,
-    select_models_for_question,
-    allowed_models_block,
-    debug_parse_and_rank,          # keep this for your debug endpoint
-    top_pick_meta,                 # promotions helper
-    recommend_options_from_sheet,  # Excel-driven recs
-    render_catalog_sections,       # no-followup catalog renderer
-    parse_catalog_intent,          # intent helper
-)
-
-# ---------------------------------------------------------------------
-# Admin usage tracking (optional)
-# ---------------------------------------------------------------------
+# (Optional) OpenAI client — leave imported but do not instantiate here
 try:
-    from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+    from openai import OpenAI  # noqa
 except Exception:
-    admin_bp = None
-    init_admin_usage = None
-    record_event = lambda *a, **k: None
-    log_model_usage = lambda *a, **k: None
-
-# ---------------------------------------------------------------------
-# Options & Attachments API (includes the focused chat endpoints)
-# ---------------------------------------------------------------------
-from api_options import bp_options  # import ONCE
-
-# ---------------------------------------------------------------------
-# Promotions (optional)
-# ---------------------------------------------------------------------
-try:
-    from promotions import promos_for_context, render_promo_lines
-except Exception:
-    promos_for_context = lambda *a, **k: []
-    render_promo_lines = lambda *a, **k: []
+    OpenAI = None  # safe fallback
 
 # -----------------------------------------------------------------------------
-# App init
+# App init (create the app FIRST, then import blueprints/modules)
 # -----------------------------------------------------------------------------
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")  # set env in prod
@@ -67,42 +30,138 @@ app.permanent_session_lifetime = timedelta(days=14)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1",
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "0") == "1",  # dev-safe
 )
 
-from flask import render_template, jsonify, redirect, url_for
+logging.basicConfig(level=logging.INFO)
 
-# Healthcheck so Render stops 502 on cold starts
+# -----------------------------------------------------------------------------
+# Safe/optional helpers: only import AFTER app exists to avoid circular imports
+# -----------------------------------------------------------------------------
+# CSV helpers (optional)
+try:
+    from csv_locations import load_csv_locations, to_geojson
+except Exception as e:
+    logging.warning("csv_locations not available (%s) — falling back to stubs", e)
+    load_csv_locations = lambda: []  # noqa: E731
+    to_geojson = lambda *args, **kwargs: {}  # noqa: E731
+
+# ---- ai_logic extra helpers (with safe fallbacks) ----------------------------
+try:
+    from ai_logic import (
+        recommend_options_from_sheet,
+        render_catalog_sections,
+        top_pick_meta,
+        debug_parse_and_rank,
+    )
+except Exception as e:
+    logging.warning("ai_logic extra helpers missing (%s) — using fallbacks", e)
+
+    def recommend_options_from_sheet(*args, **kwargs):
+        # Expected shape used later in run_recommendation_flow()
+        return {"tire": None, "attachments": [], "options": [], "metadata": {}}
+
+    def render_catalog_sections(*args, **kwargs):
+        # Used by /api/chat when mode='catalog'
+        return "Catalog:\n- Not available (sheet or parser missing)."
+
+    def top_pick_meta(*args, **kwargs):
+        # Used to add 'Current Promotions' (may return None)
+        return None
+
+    def debug_parse_and_rank(*args, **kwargs):
+        # Used by /api/debug_recommend endpoint
+        return {"intent": None, "scores": [], "notes": []}
+
+# Admin usage tracking (optional)
+try:
+    from admin_usage import admin_bp, init_admin_usage, record_event, log_model_usage
+except Exception as e:
+    logging.warning("admin_usage not available (%s) — features disabled", e)
+    admin_bp = None
+    init_admin_usage = None
+    record_event = lambda *a, **k: None  # noqa: E731
+    log_model_usage = lambda *a, **k: None  # noqa: E731
+
+# ai_logic helpers (DEFERRED: do not import anything you don't immediately use)
+try:
+    from ai_logic import (
+        generate_forklift_context,
+        select_models_for_question,
+        allowed_models_block,
+        # keep debug_* imports optional; they may not exist in your file right now
+    )
+except Exception as e:
+    logging.warning("ai_logic import failed (%s) — stubbing functions", e)
+    generate_forklift_context = lambda *a, **k: ""  # noqa: E731
+    select_models_for_question = lambda *a, **k: []  # noqa: E731
+    allowed_models_block = lambda *a, **k: ""  # noqa: E731
+
+# Promotions (optional)
+try:
+    from promotions import promos_for_context, render_promo_lines
+except Exception as e:
+    logging.warning("promotions not available (%s) — skipping", e)
+    promos_for_context = lambda *a, **k: []  # noqa: E731
+    render_promo_lines = lambda *a, **k: []  # noqa: E731
+
+# -----------------------------------------------------------------------------
+# Register blueprints AFTER the app exists to avoid circular imports
+# -----------------------------------------------------------------------------
+# Options & Attachments API (focused chat endpoints)
+try:
+    from api_options import bp_options  # ensure api_options.py does NOT import 'app'
+    app.register_blueprint(bp_options)  # url_prefix can be set inside api_options
+except Exception as e:
+    logging.warning("api_options not available or failed to register (%s)", e)
+
+# Admin blueprint (if available)
+if admin_bp:
+    try:
+        app.register_blueprint(admin_bp)
+        if init_admin_usage:
+            init_admin_usage(app)
+    except Exception as e:
+        logging.warning("Failed to register admin blueprint (%s)", e)
+
+# -----------------------------------------------------------------------------
+# Healthcheck & public landing (moved to /public to avoid route conflict with the
+# login-required "/" route defined later)
+# -----------------------------------------------------------------------------
 @app.get("/healthz")
 def healthz():
     return jsonify({"ok": True})
 
-# Basic index (serve template if present; otherwise plain OK)
-@app.get("/")
-def root():
-    return render_template("index.html")
+@app.get("/public")
+def public_root():
+    # If you don't have templates/index.html yet, render_template will 500.
+    # Keep a safe fallback:
+    try:
+        return render_template("index.html")
+    except Exception:
+        return jsonify({"ok": True, "note": "templates/index.html not found"}), 200
 
-# optional alias
 @app.get("/index")
 def index_alias():
-    return redirect(url_for("root"))
+    return redirect(url_for("public_root"))
+
+# (Optional) Simple 500 handler that logs tracebacks in dev
+@app.errorhandler(500)
+def server_error(e):
+    logging.exception("Unhandled exception: %s", e)
+    return render_template("500.html") if os.path.exists("templates/500.html") else (
+        jsonify({"error": "Internal Server Error"}), 500
+    )
 
 # ---------------------------------------------------------------------
-# Blueprints
+# Blueprints (admin only here — bp_options was already registered above)
 # ---------------------------------------------------------------------
 if admin_bp and init_admin_usage:
     try:
         init_admin_usage(app)
         app.register_blueprint(admin_bp)
-    except Exception:
-        pass
-
-# Register Options/Attachments endpoints:
-#   - GET  /api/options
-#   - POST /api/recommend
-#   - POST /api/catalog_text
-#   - POST /api/options_attachments_chat   (legacy alias)
-app.register_blueprint(bp_options)
+    except Exception as e:
+        logging.warning("Admin blueprint init/register failed (%s)", e)
 
 # -------------------------------------------------------------------------
 # Data boot (safe if the CSV is missing — load_csv_locations should handle)
@@ -117,7 +176,11 @@ except Exception as e:
 # -------------------------------------------------------------------------
 # OpenAI client
 # -------------------------------------------------------------------------
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+if OpenAI and os.getenv("OPENAI_API_KEY"):
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+else:
+    client = None
+    logging.warning("OpenAI client not configured — set OPENAI_API_KEY to enable AI features")
 
 # ─────────────────────────────────────────────────────────────────────────
 # USERS DB (simple SQLite) + VISITS
@@ -518,8 +581,12 @@ def _build_peer_comparison_lines(top_model_code: str, K: int = 4) -> list[str]:
 # Recommendation flow helper
 # ─────────────────────────────────────────────────────────────────────────
 def run_recommendation_flow(user_q: str) -> str:
+    if not client:
+        return ("AI is not configured on this server. "
+                "Set OPENAI_API_KEY to enable recommendations.")
     acct = find_account_by_name(user_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
+    ...
 
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
