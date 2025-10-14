@@ -1003,14 +1003,123 @@ def chat():
         ai_reply = _strip_prompt_leak(ai_reply)
         return jsonify({"response": f"{tag}\n{ai_reply}"})
 
-    # Catalog (attachments + options + tires explainer)
-    if mode in ("attachments_options_catalog", "catalog", "attachments-catalog"):
-        # Tweak max_per_section to tighten/expand the list length
+    def _catalog_noninteractive(q: str, max_per_section: int = 6) -> str:
+        """
+        Tailored, non-interactive catalog answer.
+        - Detects indoor/pedestrian intent from the question.
+        - Scores items for safety/visibility/indoor suitability.
+        - Returns concise lists with 'Why' reasoning.
+        """
+        text = (q or "").lower()
+
+        INDOOR_KWS = {"indoor", "warehouse", "inside", "aisle", "dock", "racking"}
+        PEOPLE_KWS = {"pedestrian", "people", "traffic", "crowd", "bystander", "workers"}
+        SAFETY_KWS = {
+            "blue", "red zone", "proximity", "detection", "presence", "camera",
+            "beacon", "strobe", "horn", "alarm", "white noise", "speed limit",
+            "speed limiter", "slow", "turn", "mirror", "led", "light"
+        }
+        NOISE_KWS  = {"white noise", "quiet", "low noise", "indoor"}
+        TIRE_KWS   = {"non-marking", "cushion"}
+
+        indoor_intent = any(k in text for k in INDOOR_KWS)
+        people_intent = any(k in text for k in PEOPLE_KWS)
+
+        # Pull sheet-driven recs if available
         try:
-            text = render_catalog_sections(user_q, max_per_section=6)
-        except Exception as e:
-            text = f"❌ Catalog error: {e}"
-        return jsonify({"response": text})
+            rec = recommend_options_from_sheet(q) or {}
+        except Exception:
+            rec = {}
+
+        attachments = (rec.get("attachments") or rec.get("others") or [])[:50]
+        options     = (rec.get("options") or [])[:50]
+        tire        = rec.get("tire") or {}
+
+        def _score_item(item: dict) -> float:
+            name = (item.get("name") or "").lower()
+            ben  = (item.get("benefit") or "").lower()
+            blob = f"{name} {ben}"
+            score = 0.0
+            # core safety/visibility in busy indoor environments
+            if indoor_intent:
+                score += 1.0 * sum(kw in blob for kw in INDOOR_KWS)
+            if people_intent:
+                score += 2.0 * sum(kw in blob for kw in PEOPLE_KWS)
+                score += 2.5 * sum(kw in blob for kw in SAFETY_KWS)
+            # noise-friendly alerts for indoors
+            score += 1.0 * sum(kw in blob for kw in NOISE_KWS)
+            # generic bump for clearly safety-labeled items
+            score += 1.0 if any(w in name for w in ["safety", "pedestrian", "visibility"]) else 0.0
+            return score
+
+        def _pick(items: list[dict]) -> list[dict]:
+            # unique by name, keep highest score
+            best = {}
+            for it in items:
+                nm = (it.get("name") or "").strip()
+                if not nm:
+                    continue
+                sc = _score_item(it)
+                if nm not in best or sc > best[nm][0]:
+                    best[nm] = (sc, it)
+            ranked = sorted(best.values(), key=lambda t: t[0], reverse=True)
+            out = [it for sc, it in ranked]
+            # If nothing scored (e.g., sheet lacks keywords), fall back to original order
+            return out if ranked and ranked[0][0] > 0 else items
+
+        top_attachments = _pick(attachments)[:max_per_section]
+        top_options     = _pick(options)[:max_per_section]
+
+        # Build Tire line: default to indoor-friendly if sheet is empty
+        tire_line = None
+        if tire.get("name"):
+            ben = (tire.get("benefit") or "").strip()
+            tire_line = f"- {tire['name']}" + (f" — {ben}" if ben else "")
+        elif indoor_intent:
+            tire_line = "- Cushion, non-marking — protects floors; best for smooth indoor concrete"
+
+        def _mk_lines(items: list[dict]) -> list[str]:
+            lines = []
+            for it in items:
+                nm = (it.get("name") or "").strip()
+                if not nm:
+                    continue
+                ben = (it.get("benefit") or "").strip()
+                # Add short 'Why' if missing and we know the intent
+                if not ben:
+                    low = nm.lower()
+                    if "blue" in low or "red" in low or "light" in low:
+                        ben = "boosts pedestrian visibility in busy aisles"
+                    elif "white noise" in low or "alarm" in low:
+                        ben = "audible alert that’s clearer (and less disruptive) indoors"
+                    elif "speed" in low or "slow" in low or "turn" in low:
+                        ben = "reduces risk in high-traffic areas"
+                    elif "camera" in low or "mirror" in low:
+                        ben = "improves line-of-sight near pedestrians and racking"
+                    elif "presence" in low or "proximity" in low or "detection" in low:
+                        ben = "alerts operator to nearby people"
+                lines.append(f"- {nm}" + (f" — {ben}" if ben else ""))
+            return lines or ["- Not specified"]
+
+        # Headline: answer the *question*, then the lists
+        headline_bits = []
+        if indoor_intent:
+            headline_bits.append("indoor warehouse")
+        if people_intent:
+            headline_bits.append("high pedestrian traffic")
+        if not headline_bits:
+            headline = "Recommended attachments & options"
+        else:
+            headline = "Recommended for " + " with ".join(headline_bits)
+
+        blocks = [headline]
+        if tire_line:
+            blocks.append("Tire Type:\n" + tire_line)
+
+        blocks.append("Attachments:\n" + "\n".join(_mk_lines(top_attachments)))
+        blocks.append("Options:\n"     + "\n".join(_mk_lines(top_options)))
+
+        return "\n".join(blocks).strip()
 
     # Recommendation (default)
     ai_reply = run_recommendation_flow(user_q)
