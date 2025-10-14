@@ -46,32 +46,94 @@ except Exception as e:
     load_csv_locations = lambda: []  # noqa: E731
     to_geojson = lambda *args, **kwargs: {}  # noqa: E731
 
-# ---- ai_logic extra helpers (with safe fallbacks) ----------------------------
+# ---- ai_logic extra helpers (with safe fallbacks + non-interactive wrapper) --
 try:
     from ai_logic import (
         recommend_options_from_sheet,
-        render_catalog_sections,
+        render_catalog_sections as _render_catalog_sections,  # import real impl
         top_pick_meta,
         debug_parse_and_rank,
     )
+
+    # Wrap to force non-interactive "both lists" and strip follow-up prompts.
+    def render_catalog_sections(q: str, max_per_section: int = 6, **kwargs) -> str:
+        # 1) Try to call the underlying function in a non-interactive way
+        out = None
+        try:
+            out = _render_catalog_sections(
+                q,
+                max_per_section=max_per_section,
+                selection="both",
+                interactive=False,
+                **kwargs,
+            )
+        except TypeError:
+            # Fallback signatures if the impl doesn't accept those kwargs
+            try:
+                out = _render_catalog_sections(q, max_per_section=max_per_section, selection="both", **kwargs)
+            except TypeError:
+                out = _render_catalog_sections(q, max_per_section=max_per_section)
+
+        except Exception as e:
+            out = f"__ERROR__::{e}"
+
+        # 2) Strip any interactive follow-up lines that slipped through
+        if isinstance(out, str):
+            out = re.sub(r'(?im)^\s*Do you want options, attachments.*$', '', out)
+            out = re.sub(r'(?im)^\s*Want me to include attachments.*$', '', out)
+            out = re.sub(r'\n{3,}', '\n\n', out).strip()
+
+            # If it already contains both sections, return it
+            has_opts = bool(re.search(r'(?mi)^\s*Options:\s*$', out) or "Options:" in out)
+            has_att  = bool(re.search(r'(?mi)^\s*Attachments:\s*$', out) or "Attachments:" in out)
+            if has_opts and has_att:
+                return out
+
+        # 3) Final fallback: build both sections from the sheet recs so we never loop
+        try:
+            rec = recommend_options_from_sheet(q) or {}
+        except Exception:
+            rec = {}
+
+        def _lines(rows, n=6):
+            lines = []
+            for r in (rows or [])[:n]:
+                nm = (r.get("name") or "").strip()
+                if not nm:
+                    continue
+                ben = (r.get("benefit") or "").strip()
+                lines.append(f"- {nm}" + (f" — {ben}" if ben else ""))
+            return lines or ["- Not specified"]
+
+        # tire
+        t = rec.get("tire")
+        if t and t.get("name"):
+            ben = (t.get("benefit") or "").strip()
+            tire_line = f"- {t['name']}" + (f" — {ben}" if ben else "")
+        else:
+            tire_line = "- Not specified"
+
+        attachments_block = "Attachments:\n" + "\n".join(_lines(rec.get("attachments") or rec.get("others")))
+        options_block     = "Options:\n"     + "\n".join(_lines(rec.get("options")))
+        tire_block        = "Tire Type:\n"   + tire_line
+
+        return "\n".join([tire_block, attachments_block, options_block]).strip()
+
 except Exception as e:
     logging.warning("ai_logic extra helpers missing (%s) — using fallbacks", e)
 
     def recommend_options_from_sheet(*args, **kwargs):
-        # Expected shape used later in run_recommendation_flow()
         return {"tire": None, "attachments": [], "options": [], "metadata": {}}
 
     def render_catalog_sections(*args, **kwargs):
-        # Used by /api/chat when mode='catalog'
-        return "Catalog:\n- Not available (sheet or parser missing)."
+        return "Tire Type:\n- Not specified\nAttachments:\n- Not specified\nOptions:\n- Not specified"
 
     def top_pick_meta(*args, **kwargs):
-        # Used to add 'Current Promotions' (may return None)
         return None
 
     def debug_parse_and_rank(*args, **kwargs):
-        # Used by /api/debug_recommend endpoint
         return {"intent": None, "scores": [], "notes": []}
+# ------------------------------------------------------------------------------
 
 # Admin usage tracking (optional)
 try:
