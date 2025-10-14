@@ -2,18 +2,26 @@
 # Excel-typed Options & Attachments router with:
 # - True "ALL" handling (full lists from Excel on request)
 # - Environment-aware curation for normal queries
-# - Loop-proof clarifiers (asks at most once)
+# - Loop-PROOF behavior (no back-and-forth clarifiers)
 # - Clean HTML section headers (no markdown **)
+# - Safe OpenAI guards (won’t crash if key/package missing)
 
 from __future__ import annotations
 import os
 import re
 import json
 from typing import Dict, Tuple, List
-from openai import OpenAI
 
-# ---------------- OpenAI client & models ----------------
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ---------------- OpenAI client & models (SAFE GUARD) ----------------
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:
+    OpenAI = None  # noqa
+
+if OpenAI and os.getenv("OPENAI_API_KEY"):
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+else:
+    client = None  # guarded use below
 
 MODEL_CLASSIFIER = os.getenv("OA_CLASSIFIER_MODEL", "gpt-4o-mini")
 MODEL_RESPONDER  = os.getenv("OA_RESPONDER_MODEL",  "gpt-4o-mini")
@@ -91,12 +99,13 @@ SYSTEM_PROMPT = (
 _CUES = {
     "indoor":        ["indoor", "warehouse", "finished floor", "epoxy", "polished"],
     "outdoor":       ["outdoor", "yard", "rough", "gravel", "pothole", "construction", "lumber", "timber", "debris"],
-    "pedestrians":   ["busy", "people", "pedestrian", "foot traffic", "crowded"],
+    "pedestrians":   ["busy", "people", "pedestrian", "foot traffic", "crowded", "workers", "bystander"],
     "long_loads":    ["long", "bundle", "lumber", "pipe", "tubing", "oversized"],
     "dust":          ["dust", "sawdust", "powder", "grain", "cement"],
     "cold":          ["cold storage", "freezer", "low-temp", "low temp", "freezing"],
     "precision":     ["precision", "fine", "tight aisle", "narrow aisle", "delicate"],
     "wet":           ["wet", "washdown", "rain", "condensation"],
+    "dark":          ["dark", "poor lighting", "dim", "low light"],
 }
 def _extract_cues(q: str) -> Dict[str, bool]:
     t = (q or "").lower()
@@ -106,6 +115,9 @@ def _extract_cues(q: str) -> Dict[str, bool]:
 def _embed(texts: List[str]) -> List[List[float]]:
     if not texts:
         return []
+    if not client:
+        # safe fallback: no embeddings available
+        return [[0.0] * 8] * (len(texts))
     resp = client.embeddings.create(model=EMBED_MODEL, input=texts)
     return [d.embedding for d in resp.data]
 
@@ -161,10 +173,13 @@ def _curate_tires(names: List[str], pool: Dict[str, str], cues: Dict[str, bool])
     top_tires = tires_sorted[:2]
     return [n for n in names if n in non_tires or n in top_tires]
 
-# ---------------- LLM helpers ----------------
+# ---------------- LLM helpers (guarded) ----------------
 def _llm(messages, model: str, temperature: float = 0.2) -> str:
+    if not client:
+        # Safe fallback: no LLM, return empty string
+        return ""
     resp = client.chat.completions.create(model=model, temperature=temperature, messages=messages)
-    return resp.choices[0].message.content
+    return resp.choices[0].message.content if resp and resp.choices else ""
 
 # Grounded selector (choose only from candidate names)
 _SELECTOR_INSTRUCTION = (
@@ -194,7 +209,7 @@ def _llm_pick_from(names: List[str], pool: Dict[str, str], kind: str, query: str
             model=MODEL_SELECTOR,
             temperature=0.1,
         )
-        data = json.loads(out)
+        data = json.loads(out) if out else {}
         sel = [n for n in data.get("items", []) if isinstance(n, str)]
         allowed = {n.strip() for n in names}
         return [n for n in sel if n.strip() in allowed]
@@ -234,7 +249,7 @@ def _classify_llm(user_text: str) -> Dict[str, str]:
         temperature=0.1,
     )
     try:
-        data = json.loads(out)
+        data = json.loads(out) if out else {}
         return {"intent": str(data.get("intent", "unknown") or "unknown"),
                 "item":   str(data.get("item", "") or "")}
     except Exception:
@@ -285,7 +300,7 @@ def _classify(user_text: str) -> Dict[str, str]:
     if any(cues.values()):
         return {"intent":"both_lists","item":""}
 
-    # fallback to LLM once
+    # fallback to LLM once (guarded)
     try:
         guess = _classify_llm(traw)
         if guess.get("intent") and guess["intent"] != "unknown":
@@ -364,6 +379,57 @@ def _detail_prompt(name: str, seed_blurb: str) -> str:
         f"Helpful context: {seed_blurb}\n"
     )
 
+# ---------------- Indoor/pedestrian/dark fallback (new) ----------------
+def _fallback_curated_for_indoor_pedestrians(opt_pool: Dict[str, str], att_pool: Dict[str, str]) -> Tuple[List[str], List[str]]:
+    """
+    If ranking/LLM selection returns nothing, pick sensible defaults by keyword.
+    Returns (options, attachments) lists of names (not blurbs).
+    """
+    def _pick_by_keywords(pool: Dict[str, str], keywords: List[str], limit: int = 6) -> List[str]:
+        names = []
+        for name, blurb in pool.items():
+            s = f"{name} {blurb}".lower()
+            if any(k in s for k in keywords):
+                names.append(name)
+        # dedupe while preserving insertion order
+        seen, out = set(), []
+        for n in names:
+            if n not in seen:
+                out.append(n); seen.add(n)
+        return out[:limit] if out else []
+
+    # Options (incl. tires) for dark, indoor, high pedestrian traffic
+    option_keywords = [
+        "blue light", "red light", "pedestrian", "warning light", "strobe", "beacon",
+        "white noise", "alarm", "backup alarm",
+        "led work light", "led light",
+        "camera", "rear camera", "mirror",
+        "speed limit", "speed limiter", "cornering", "turn", "slow",
+        "presence", "proximity", "detection",
+        "non-marking", "cushion",  # tires exposed via _merged_options()
+    ]
+    attach_keywords = [
+        "sideshift", "side shift", "side-shift",
+        "fork positioner", "positioner",
+        "load backrest", "backrest",
+        "panoramic mirror", "mirror",
+    ]
+
+    opt_names = _pick_by_keywords(opt_pool, option_keywords, limit=8)
+    att_names = _pick_by_keywords(att_pool, attach_keywords, limit=6)
+
+    # If still empty, include the three most common indoor-safety picks
+    if not opt_names:
+        for fallback in ["Blue Pedestrian Warning Light", "White-Noise Backup Alarm", "LED Work Lights"]:
+            if fallback in opt_pool:
+                opt_names.append(fallback)
+    if not att_names:
+        for fallback in ["Sideshifter", "Fork Positioner", "Load Backrest"]:
+            if fallback in att_pool and fallback not in att_names:
+                att_names.append(fallback)
+
+    return opt_names[:8], att_names[:6]
+
 # ---------------- Public entry point ----------------
 def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
@@ -410,10 +476,10 @@ def respond_options_attachments(user_text: str) -> str:
 
         # Light nudges for common environments
         def _nudge(names: List[str], pool: Dict[str, str], kind: str) -> List[str]:
-            if kind == "options" and (cues.get("indoor") or cues.get("pedestrians")):
-                pri = ["camera", "radar", "ops", "operator presence", "speed", "finger", "blue", "beacon", "horn", "mirror", "non-marking", "cushion", "led"]
-            elif kind == "attachments" and (cues.get("indoor") or cues.get("precision")):
-                pri = ["sideshift", "positioner", "load backrest"]
+            if (kind == "options") and (cues.get("indoor") or cues.get("pedestrians") or cues.get("dark")):
+                pri = ["camera", "radar", "ops", "operator presence", "speed", "finger", "blue", "beacon", "horn", "mirror", "non-marking", "cushion", "led", "white noise"]
+            elif (kind == "attachments") and (cues.get("indoor") or cues.get("precision")):
+                pri = ["sideshift", "positioner", "load backrest", "mirror"]
             else:
                 pri = []
             def score(n):
@@ -432,8 +498,8 @@ def respond_options_attachments(user_text: str) -> str:
             opt_names = _curate_tires(opt_names, opt_pool, cues)
 
         if not opt_names and not att_names:
-            # One-time clarifier (no loop)
-            return 'Do you want options, attachments, or both lists? (e.g., "options only", "attachments only", "both lists")'
+            # No follow-ups — build a safe curated default for indoor/pedestrian/dark
+            opt_names, att_names = _fallback_curated_for_indoor_pedestrians(opt_pool, att_pool)
 
         parts = [
             _build_list("Options", opt_names, opt_pool),
@@ -452,7 +518,9 @@ def respond_options_attachments(user_text: str) -> str:
         if names:
             names = _curate_tires(names, opt_pool, cues)
         if not names:
-            return 'Want me to include attachments too, or show all options? (say "both lists" or "all options")'
+            # Fall back to curated indoor/pedestrian defaults (options only)
+            fallback_opts, _ = _fallback_curated_for_indoor_pedestrians(opt_pool, att_pool)
+            names = fallback_opts
         return _build_list("Options", names, opt_pool)
 
     # -------- ATTACHMENTS ONLY (curated unless "all") --------
@@ -463,7 +531,9 @@ def respond_options_attachments(user_text: str) -> str:
         pref = _rank_semantic(att_pool, user_text, extra_context="Select attachments for this scenario.", top_k=30)
         names = _llm_pick_from(pref, att_pool, "attachments", user_text)
         if not names:
-            return 'Want me to include options too, or show all attachments? (say "both lists" or "all attachments")'
+            # Fall back to curated indoor/pedestrian defaults (attachments only)
+            _, fallback_atts = _fallback_curated_for_indoor_pedestrians(_merged_options(), att_pool)
+            names = fallback_atts
         return _build_list("Attachments", names, att_pool)
 
     # -------- DETAIL ITEM --------
@@ -499,5 +569,18 @@ def respond_options_attachments(user_text: str) -> str:
             fallback = _decorate_headers(fallback, title=f"{key} — Deep Dive")
             return _strip_all_md_emphasis(fallback)
 
-    # Final fallback: treat as both_lists once (no loop)
-    return respond_options_attachments(user_text + " (both lists)")
+    # Final fallback: treat as both_lists in a non-interactive way (no loop)
+    cues = _extract_cues(user_text)
+    opt_pref = _rank_semantic(_merged_options(), user_text, extra_context="Select options (including tires) for this scenario.", top_k=30)
+    att_pref = _rank_semantic(ATTACHMENTS, user_text, extra_context="Select attachments for this scenario.", top_k=30)
+    opt_names = _llm_pick_from(opt_pref, _merged_options(), "options (incl. tires)", user_text)
+    att_names = _llm_pick_from(att_pref, ATTACHMENTS, "attachments", user_text)
+    if opt_names:
+        opt_names = _curate_tires(opt_names, _merged_options(), cues)
+    if not opt_names and not att_names:
+        opt_names, att_names = _fallback_curated_for_indoor_pedestrians(_merged_options(), ATTACHMENTS)
+    parts = [
+        _build_list("Options", opt_names, _merged_options()),
+        _build_list("Attachments", att_names, ATTACHMENTS),
+    ]
+    return "\n\n".join(parts)
