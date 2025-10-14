@@ -70,6 +70,8 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1",
 )
 
+from flask import render_template, jsonify, redirect, url_for
+
 # Healthcheck so Render stops 502 on cold starts
 @app.get("/healthz")
 def healthz():
@@ -77,11 +79,13 @@ def healthz():
 
 # Basic index (serve template if present; otherwise plain OK)
 @app.get("/")
-def index():
-    try:
-        return render_template("index.html")
-    except Exception:
-        return "OK", 200
+def root():
+    return render_template("index.html")
+
+# optional alias
+@app.get("/index")
+def index_alias():
+    return redirect(url_for("root"))
 
 # ---------------------------------------------------------------------
 # Blueprints
