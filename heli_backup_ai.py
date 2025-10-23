@@ -173,6 +173,16 @@ except Exception as e:
 # Register blueprints AFTER the app exists to avoid circular imports
 # -----------------------------------------------------------------------------
 # Options & Attachments API (focused chat endpoints)
+
+# Contact Finder (new) — registers /api/contacts/search and /api/chat_contact_finder
+try:
+    from contact_finder import contact_finder_bp  # contact_finder.py must NOT import 'app'
+    app.register_blueprint(contact_finder_bp)
+    logging.info("✅ contact_finder blueprint registered")
+except Exception as e:
+    logging.warning("contact_finder not available or failed to register (%s)", e)
+
+
 try:
     from api_options import bp_options  # ensure api_options.py does NOT import 'app'
     app.register_blueprint(bp_options)  # url_prefix can be set inside api_options
@@ -968,6 +978,22 @@ def chat():
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
+    # Contact Finder (CSV lookup)
+    if mode == "contact_finder":
+        try:
+            from contact_finder import chat_contact_finder as _cf_handler
+            # Let the wrapper parse the natural language (e.g., "give me contacts for FCI Construction")
+            page = int((data.get("page") or 1))
+            page_size = int((data.get("page_size") or 25))
+            with app.test_request_context(json={"message": user_q, "page": page, "page_size": page_size}):
+                resp = _cf_handler()
+            payload = resp.get_json() if hasattr(resp, "get_json") else (resp or {})
+            text = payload.get("text") or payload.get("error") or "_No contacts found._"
+            return jsonify({"response": text})
+        except Exception as e:
+            app.logger.exception("Contact Finder error: %s", e)
+            return jsonify({"response": f"❌ Contact Finder error: {e}"}), 500
+
     # Sales Coach
     if mode == "coach":
         ai_reply = run_sales_coach(user_q)
@@ -1224,6 +1250,7 @@ def api_modes():
         {"id": "inquiry",        "label": "Customer Inquiry"},
         {"id": "coach",          "label": "Sales Coach"},
         {"id": "catalog",        "label": "Attachments/Options Catalog"},
+        {"id": "contact_finder", "label": "Contact Finder"},
     ])
 
 # ─────────────────────────────────────────────────────────────────────────
