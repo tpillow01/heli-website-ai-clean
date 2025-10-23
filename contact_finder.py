@@ -126,30 +126,56 @@ def _dedupe_by_person(records: List[Dict]) -> List[Dict]:
     return out
 
 def _format_contact_line(r: Dict) -> str:
-    name = " ".join(x for x in [r.get("First Name",""), r.get("Last Name","")] if x)
-    title = r.get("Title","")
-    city = r.get("Contact City","")
-    state = r.get("Contact State","")
-    emails = ", ".join([e for e in [r.get("Email 1",""), r.get("Email 2","")] if e])
-    phones = ", ".join([p for p in [r.get("Company Phone 1",""), r.get("Company Phone 2","")] if p])
-    website = r.get("Website","")
-    bits = []
-    if title: bits.append(title)
-    if city or state: bits.append(f"{city}, {state}".strip(", "))
-    if emails: bits.append(emails)
-    if phones: bits.append(phones)
-    if website: bits.append(website)
-    bits_str = " • ".join(bits) if bits else ""
-    return f"- {name}" + (f" — {bits_str}" if bits_str else "")
+    """
+    Pretty, multi-line "card" per contact:
+    - Name — Title
+      • Location: City, ST
+      • Email: a@b.com, c@d.com
+      • Phone: 555-..., 555-...
+      • Website: example.com
+    """
+    first = (r.get("First Name", "") or "").strip()
+    last  = (r.get("Last Name", "") or "").strip()
+    name  = " ".join([x for x in [first, last] if x])
+
+    title = (r.get("Title", "") or "").strip()
+    city  = (r.get("Contact City", "") or "").strip()
+    state = (r.get("Contact State", "") or "").strip()
+    emails = ", ".join([e for e in [(r.get("Email 1") or "").strip(),
+                                    (r.get("Email 2") or "").strip()] if e])
+    phones = ", ".join([p for p in [(r.get("Company Phone 1") or "").strip(),
+                                    (r.get("Company Phone 2") or "").strip()] if p])
+    website = (r.get("Website", "") or "").strip()
+
+    # Top line: Name — Title (title optional)
+    top = f"- **{name}**" if name else "- **(Name not specified)**"
+    if title:
+        top += f" — {title}"
+
+    lines = [top]
+
+    # Subsequent lines only if present
+    loc_bits = ", ".join([b for b in [city, state] if b])
+    if loc_bits:
+        lines.append(f"  • Location: {loc_bits}")
+    if emails:
+        lines.append(f"  • Email: {emails}")
+    if phones:
+        lines.append(f"  • Phone: {phones}")
+    if website:
+        lines.append(f"  • Website: {website}")
+
+    return "\n".join(lines)
 
 def _format_company_block(company: str, rows: List[Dict], page: int, page_size: int, total: int) -> str:
-    header = f"**Contacts for:** {company}  \n"
-    lines = "\n".join(_format_contact_line(r) for r in rows)
+    header = f"**Contacts for:** {company}\n\n"
+    # Blank line between contacts for readability
+    body = "\n\n".join(_format_contact_line(r) for r in rows) if rows else "_No contacts found._"
     footer = ""
     if total > page_size:
         last_page = (total + page_size - 1) // page_size
-        footer = f"\n_Page {page} of {last_page} • {total} matches_"
-    return header + (lines or "_No contacts found._") + (footer if footer else "")
+        footer = f"\n\n_Page {page} of {last_page} • {total} matches_"
+    return header + body + footer
 
 def _extract_company_query(raw: str) -> str:
     """
