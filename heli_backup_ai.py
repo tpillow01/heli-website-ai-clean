@@ -257,9 +257,15 @@ else:
     logging.warning("OpenAI client not configured — set OPENAI_API_KEY to enable AI features")
 
 # ─────────────────────────────────────────────────────────────────────────
-# USERS DB (simple SQLite) + VISITS
+# USERS DB (SQLite) on a persistent disk + VISITS
 # ─────────────────────────────────────────────────────────────────────────
-USERS_DB_PATH = os.getenv("USERS_DB_PATH", "heli_users.db")
+from pathlib import Path
+
+PERSISTENT_DIR = os.getenv("PERSISTENT_DIR") or "/var/data"
+Path(PERSISTENT_DIR).mkdir(parents=True, exist_ok=True)
+
+# Default to a persistent location; allow override via USERS_DB_PATH
+USERS_DB_PATH = os.getenv("USERS_DB_PATH", os.path.join(PERSISTENT_DIR, "heli_users.db"))
 
 def get_user_db():
     conn = sqlite3.connect(USERS_DB_PATH)
