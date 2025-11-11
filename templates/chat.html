@@ -97,11 +97,19 @@
       );
     }
 
-    function renderBubble(text, sender='ai'){
+    function renderBubble(textOrHtml, sender='ai'){
       if(sender==='ai') stopAnimation();
-      const el=document.createElement('div');
-      el.className=`response-bubble ${sender}`;
-      el.innerHTML = formatLabels(text).split('\n').map(l=>`<div>${l}</div>`).join('');
+      const el = document.createElement('div');
+      el.className = `response-bubble ${sender}`;
+
+      // If the server returned HTML (e.g., <ul>…</ul>), render as HTML.
+      const looksLikeHtml = /<\s*\w+[^>]*>/.test(textOrHtml);
+      if (looksLikeHtml) {
+        el.innerHTML = textOrHtml;
+      } else {
+        el.innerHTML = formatLabels(textOrHtml).split('\n').map(l=>`<div>${l}</div>`).join('');
+      }
+
       responseArea.appendChild(el);
       el.scrollIntoView({behavior:'smooth'});
     }
@@ -134,26 +142,31 @@
     }
 
     async function askOptionsAttachments(userText) {
-      const res = await fetch("/api/options_attachments_chat", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ message: userText })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data.answer || "(no response)";
-    }
+  const res = await fetch("/api/options_attachments_chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q: userText }) // <-- IMPORTANT: server expects "q"
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
 
-    async function askGeneralChat(userText, mode) {
-      const res = await fetch('/api/chat', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ question:userText, mode })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { response } = await res.json();
-      return response || '✓';
-    }
+  // Prefer HTML if present; fall back gracefully
+  return data.html || data.response || data.text || data.message || '(no response)';
+}
+
+   async function askGeneralChat(userText, mode) {
+  const res = await fetch('/api/chat', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ question:userText, mode })
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+
+  // Handle either plain text or html if your /api/chat ever returns it
+  return data.html || data.response || data.text || data.message || '✓';
+}
+
     // -------------------------------------------------------------
 
     form.addEventListener('submit', async (e)=>{
