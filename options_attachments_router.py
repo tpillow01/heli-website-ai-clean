@@ -1,16 +1,26 @@
 # options_attachments_router.py
 # Excel-typed Options & Attachments router with:
+# - Accurate intent handling (options / attachments / both / ALL / specific item)
+# - Environment-aware curation (indoor/outdoor/pedestrians/dark/etc.)
 # - True "ALL" handling (full lists from Excel on request)
-# - Environment-aware curation for normal queries
+# - Deep-dive item responder with clean HTML section headers (no markdown **)
 # - Loop-PROOF behavior (no back-and-forth clarifiers)
-# - Clean HTML section headers (no markdown **)
 # - Safe OpenAI guards (won’t crash if key/package missing)
+# - Cache-safe reload endpoint for when you update the Excel
+# - Flask Blueprint: /api/options (GET/POST), /api/options/reload (POST)
 
 from __future__ import annotations
 import os
 import re
 import json
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
+
+# ---------------- Optional Flask blueprint ----------------
+try:
+    from flask import Blueprint, request, jsonify
+    options_bp: Optional["Blueprint"] = Blueprint("options_attachments", __name__)
+except Exception:  # If Flask not present (e.g., running unit tests)
+    options_bp = None  # type: ignore
 
 # ---------------- OpenAI client & models (SAFE GUARD) ----------------
 try:
@@ -29,7 +39,8 @@ MODEL_SELECTOR   = os.getenv("OA_SELECTOR_MODEL",   "gpt-4o-mini")
 EMBED_MODEL      = os.getenv("OA_EMBED_MODEL",      "text-embedding-3-small")
 
 # ---------------- Load typed catalogs (option / attachment / tire) ----------------
-from ai_logic import load_catalogs  # requires 'type' column in your Excel
+# Expected: ai_logic.load_catalogs() -> (options: {name:benefit}, attachments: {...}, tires: {...})
+from ai_logic import load_catalogs  # load_catalogs is @lru_cache(maxsize=1) in ai_logic
 
 OPTIONS: Dict[str, str] = {}
 ATTACHMENTS: Dict[str, str] = {}
@@ -43,10 +54,22 @@ def _hydrate_catalogs() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]
         return {}, {}, {}
 
 def reload_catalogs() -> None:
+    """
+    Public: clear ai_logic.load_catalogs() cache and reload all three dicts.
+    Call this after updating forklift_options_benefits.xlsx.
+    """
+    from ai_logic import load_catalogs as _load  # local import avoids circulars
+    try:
+        _load.cache_clear()  # ensure fresh read of the Excel every time you reload
+    except Exception:
+        pass
     global OPTIONS, ATTACHMENTS, TIRES
-    OPTIONS, ATTACHMENTS, TIRES = _hydrate_catalogs()
+    try:
+        OPTIONS, ATTACHMENTS, TIRES = _load()
+    except Exception:
+        OPTIONS, ATTACHMENTS, TIRES = {}, {}, {}
 
-# Initial load
+# Initial load at import time
 reload_catalogs()
 
 def _merged_options() -> Dict[str, str]:
@@ -150,19 +173,19 @@ def _is_tire(name: str, blurb: str = "") -> bool:
 def _score_tire(name: str, blurb: str, cues: Dict[str, bool]) -> float:
     s = f"{name} {blurb}".lower()
     score = 0.0
-    if cues["outdoor"]:
+    if cues.get("outdoor"):
         if "solid pneumatic" in s: score += 5
         if "pneumatic" in s:      score += 4
         if "dual" in s:           score += 3
         if "non-marking" in s:    score -= 3
         if "cushion" in s:        score -= 2
-    if cues["indoor"]:
+    if cues.get("indoor"):
         if "non-marking" in s:    score += 5
         if "cushion" in s:        score += 4
         if "pneumatic" in s:      score -= 2
         if "solid pneumatic" in s:score -= 1
         if "dual" in s:           score -= 1
-    if cues["cold"]:
+    if cues.get("cold"):
         if "non-marking" in s:    score += 2
     return score
 
@@ -170,7 +193,7 @@ def _curate_tires(names: List[str], pool: Dict[str, str], cues: Dict[str, bool])
     tires = [(n, _score_tire(n, pool.get(n, ""), cues)) for n in names if _is_tire(n, pool.get(n, ""))]
     non_tires = [n for n in names if not _is_tire(n, pool.get(n, ""))]
     tires_sorted = [n for n,_ in sorted(tires, key=lambda x: (-x[1], _normalize(x[0])))]
-    top_tires = tires_sorted[:2]
+    top_tires = tires_sorted[:2]  # surface best-fit tires alongside curated options
     return [n for n in names if n in non_tires or n in top_tires]
 
 # ---------------- LLM helpers (guarded) ----------------
@@ -430,7 +453,7 @@ def _fallback_curated_for_indoor_pedestrians(opt_pool: Dict[str, str], att_pool:
 
     return opt_names[:8], att_names[:6]
 
-# ---------------- Public entry point ----------------
+# ---------------- Public entry point (core) ----------------
 def respond_options_attachments(user_text: str) -> str:
     if not (user_text or "").strip():
         return "Ask about options, attachments, all items, or a specific item (e.g., Fork Positioner)."
@@ -584,3 +607,26 @@ def respond_options_attachments(user_text: str) -> str:
         _build_list("Attachments", att_names, ATTACHMENTS),
     ]
     return "\n\n".join(parts)
+
+# ---------------- Flask routes (optional, only if Blueprint available) ----------------
+if options_bp is not None:
+    @options_bp.route("/api/options", methods=["GET", "POST"])
+    def api_options_attachments():
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            q = data.get("q") or data.get("query") or ""
+        else:
+            q = request.args.get("q") or request.args.get("query") or ""
+        txt = str(q or "").strip()
+        if not txt:
+            return jsonify({"ok": True, "html": "Ask about options, attachments, all items, or a specific item (e.g., Fork Positioner)."})
+        html = respond_options_attachments(txt)
+        return jsonify({"ok": True, "html": html})
+
+    @options_bp.route("/api/options/reload", methods=["POST"])
+    def api_reload_options():
+        try:
+            reload_catalogs()
+            return jsonify({"ok": True, "msg": "Catalogs reloaded."})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500

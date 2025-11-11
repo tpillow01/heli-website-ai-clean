@@ -35,10 +35,11 @@ def _make_code(name: str) -> str:
 def _read_catalog_df():
     """
     Reads Excel and normalizes columns to:
-      - name    (from 'Name' or 'Option')
-      - benefit (from 'Benefit' or empty string)
-      - type    (from 'Type' or inferred; values: option | attachment | tire)
-    Returns a pandas DataFrame with columns ['name','benefit','type'] or None if missing.
+      - name         (from 'Name' or 'Option')
+      - benefit      (from 'Benefit' | 'Desc' | 'Description' or empty)
+      - type         (from 'Type' | 'Category' or inferred; values: option | attachment | tire)
+      - subcategory  (optional, from 'Subcategory')
+    Returns a pandas DataFrame with columns ['name','benefit','type','subcategory'] or None if missing.
     """
     if _pd is None or not os.path.exists(_OPTIONS_XLSX):
         print(f"[ai_logic] Excel not found or pandas missing: {_OPTIONS_XLSX}")
@@ -57,56 +58,64 @@ def _read_catalog_df():
     name_col    = cols.get("name") or cols.get("option")
     benefit_col = cols.get("benefit") or cols.get("desc") or cols.get("description")
     type_col    = cols.get("type") or cols.get("category")
+    subcat_col  = cols.get("subcategory")
 
     if not name_col:
         print("[ai_logic] Excel must have a 'Name' or 'Option' column.")
         return None
 
-    # Build a normalized frame
-    use_cols = [name_col]
-    if benefit_col: use_cols.append(benefit_col)
-    if type_col:    use_cols.append(type_col)
-    df = df[use_cols].copy()
+    # Start from a copy so we can create defaults before selecting
+    df = df.copy()
 
-    rename = {name_col: "name"}
-    if benefit_col: rename[benefit_col] = "benefit"
-    if type_col:    rename[type_col]    = "type"
-    df.rename(columns=rename, inplace=True)
+    # Create standardized columns (ensure they exist even if source missing)
+    df["__name__"] = df[name_col].astype(str).str.strip()
 
-    # Defaults & normalization
-    if "benefit" not in df.columns:
-        df["benefit"] = ""
-    if "type" not in df.columns:
-        df["type"] = ""
+    if benefit_col:
+        df["__benefit__"] = df[benefit_col].astype(str).str.strip()
+    else:
+        df["__benefit__"] = ""
 
-    df["name"]    = df["name"].astype(str).str.strip()
-    df["benefit"] = df["benefit"].astype(str).str.strip()
-    df["type"]    = df["type"].astype(str).str.strip().str.lower()
+    if type_col:
+        df["__type__"] = df[type_col].astype(str).str.strip().str.lower()
+    else:
+        df["__type__"] = ""
 
-    # Fill missing/unknown types
-    typed = []
-    for _, r in df.iterrows():
-        nm = r["name"].strip()
-        if not nm:
-            continue
-        tp = (r.get("type") or "").strip().lower()
-        if not tp:
-            ln = nm.lower()
-            if any(k in ln for k in ("clamp","sideshift","side shift","positioner","rotator","boom","pole","ram","fork extension","extensions","push/ pull","push/pull","slip-sheet","slipsheet","bale","carton","drum")):
-                tp = "attachment"
-            elif "tire" in ln or "pneumatic" in ln or "non-mark" in ln or "cushion" in ln or "dual" in ln:
-                tp = "tire"
-            else:
-                tp = "option"
-        else:
-            if tp in ("options","opt"): tp = "option"
-            if tp in ("attachments","att"): tp = "attachment"
-            if tp == "tires": tp = "tire"
+    if subcat_col:
+        df["__subcategory__"] = df[subcat_col].astype(str).str.strip()
+    else:
+        df["__subcategory__"] = ""
 
-        typed.append({"name": nm, "benefit": r.get("benefit",""), "type": tp})
+    # Normalize type labels
+    df["__type__"] = df["__type__"].replace({
+        "options": "option",
+        "opt": "option",
+        "attachments": "attachment",
+        "att": "attachment",
+        "tires": "tire"
+    })
 
-    out = _pd.DataFrame(typed, columns=["name","benefit","type"])
-    out = out[out["name"] != ""]
+    # Fallback: infer type if missing/blank
+    def _infer_type(nm: str, tp: str) -> str:
+        if tp:
+            return tp
+        ln = (nm or "").lower()
+        if any(k in ln for k in (
+            "clamp","sideshift","side shift","side-shift","positioner","rotator",
+            "boom","pole","ram","fork extension","extensions","push/ pull","push/pull",
+            "slip-sheet","slipsheet","bale","carton","drum","load stabilizer","inverta"
+        )):
+            return "attachment"
+        if any(k in ln for k in ("tire","tyre","pneumatic","cushion","non-mark","dual")):
+            return "tire"
+        return "option"
+
+    df["__type__"] = df.apply(lambda r: _infer_type(r["__name__"], r["__type__"]), axis=1)
+
+    # Build final, drop empties
+    out = df.loc[df["__name__"] != "", ["__name__","__benefit__","__type__","__subcategory__"]].rename(
+        columns={"__name__":"name","__benefit__":"benefit","__type__":"type","__subcategory__":"subcategory"}
+    )
+
     return out
 
 @lru_cache(maxsize=1)
@@ -172,6 +181,16 @@ def option_benefit(name: str) -> Optional[str]:
     """Convenience: get the benefit sentence for an exact option/tire name."""
     row = options_lookup_by_name().get((name or "").lower())
     return row["benefit"] if row else None
+@lru_cache(maxsize=1)
+def load_catalog_rows() -> list[dict]:
+    """
+    Return every Excel row as dicts with keys:
+      name, benefit, type, subcategory
+    """
+    df = _read_catalog_df()
+    if df is None or df.empty:
+        return []
+    return df.to_dict(orient="records")
 
 # === Sales Catalog helpers ===============================================
 
@@ -269,15 +288,21 @@ def _infer_category_from_name(n: str) -> str:
     return "Other"
 
 def _options_iter():
-    """Yield normalized option rows from the Excel loader with inferred category."""
-    for o in load_options():
-        name = o["name"]
+    """
+    Yield normalized rows with a 'category' that prefers the Excel Subcategory,
+    falling back to name-based inference when blank.
+    """
+    for r in load_catalog_rows():  # has: name, benefit, type, subcategory
+        name = r.get("name", "")
+        benefit = r.get("benefit", "")
+        subcat = (r.get("subcategory") or "").strip()
+        category = subcat if subcat else _infer_category_from_name(name)
         yield {
-            "code": o["code"],
+            "code": _make_code(name),
             "name": name,
-            "benefit": o.get("benefit",""),
-            "category": _infer_category_from_name(name),
-            "lname": name.lower()
+            "benefit": benefit,
+            "category": category,
+            "lname": name.lower(),
         }
 
 def _score_option_for_needs(opt: dict, want: dict) -> float:
@@ -962,101 +987,29 @@ def parse_catalog_intent(user_q: str) -> dict:
 
     return {"which": which, "list_all": list_all}
 
-def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
-    """
-    If the user explicitly asks for attachments/options/both (or to list *all*),
-    render exactly those sections from your Excel-driven catalog. Otherwise,
-    return the scenario-aware compact recommendation (Tires, Attachments, Options).
-    """
-    intent = parse_catalog_intent(user_q)
-    which = intent["which"]
-    want_all = intent["list_all"]
-
-    def _line(n, b):
-        b = (b or "").strip()
-        return f"- {n}" + (f" — {b}" if b else "")
-
-    # If the user said "both"/"attachments"/"options" or asked to list all:
-    if which in ("both", "attachments", "options") or want_all:
-        # Group via existing helpers: _options_iter() & _is_attachment()
-        tires, atts, opts = [], [], []
-        for o in _options_iter():  # yields: {code,name,benefit,category,lname}
-            nm = o["name"]; ben = o.get("benefit", ""); nl = o["lname"]
-            if "tire" in nl:
-                tires.append((nm, ben))
-            elif _is_attachment(nl):
-                atts.append((nm, ben))
-            else:
-                opts.append((nm, ben))
-
-        tires.sort(key=lambda x: x[0].lower())
-        atts.sort(key=lambda x: x[0].lower())
-        opts.sort(key=lambda x: x[0].lower())
-
-        out = []
-        if which == "attachments":
-            out.append("Attachments:")
-            out.extend([_line(n, b) for n, b in atts] or ["- None found in catalog"])
-        elif which == "options":
-            out.append("Options:")
-            out.extend([_line(n, b) for n, b in opts] or ["- None found in catalog"])
-        else:  # both or list_all
-            out.append("Attachments:")
-            out.extend([_line(n, b) for n, b in atts] or ["- None found in catalog"])
-            out.append("")
-            out.append("Options:")
-            out.extend([_line(n, b) for n, b in opts] or ["- None found in catalog"])
-            # Only include Tires if user said "all" explicitly
-            if want_all:
-                out.append("")
-                out.append("Tires:")
-                out.extend([_line(n, b) for n, b in tires] or ["- None found in catalog"])
-
-        return _plain("\n".join(out))
-
-    # ---------- Scenario-aware compact output (no markdown) ----------
-    # Guard against missing flagger; only call if defined.
-    flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
-
-    rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
-    tire_pick   = rec.get("tire")
-    attachments = rec.get("attachments", [])[:max_per_section]
-    options     = rec.get("options", [])[:max_per_section]
-
-    lines: list[str] = []
-
-    # Tires
-    lines.append("Tires (recommended):")
-    if tire_pick:
-        best_for = ", ".join(_env_tags_for_name(tire_pick.get("name", ""))) or "General use"
-        lines.append(_line(tire_pick.get("name", ""), tire_pick.get("benefit", "")))
-        lines.append(f"  Best used for: {best_for}")
-    else:
-        lines.append("- Not specified")
-
-    # Attachments
-    lines.append("")
-    lines.append("Attachments (relevant):")
-    if attachments:
-        for a in attachments:
-            lines.append(_line(a.get("name", ""), a.get("benefit", "")))
-    else:
-        lines.append("- Not specified")
-
-    # Options
-    lines.append("")
-    lines.append("Options (relevant):")
-    if options:
-        for o in options:
-            lines.append(_line(o.get("name", ""), o.get("benefit", "")))
-    else:
-        lines.append("- Not specified")
-
-    return _plain("\n".join(lines))
-
-# --- Back-compat export for heli_backup_ai.py ----------------------------
-# Keep the old name so imports don't break.
-generate_catalog_mode_response = render_catalog_sections
+# --- maintenance: refresh Excel-driven caches ----------------------------
+def refresh_catalog_caches():
+    """Call this after you update forklift_options_benefits.xlsx to reload data."""
+    try:
+        load_catalogs.cache_clear()
+    except Exception:
+        pass
+    try:
+        load_options.cache_clear()
+    except Exception:
+        pass
+    try:
+        load_attachments.cache_clear()
+    except Exception:
+        pass
+    try:
+        load_tires_as_options.cache_clear()
+    except Exception:
+        pass
+    try:
+        options_lookup_by_name.cache_clear()
+    except Exception:
+        pass
 
 # ── load JSON once -------------------------------------------------------
 def _load_json(path: str):
