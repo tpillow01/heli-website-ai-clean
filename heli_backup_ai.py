@@ -35,6 +35,10 @@ app.config.update(
 
 logging.basicConfig(level=logging.INFO)
 
+# --- Options & Attachments API (blueprint) ---
+from options_attachments_router import options_bp
+app.register_blueprint(options_bp)
+
 # -----------------------------------------------------------------------------
 # Safe/optional helpers: only import AFTER app exists to avoid circular imports
 # -----------------------------------------------------------------------------
@@ -73,7 +77,6 @@ try:
                 out = _render_catalog_sections(q, max_per_section=max_per_section, selection="both", **kwargs)
             except TypeError:
                 out = _render_catalog_sections(q, max_per_section=max_per_section)
-
         except Exception as e:
             out = f"__ERROR__::{e}"
 
@@ -132,8 +135,23 @@ except Exception as e:
         return None
 
     def debug_parse_and_rank(*args, **kwargs):
-        return {"intent": None, "scores": [], "notes": []}
-# ------------------------------------------------------------------------------
+        return {"parsed": {}, "top": []}
+
+# -----------------------------------------------------------------------------
+# Compatibility alias to prevent 404s from older frontend code:
+# /api/options_attachments_chat → same behavior as /api/options
+# -----------------------------------------------------------------------------
+@app.route("/api/options_attachments_chat", methods=["POST"])
+def api_options_attachments_chat():
+    data = request.get_json(silent=True) or {}
+    q = (data.get("q") or data.get("query") or "").strip()
+    if not q:
+        return jsonify({
+            "ok": True,
+            "text": "Ask about options, attachments, list all, or a specific item (e.g., Fork Positioner)."
+        })
+    text = render_catalog_sections(q)
+    return jsonify({"ok": True, "text": text})
 
 # ------------------------------------------------------------------------------
 
