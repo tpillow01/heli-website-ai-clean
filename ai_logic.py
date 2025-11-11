@@ -180,6 +180,173 @@ def _read_catalog_df():
 
     return out
 
+# ---------------- Query intent + filtering ------------------------------------
+import re
+
+def _interpret_query(q: str) -> dict:
+    """
+    Pull lightweight intent from free text.
+    Returns dict with:
+      wanted_types: set of {'attachment','option','tire'} or empty for 'auto'
+      subcategory: canonicalized subcategory string or ''
+      keywords: set of free-text tokens (lowercased) used to bias selection
+      list_all: True if user asked to list everything for a type
+    """
+    txt = (q or "").strip()
+    low = txt.lower()
+
+    wanted = set()
+    # Hard type hints
+    if re.search(r"\battachment(s)?\b", low):
+        wanted.add("attachment")
+    if re.search(r"\boption(s)?\b", low):
+        wanted.add("option")
+    if re.search(r"\btire(s)?\b|\btyre(s)?\b", low):
+        wanted.add("tire")
+
+    # Specific phrasing like "which attachment"
+    if re.search(r"\bwhich\s+attachment\b", low):
+        wanted = {"attachment"}
+
+    # Subcategory only queries (e.g., "show visibility subcategory only")
+    subcat = ""
+    m = re.search(r"\bsubcategory\s*:\s*([^\n\r]+)", low)  # subcategory: X
+    if m:
+        subcat = m.group(1).strip()
+    else:
+        m2 = re.search(r"\b(show|only|just)\s+([a-z][a-z\s\-\/]+)\s+subcategory\b", low)
+        if m2:
+            subcat = m2.group(2).strip()
+
+    # Clean/canonicalize subcategory with your helper
+    try:
+        subcat = _canon_subcat(subcat)
+    except Exception:
+        pass
+
+    # "list all ..." intent
+    list_all = bool(re.search(r"\blist\s+all\b", low))
+
+    # Keywords for relevance bias (avoid single stopwords)
+    tokens = set(t for t in re.findall(r"[a-z0-9\-+/]{3,}", low))
+
+    return {
+        "wanted_types": wanted,   # empty means auto
+        "subcategory": subcat,    # '' means ignore
+        "keywords": tokens,
+        "list_all": list_all,
+    }
+
+def _score_row(name: str, benefit: str, kw: set[str]) -> float:
+    """Very small relevance bump from keyword overlaps."""
+    blob = f"{name} {benefit}".lower()
+    score = 0.0
+    for t in kw:
+        if t in blob:
+            score += 1.0
+    # Prefer exact phrase “paper roll” when present, etc.
+    if "paper" in kw and "roll" in kw and "roll" in blob:
+        score += 2.0
+    return score
+
+# ---------------- Render (main entry used by router) --------------------------
+def render_catalog_sections(user_q: str) -> str:
+    """
+    Returns plain text with Tires / Attachments / Options sections,
+    filtered by query intent:
+      - type gating (attachments-only, tires-only, etc.)
+      - subcategory gating
+      - simple keyword relevance sort
+    """
+    # Load current catalogs you prepared elsewhere (must exist)
+    cats = load_catalogs()  # should return dicts: {"options":[...], "attachments":[...], "tires":[...]}
+    opts = cats.get("options") or []
+    atts = cats.get("attachments") or []
+    tires = cats.get("tires") or []
+
+    want = _interpret_query(user_q)
+    wanted_types = want["wanted_types"]     # empty → auto
+    subcat = want["subcategory"]
+    kw = want["keywords"]
+    list_all = want["list_all"]
+
+    # If user asks “which attachment …” force attachments mode
+    if not wanted_types:
+        if re.search(r"\bwhich\s+attachment\b", user_q.lower()):
+            wanted_types = {"attachment"}
+
+    # If subcategory present, narrow to that subcategory only
+    def _subcat_match(row):
+        if not subcat:
+            return True
+        s = (row.get("subcategory") or "").strip()
+        return s.lower() == subcat.lower()
+
+    # Helper to prepare a list with relevance
+    def _prep(rows):
+        out = []
+        for r in rows:
+            nm = r.get("name","").strip()
+            be = r.get("benefit","").strip()
+            if not nm:
+                continue
+            if not _subcat_match(r):
+                continue
+            score = _score_row(nm, be, kw)
+            out.append((score, nm, be))
+        # If user said "list all", keep original-ish order (no sort by score)
+        if list_all:
+            return [(_, n, b) for (_, n, b) in out]
+        # Otherwise sort best-first
+        return sorted(out, key=lambda x: x[0], reverse=True)
+
+    # Decide which sections to show
+    show_tires = ("tire" in wanted_types) if wanted_types else False
+    show_atts  = ("attachment" in wanted_types) if wanted_types else False
+    show_opts  = ("option" in wanted_types) if wanted_types else False
+
+    # Auto-mode: if the user didn’t name a type and didn’t ask list-all,
+    # default to *Attachments* when the question starts with “which attachment …”,
+    # otherwise default to Options (general) and include Tires only if tirey words appear.
+    if not wanted_types:
+        text_low = user_q.lower()
+        tirey = bool(re.search(r"\b(non-?mark|pneumatic|cushion|tire|tyre|dual)\b", text_low))
+        if re.search(r"\bwhich\s+attachment\b", text_low):
+            show_atts = True
+        else:
+            show_opts = True
+            show_tires = tirey
+
+    # Build sections
+    lines = []
+
+    if show_tires:
+        rows = _prep(tires)
+        lines.append("Tires (recommended):" if rows else "Tires (recommended):\n- Not specified")
+        for _, n, b in rows[:30]:
+            lines.append(f"- {n} - {b}")
+        lines.append("")  # spacer
+
+    if show_atts:
+        rows = _prep(atts)
+        lines.append("Attachments (relevant):" if rows else "Attachments (relevant):\n- Not specified")
+        for _, n, b in rows[:30]:
+            lines.append(f"- {n} - {b}")
+        lines.append("")
+
+    if show_opts:
+        rows = _prep(opts)
+        lines.append("Options (relevant):" if rows else "Options (relevant):\n- Not specified")
+        for _, n, b in rows[:30]:
+            lines.append(f"- {n} - {b}")
+        lines.append("")
+
+    # If nothing matched anything at all, be explicit
+    if not any([show_tires, show_atts, show_opts]):
+        lines.append("No matching items. Try specifying a type (attachments/options/tires) or a subcategory.")
+
+    return "\n".join(lines).strip()
+
 @lru_cache(maxsize=1)
 def load_catalogs() -> tuple[dict, dict, dict]:
     """
