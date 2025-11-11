@@ -154,13 +154,20 @@ except Exception as e:
 def api_options_attachments_chat():
     data = request.get_json(silent=True) or {}
     q = (data.get("q") or data.get("query") or "").strip()
+
+    # Empty prompt -> short help text
     if not q:
         return jsonify({
             "ok": True,
-            "text": "Ask about options, attachments, list all, or a specific item (e.g., Fork Positioner)."
+            "response": "Ask about options, attachments, tires, or say 'list all options & attachments'."
         })
-    text = render_catalog_sections(q)
-    return jsonify({"ok": True, "text": text})
+
+    try:
+        result = render_catalog_sections(q)  # <- always returns a string
+    except Exception as e:
+        result = f"Error generating catalog response: {e}"
+
+    return jsonify({"ok": True, "response": result})
 
 # ------------------------------------------------------------------------------
 
