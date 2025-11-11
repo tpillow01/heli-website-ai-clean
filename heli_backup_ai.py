@@ -36,8 +36,17 @@ app.config.update(
 logging.basicConfig(level=logging.INFO)
 
 # --- Options & Attachments API (blueprint) ---
-from options_attachments_router import options_bp
-app.register_blueprint(options_bp)
+try:
+    from options_attachments_router import options_bp
+    # Avoid duplicate registration on hot-reloads (use the blueprint's actual name)
+    bp_name = getattr(options_bp, "name", "options_attachments")
+    if bp_name not in app.blueprints:
+        app.register_blueprint(options_bp)
+        logging.info("✅ Registered blueprint: %s", bp_name)
+    else:
+        logging.info("ℹ️ Blueprint already registered: %s", bp_name)
+except Exception as e:
+    logging.warning("options_attachments_router not available (%s)", e)
 
 # -----------------------------------------------------------------------------
 # Safe/optional helpers: only import AFTER app exists to avoid circular imports
@@ -200,12 +209,8 @@ try:
 except Exception as e:
     logging.warning("contact_finder not available or failed to register (%s)", e)
 
-
-try:
-    from api_options import bp_options  # ensure api_options.py does NOT import 'app'
-    app.register_blueprint(bp_options)  # url_prefix can be set inside api_options
-except Exception as e:
-    logging.warning("api_options not available or failed to register (%s)", e)
+# Deprecated: legacy api_options blueprint (superseded by options_attachments_router)
+# Intentionally not importing/registering bp_options to prevent route duplication.
 
 # Admin blueprint (if available)
 if admin_bp:
@@ -245,15 +250,7 @@ def server_error(e):
         jsonify({"error": "Internal Server Error"}), 500
     )
 
-# ---------------------------------------------------------------------
-# Blueprints (admin only here — bp_options was already registered above)
-# ---------------------------------------------------------------------
-if admin_bp and init_admin_usage:
-    try:
-        init_admin_usage(app)
-        app.register_blueprint(admin_bp)
-    except Exception as e:
-        logging.warning("Admin blueprint init/register failed (%s)", e)
+# Admin blueprint already registered above (avoid duplicate registration).
 
 # -------------------------------------------------------------------------
 # Data boot (safe if the CSV is missing — load_csv_locations should handle)
@@ -684,8 +681,8 @@ def run_recommendation_flow(user_q: str) -> str:
                 "Set OPENAI_API_KEY to enable recommendations.")
     acct = find_account_by_name(user_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
-    ...
 
+    # Removed stray ellipsis; proceed directly to model selection
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
     print(f"[recommendation] allowed models: {allowed}")
@@ -728,11 +725,23 @@ def run_recommendation_flow(user_q: str) -> str:
 
     try:
         t0 = time.perf_counter()
+
+        mt_raw = (os.getenv("OAI_MAX_TOKENS") or "").strip()
+        tp_raw = (os.getenv("OAI_TEMPERATURE") or "").strip()
+        try:
+            max_tokens_val = int(mt_raw) if mt_raw else 650
+        except Exception:
+            max_tokens_val = 650
+        try:
+            temperature_val = float(tp_raw) if tp_raw else 0.4
+        except Exception:
+            temperature_val = 0.4
+
         resp = client.chat.completions.create(
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             messages=messages,
-            max_tokens=650,
-            temperature=0.4
+            max_tokens=max_tokens_val,
+            temperature=temperature_val
         )
         duration_ms = int((time.perf_counter() - t0) * 1000)
         log_model_usage(
@@ -802,7 +811,7 @@ def run_recommendation_flow(user_q: str) -> str:
 # ========= Structured "top-N by spend" helper (inline) =========
 import pandas as pd
 from functools import lru_cache
-from typing import Union
+from typing import Union, List, Dict
 
 _CAT_MAP = {
     "rental": "Rental Revenue R12",
@@ -1104,10 +1113,10 @@ def chat():
 
         try:
             resp = client.chat.completions.create(
-                model="gpt-4",
+                model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
                 messages=messages,
-                max_tokens=900,
-                temperature=0.35
+                max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
+                temperature=float(os.getenv("OAI_TEMPERATURE", "0.35"))
             )
             ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
@@ -1133,8 +1142,8 @@ def chat():
             "beacon", "strobe", "horn", "alarm", "white noise", "speed limit",
             "speed limiter", "slow", "turn", "mirror", "led", "light"
         }
-        NOISE_KWS  = {"white noise", "quiet", "low noise", "indoor"}
-        TIRE_KWS   = {"non-marking", "cushion"}
+        NOISE_KWS = {"white noise", "quiet", "low noise", "indoor"}
+        TIRE_KWS = {"non-marking", "cushion"}
 
         indoor_intent = any(k in text for k in INDOOR_KWS)
         people_intent = any(k in text for k in PEOPLE_KWS)
@@ -1146,12 +1155,12 @@ def chat():
             rec = {}
 
         attachments = (rec.get("attachments") or rec.get("others") or [])[:50]
-        options     = (rec.get("options") or [])[:50]
-        tire        = rec.get("tire") or {}
+        options = (rec.get("options") or [])[:50]
+        tire = rec.get("tire") or {}
 
         def _score_item(item: dict) -> float:
             name = (item.get("name") or "").lower()
-            ben  = (item.get("benefit") or "").lower()
+            ben = (item.get("benefit") or "").lower()
             blob = f"{name} {ben}"
             score = 0.0
             # core safety/visibility in busy indoor environments
@@ -1163,12 +1172,13 @@ def chat():
             # noise-friendly alerts for indoors
             score += 1.0 * sum(kw in blob for kw in NOISE_KWS)
             # generic bump for clearly safety-labeled items
-            score += 1.0 if any(w in name for w in ["safety", "pedestrian", "visibility"]) else 0.0
+            if any(w in name for w in ["safety", "pedestrian", "visibility"]):
+                score += 1.0
             return score
 
         def _pick(items: list[dict]) -> list[dict]:
             # unique by name, keep highest score
-            best = {}
+            best: dict[str, tuple[float, dict]] = {}
             for it in items:
                 nm = (it.get("name") or "").strip()
                 if not nm:
@@ -1182,10 +1192,10 @@ def chat():
             return out if ranked and ranked[0][0] > 0 else items
 
         top_attachments = _pick(attachments)[:max_per_section]
-        top_options     = _pick(options)[:max_per_section]
+        top_options = _pick(options)[:max_per_section]
 
         # Build Tire line: default to indoor-friendly if sheet is empty
-        tire_line = None
+        tire_line: str | None = None
         if tire.get("name"):
             ben = (tire.get("benefit") or "").strip()
             tire_line = f"- {tire['name']}" + (f" — {ben}" if ben else "")
@@ -1193,7 +1203,7 @@ def chat():
             tire_line = "- Cushion, non-marking — protects floors; best for smooth indoor concrete"
 
         def _mk_lines(items: list[dict]) -> list[str]:
-            lines = []
+            lines: list[str] = []
             for it in items:
                 nm = (it.get("name") or "").strip()
                 if not nm:
@@ -1206,17 +1216,17 @@ def chat():
                         ben = "boosts pedestrian visibility in busy aisles"
                     elif "white noise" in low or "alarm" in low:
                         ben = "audible alert that’s clearer (and less disruptive) indoors"
-                    elif "speed" in low or "slow" in low or "turn" in low:
+                    elif any(k in low for k in ["speed", "slow", "turn"]):
                         ben = "reduces risk in high-traffic areas"
                     elif "camera" in low or "mirror" in low:
                         ben = "improves line-of-sight near pedestrians and racking"
-                    elif "presence" in low or "proximity" in low or "detection" in low:
+                    elif any(k in low for k in ["presence", "proximity", "detection"]):
                         ben = "alerts operator to nearby people"
                 lines.append(f"- {nm}" + (f" — {ben}" if ben else ""))
             return lines or ["- Not specified"]
 
         # Headline: answer the *question*, then the lists
-        headline_bits = []
+        headline_bits: list[str] = []
         if indoor_intent:
             headline_bits.append("indoor warehouse")
         if people_intent:
@@ -1226,20 +1236,25 @@ def chat():
         else:
             headline = "Recommended for " + " with ".join(headline_bits)
 
-        blocks = [headline]
+        blocks: list[str] = [headline]
         if tire_line:
             blocks.append("Tire Type:\n" + tire_line)
-
         blocks.append("Attachments:\n" + "\n".join(_mk_lines(top_attachments)))
-        blocks.append("Options:\n"     + "\n".join(_mk_lines(top_options)))
+        blocks.append("Options:\n" + "\n".join(_mk_lines(top_options)))
 
         return "\n".join(blocks).strip()
+
+    # Catalog (non-interactive list builder)
+    if mode == "catalog":
+        text = _catalog_noninteractive(user_q)
+        return jsonify({"response": text})
 
     # Recommendation (default)
     ai_reply = run_recommendation_flow(user_q)
 
     # Inject Current Promotions
     meta = top_pick_meta(user_q)
+
     if meta:
         top_code, top_class, top_power = meta
         if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
