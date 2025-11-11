@@ -1016,7 +1016,7 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────────────────────────────────
-# Chat API (Recommendation + Inquiry + Coach + Catalog)
+# Chat API (Recommendation + Inquiry + Coach + Catalog) — UI-safe version
 # ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -1025,88 +1025,105 @@ def chat():
     user_q = (data.get("question") or "").strip()
     mode   = (data.get("mode") or "recommendation").lower()
 
+    def _ok(text:str, mode_used:str):
+        # Always provide both keys so old frontends (expecting `text`) render.
+        payload = {
+            "ok": True,
+            "mode_used": mode_used,
+            "response": text,
+            "text": text
+        }
+        return jsonify(payload), 200
+
+    def _err(msg:str, code:int=400):
+        payload = {
+            "ok": False,
+            "mode_used": mode,
+            "response": msg,
+            "text": msg
+        }
+        return jsonify(payload), code
+
     if not user_q:
-        return jsonify({"ok": False, "response": "Please enter a description of the customer’s needs.", "text": "Please enter a description of the customer’s needs."}), 400
+        return _err("Please enter a description of the customer’s needs.", 400)
 
-    app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
+    app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)} :: {user_q[:120]}")
 
-    # ───────── CATALOG FAST-PATH ─────────
-    # If the user asks to show/list options or attachments (or sets mode to catalog),
-    # answer immediately using the non-interactive catalog builder.
-    if (
-        mode in {"catalog", "options", "attachments"}
-        or re.search(r"\b(show|list|all)\s+(options?|attachments?)\b", user_q, re.I)
-        or (re.search(r"\b(options?|attachments?)\b", user_q, re.I) and "recommend" not in user_q.lower())
-    ):
-        try:
-            text = _catalog_noninteractive(user_q)
-            return jsonify({"ok": True, "response": text, "text": text, "message": text})
-        except Exception as e:
-            app.logger.exception("catalog fast-path error: %s", e)
-            err = f"❌ Catalog error: {e}"
-            return jsonify({"ok": False, "response": err, "text": err}), 500
-    # ─────────────────────────────────────
+    # ---------- AUTO-ROUTE: if user asks for options/attachments, force catalog ----------
+    ql = user_q.lower()
+    if any(k in ql for k in ["options", "attachments", "show options", "show attachments", "pedestrian", "traffic"]):
+        mode = "catalog"
 
-    # Contact Finder (CSV lookup)
+    # ---------- CONTACT FINDER ----------
     if mode == "contact_finder":
         try:
             from contact_finder import chat_contact_finder as _cf_handler
-            # Let the wrapper parse the natural language (e.g., "give me contacts for FCI Construction")
             page = int((data.get("page") or 1))
             page_size = int((data.get("page_size") or 25))
             with app.test_request_context(json={"message": user_q, "page": page, "page_size": page_size}):
                 resp = _cf_handler()
             payload = resp.get_json() if hasattr(resp, "get_json") else (resp or {})
-            text = payload.get("text") or payload.get("error") or "_No contacts found._"
-            return jsonify({"ok": True, "response": text, "text": text})
+            text = payload.get("text") or payload.get("response") or payload.get("error") or "_No contacts found._"
+            return _ok(text, "contact_finder")
         except Exception as e:
             app.logger.exception("Contact Finder error: %s", e)
-            err = f"❌ Contact Finder error: {e}"
-            return jsonify({"ok": False, "response": err, "text": err}), 500
+            return _err(f"❌ Contact Finder error: {e}", 500)
 
-    # Sales Coach
+    # ---------- SALES COACH ----------
     if mode == "coach":
-        ai_reply = run_sales_coach(user_q)
-        return jsonify({"ok": True, "response": ai_reply, "text": ai_reply})
-
-    # Inquiry
-    if mode == "inquiry":
-        structured = try_structured_top_spend_answer(user_q)
-        if structured:
-            return jsonify({"ok": True, "response": structured, "text": structured})
-
-        from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
-
-        qnorm = _norm_name(user_q)
-        chosen_name = None
         try:
+            ai_reply = run_sales_coach(user_q)
+        except Exception as e:
+            ai_reply = f"❌ Internal error: {e}"
+        return _ok(ai_reply or "No coach output.", "coach")
+
+    # ---------- INQUIRY ----------
+    if mode == "inquiry":
+        structured = None
+        try:
+            structured = try_structured_top_spend_answer(user_q)
+        except Exception:
+            structured = None
+        if structured:
+            return _ok(structured, "inquiry")
+
+        try:
+            from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
+            qnorm = _norm_name(user_q)
+            chosen_name = None
             for it in make_inquiry_targets():
                 lbl_norm = _norm_name(it.get("label", ""))
                 if lbl_norm and lbl_norm in qnorm:
                     chosen_name = it["label"]
                     break
+            probe = chosen_name or user_q
+            brief = build_inquiry_brief(probe)
         except Exception as e:
-            app.logger.warning(f"scan targets failed: {e}")
+            app.logger.warning("Inquiry context failed: %s", e)
+            brief = None
 
-        probe = chosen_name or user_q
-        brief = build_inquiry_brief(probe)
         if not brief:
-            msg = ("I couldn’t locate that customer in the report/billing data. "
-                   "Please include the company name as it appears in your system.")
-            return jsonify({"ok": True, "response": msg, "text": msg})
+            return _ok(
+                "I couldn’t locate that customer in the report/billing data. "
+                "Please include the company name as it appears in your system.",
+                "inquiry"
+            )
 
         recent_block = ""
-        if brief.get("recent_invoices"):
-            five = brief["recent_invoices"][:5]
-            if five:
-                lines = ["Recent Invoices"]
-                for inv in five:
-                    desc = inv.get("Description", "")
-                    line = f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f}"
-                    if desc:
-                        line += f" | {desc}"
-                    lines.append(line)
-                recent_block = "\n".join(lines)
+        try:
+            if brief.get("recent_invoices"):
+                five = brief["recent_invoices"][:5]
+                if five:
+                    lines = ["Recent Invoices"]
+                    for inv in five:
+                        desc = inv.get("Description", "")
+                        line = f"- {inv['Date']} | {inv['Type']} | ${inv['REVENUE']:,.2f}"
+                        if desc:
+                            line += f" | {desc}"
+                        lines.append(line)
+                    recent_block = "\n".join(lines)
+        except Exception:
+            pass
 
         system_prompt = {
             "role": "system",
@@ -1137,10 +1154,8 @@ def chat():
             )
         }
 
-        messages = [
-            system_prompt,
-            {"role": "system", "content": brief["context_block"]},
-        ]
+        messages = [{"role": "system", "content": system_prompt["content"]},
+                    {"role": "system", "content": brief["context_block"]}]
         if recent_block:
             messages.append({"role": "system", "content": recent_block})
         messages.append({"role": "user", "content": user_q})
@@ -1152,172 +1167,145 @@ def chat():
                 max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
                 temperature=float(os.getenv("OAI_TEMPERATURE", "0.35"))
             )
-            ai_reply = resp.choices[0].message.content.strip()
+            ai_reply = (resp.choices[0].message.content or "").strip()
         except Exception as e:
             ai_reply = f"❌ Internal error: {e}"
 
         tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
         ai_reply = _strip_prompt_leak(ai_reply)
-        out = f"{tag}\n{ai_reply}"
-        return jsonify({"ok": True, "response": out, "text": out})
+        return _ok(f"{tag}\n{ai_reply}", "inquiry")
 
-    def _catalog_noninteractive(q: str, max_per_section: int = 6) -> str:
-        """
-        Tailored, non-interactive catalog answer.
-        - Detects indoor/pedestrian intent from the question.
-        - Scores items for safety/visibility/indoor suitability.
-        - Returns concise lists with 'Why' reasoning.
-        """
-        text = (q or "").lower()
-
-        INDOOR_KWS = {"indoor", "warehouse", "inside", "aisle", "dock", "racking"}
-        PEOPLE_KWS = {"pedestrian", "people", "traffic", "crowd", "bystander", "workers"}
-        SAFETY_KWS = {
-            "blue", "red zone", "proximity", "detection", "presence", "camera",
-            "beacon", "strobe", "horn", "alarm", "white noise", "speed limit",
-            "speed limiter", "slow", "turn", "mirror", "led", "light"
-        }
-        NOISE_KWS = {"white noise", "quiet", "low noise", "indoor"}
-
-        indoor_intent = any(k in text for k in INDOOR_KWS)
-        people_intent = any(k in text for k in PEOPLE_KWS)
-
-        # Pull sheet-driven recs if available
-        try:
-            rec = recommend_options_from_sheet(q) or {}
-        except Exception:
-            rec = {}
-
-        attachments = (rec.get("attachments") or rec.get("others") or [])[:50]
-        options = (rec.get("options") or [])[:50]
-        tire = rec.get("tire") or {}
-
-        def _score_item(item: dict) -> float:
-            name = (item.get("name") or "").lower()
-            ben = (item.get("benefit") or "").lower()
-            blob = f"{name} {ben}"
-            score = 0.0
-            # core safety/visibility in busy indoor environments
-            if indoor_intent:
-                score += 1.0 * sum(kw in blob for kw in INDOOR_KWS)
-            if people_intent:
-                score += 2.0 * sum(kw in blob for kw in PEOPLE_KWS)
-                score += 2.5 * sum(kw in blob for kw in SAFETY_KWS)
-            # noise-friendly alerts for indoors
-            score += 1.0 * sum(kw in blob for kw in NOISE_KWS)
-            # generic bump for clearly safety-labeled items
-            if any(w in name for w in ["safety", "pedestrian", "visibility"]):
-                score += 1.0
-            return score
-
-        def _pick(items: list[dict]) -> list[dict]:
-            # unique by name, keep highest score
-            best: dict[str, tuple[float, dict]] = {}
-            for it in items:
-                nm = (it.get("name") or "").strip()
-                if not nm:
-                    continue
-                sc = _score_item(it)
-                if nm not in best or sc > best[nm][0]:
-                    best[nm] = (sc, it)
-            ranked = sorted(best.values(), key=lambda t: t[0], reverse=True)
-            out = [it for sc, it in ranked]
-            # If nothing scored (e.g., sheet lacks keywords), fall back to original order
-            return out if ranked and ranked[0][0] > 0 else items
-
-        top_attachments = _pick(attachments)[:max_per_section]
-        top_options = _pick(options)[:max_per_section]
-
-        # Build Tire line: default to indoor-friendly if sheet is empty
-        tire_line: str | None = None
-        if tire.get("name"):
-            ben = (tire.get("benefit") or "").strip()
-            tire_line = f"- {tire['name']}" + (f" — {ben}" if ben else "")
-        elif indoor_intent:
-            tire_line = "- Cushion, non-marking — protects floors; best for smooth indoor concrete"
-
-        def _mk_lines(items: list[dict]) -> list[str]:
-            lines: list[str] = []
-            for it in items:
-                nm = (it.get("name") or "").strip()
-                if not nm:
-                    continue
-                ben = (it.get("benefit") or "").strip()
-                # Add short 'Why' if missing and we know the intent
-                if not ben:
-                    low = nm.lower()
-                    if "blue" in low or "red" in low or "light" in low:
-                        ben = "boosts pedestrian visibility in busy aisles"
-                    elif "white noise" in low or "alarm" in low:
-                        ben = "audible alert that’s clearer (and less disruptive) indoors"
-                    elif any(k in low for k in ["speed", "slow", "turn"]):
-                        ben = "reduces risk in high-traffic areas"
-                    elif "camera" in low or "mirror" in low:
-                        ben = "improves line-of-sight near pedestrians and racking"
-                    elif any(k in low for k in ["presence", "proximity", "detection"]):
-                        ben = "alerts operator to nearby people"
-                lines.append(f"- {nm}" + (f" — {ben}" if ben else ""))
-            return lines or ["- Not specified"]
-
-        # Headline: answer the *question*, then the lists
-        headline_bits: list[str] = []
-        if indoor_intent:
-            headline_bits.append("indoor warehouse")
-        if people_intent:
-            headline_bits.append("high pedestrian traffic")
-        if not headline_bits:
-            headline = "Recommended attachments & options"
-        else:
-            headline = "Recommended for " + " with ".join(headline_bits)
-
-        blocks: list[str] = [headline]
-        if tire_line:
-            blocks.append("Tire Type:\n" + tire_line)
-        blocks.append("Attachments:\n" + "\n".join(_mk_lines(top_attachments)))
-        blocks.append("Options:\n" + "\n".join(_mk_lines(top_options)))
-
-        return "\n".join(blocks).strip()
-
-    # Catalog (explicit mode)
+    # ---------- CATALOG (non-interactive) ----------
     if mode == "catalog":
+        def _catalog_noninteractive(q: str, max_per_section: int = 6) -> str:
+            text = (q or "").lower()
+            INDOOR_KWS = {"indoor", "warehouse", "inside", "aisle", "dock", "racking"}
+            PEOPLE_KWS = {"pedestrian", "people", "traffic", "crowd", "bystander", "workers"}
+            SAFETY_KWS = {
+                "blue", "red zone", "proximity", "detection", "presence", "camera",
+                "beacon", "strobe", "horn", "alarm", "white noise", "speed limit",
+                "speed limiter", "slow", "turn", "mirror", "led", "light"
+            }
+            NOISE_KWS = {"white noise", "quiet", "low noise", "indoor"}
+
+            indoor_intent = any(k in text for k in INDOOR_KWS)
+            people_intent = any(k in text for k in PEOPLE_KWS)
+
+            try:
+                rec = recommend_options_from_sheet(q) or {}
+            except Exception:
+                rec = {}
+
+            attachments = (rec.get("attachments") or rec.get("others") or [])[:50]
+            options = (rec.get("options") or [])[:50]
+            tire = rec.get("tire") or {}
+
+            def _score_item(item: dict) -> float:
+                name = (item.get("name") or "").lower()
+                ben = (item.get("benefit") or "").lower()
+                blob = f"{name} {ben}"
+                score = 0.0
+                if indoor_intent:
+                    score += 1.0 * sum(kw in blob for kw in INDOOR_KWS)
+                if people_intent:
+                    score += 2.0 * sum(kw in blob for kw in PEOPLE_KWS)
+                    score += 2.5 * sum(kw in blob for kw in SAFETY_KWS)
+                score += 1.0 * sum(kw in blob for kw in NOISE_KWS)
+                if any(w in name for w in ["safety", "pedestrian", "visibility"]):
+                    score += 1.0
+                return score
+
+            def _pick(items: list[dict]) -> list[dict]:
+                best: dict[str, tuple[float, dict]] = {}
+                for it in items:
+                    nm = (it.get("name") or "").strip()
+                    if not nm:
+                        continue
+                    sc = _score_item(it)
+                    if nm not in best or sc > best[nm][0]:
+                        best[nm] = (sc, it)
+                ranked = sorted(best.values(), key=lambda t: t[0], reverse=True)
+                out = [it for sc, it in ranked]
+                return out if ranked and ranked[0][0] > 0 else items
+
+            top_attachments = _pick(attachments)[:max_per_section]
+            top_options = _pick(options)[:max_per_section]
+
+            # Tire line
+            tire_line: str | None = None
+            if tire.get("name"):
+                ben = (tire.get("benefit") or "").strip()
+                tire_line = f"- {tire['name']}" + (f" — {ben}" if ben else "")
+            elif indoor_intent:
+                tire_line = "- Cushion, non-marking — protects floors; best for smooth indoor concrete"
+
+            def _mk_lines(items: list[dict]) -> list[str]:
+                lines: list[str] = []
+                for it in items:
+                    nm = (it.get("name") or "").strip()
+                    if not nm:
+                        continue
+                    ben = (it.get("benefit") or "").strip()
+                    if not ben and (indoor_intent or people_intent):
+                        low = nm.lower()
+                        if "blue" in low or "red" in low or "light" in low:
+                            ben = "boosts pedestrian visibility in busy aisles"
+                        elif "white noise" in low or "alarm" in low:
+                            ben = "audible alert that’s clearer indoors"
+                        elif any(k in low for k in ["speed", "slow", "turn"]):
+                            ben = "reduces risk in high-traffic areas"
+                        elif "camera" in low or "mirror" in low:
+                            ben = "improves line-of-sight near pedestrians"
+                        elif any(k in low for k in ["presence", "proximity", "detection"]):
+                            ben = "alerts operator to nearby people"
+                    lines.append(f"- {nm}" + (f" — {ben}" if ben else ""))
+                return lines or ["- Not specified"]
+
+            headline = "Recommended attachments & options"
+            bits = []
+            if indoor_intent: bits.append("indoor warehouse")
+            if people_intent: bits.append("high pedestrian traffic")
+            if bits:
+                headline = "Recommended for " + " with ".join(bits)
+
+            blocks: list[str] = [headline]
+            if tire_line:
+                blocks.append("Tire Type:\n" + tire_line)
+            blocks.append("Attachments:\n" + "\n".join(_mk_lines(top_attachments)))
+            blocks.append("Options:\n" + "\n".join(_mk_lines(top_options)))
+            out = "\n".join(blocks).strip()
+
+            # Final guard so UI never sees empty
+            return out or "Tire Type:\n- Not specified\nAttachments:\n- Not specified\nOptions:\n- Not specified"
+
         try:
-            text = _catalog_noninteractive(user_q)
-            return jsonify({"ok": True, "response": text, "text": text})
+            text_out = _catalog_noninteractive(user_q)
         except Exception as e:
-            app.logger.exception("catalog mode error: %s", e)
-            err = f"❌ Catalog error: {e}"
-            return jsonify({"ok": False, "response": err, "text": err}), 500
+            text_out = f"❌ Catalog error: {e}"
+        return _ok(text_out, "catalog")
 
-    # Recommendation (default)
-    ai_reply = run_recommendation_flow(user_q)
+    # ---------- RECOMMENDATION (default) ----------
+    try:
+        ai_reply = run_recommendation_flow(user_q)
+    except Exception as e:
+        ai_reply = f"❌ Recommendation error: {e}"
 
-    # Inject Current Promotions
-    meta = top_pick_meta(user_q)
+    # Promotions (optional)
+    try:
+        meta = top_pick_meta(user_q)
+        if meta:
+            top_code, top_class, top_power = meta
+            if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
+            elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
+            elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
+            promo_list = promos_for_context(top_code, top_class, top_power or "")
+            promo_lines = render_promo_lines(promo_list)
+            if promo_lines:
+                ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
+    except Exception:
+        pass
 
-    if meta:
-        top_code, top_class, top_power = meta
-        if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
-        elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
-        elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
-
-        promo_list = promos_for_context(top_code, top_class, top_power or "")
-        promo_lines = render_promo_lines(promo_list)
-        if promo_lines:
-            ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
-
-    return jsonify({"ok": True, "response": ai_reply, "text": ai_reply})
-
-
-@app.post("/api/debug_recommend")
-def api_debug_recommend():
-    data = request.get_json(silent=True) or {}
-    user_q = (
-        data.get("q") or data.get("question") or
-        request.form.get("q") or request.form.get("question") or ""
-    ).strip()
-    if not user_q:
-        return jsonify({"error": "Missing 'q'"}), 400
-    return jsonify(debug_parse_and_rank(user_q, limit=10))
+    return _ok(ai_reply or "No recommendation produced.", "recommendation")
 
 # ─────────────────────────────────────────────────────────────────────────
 # Modes list
