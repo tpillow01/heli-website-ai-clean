@@ -407,3 +407,12 @@ body{
 
 .popup .section-label{ font-weight:800; margin-top:8px; color:#7b4f1b; }
 .popup a { text-decoration:none; }
+
+/* --- Kill any injected "Your Message" label near the chat box --- */
+.input-form::before,
+.input-form::after,
+.input-form label,
+.input-form label[for="userInput"] {
+  content: none !important;
+  display: none !important;
+}
