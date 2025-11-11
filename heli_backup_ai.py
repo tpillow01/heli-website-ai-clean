@@ -152,23 +152,88 @@ except Exception as e:
         return {"parsed": {}, "top": []}
 
 # ─────────────────────────────────────────────────────────────────────────
-# OPTIONS / ATTACHMENTS CHAT (non-auth) — returns multiple common keys so any UI works
+# OPTIONS / ATTACHMENTS CHAT (non-auth) — robust, always returns a string
 # ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/options_attachments_chat", methods=["POST"])
 def api_options_attachments_chat():
-    data = request.get_json(silent=True) or {}
-    q = (data.get("q") or data.get("query") or "").strip()
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    # Accept multiple possible keys from the UI
+    q = (
+        (data.get("q")
+         or data.get("query")
+         or data.get("question")
+         or data.get("input")
+         or data.get("prompt")
+         or "")
+        .strip()
+    )
+
     if not q:
-        msg = "Ask about options, attachments, list all, or a specific item (e.g., Fork Positioner)."
-        # IMPORTANT: include multiple keys so front-ends reading response/text/message all work
+        msg = "Tell me the environment/risks (e.g., 'indoor warehouse with pedestrians') and I’ll list options & attachments."
         return jsonify({"ok": True, "response": msg, "text": msg, "message": msg})
 
-    # Use your imported helper (already defined earlier in your file)
-    text = render_catalog_sections(q)
+    t = q.lower()
+    app.logger.info(f"/api/options_attachments_chat qlen={len(q)} q='{t[:120]}'")
 
-    # CRITICAL: return all three keys
+    # ---- Primary: use your catalog renderer (if it returns something non-empty)
+    text = ""
+    try:
+        text = (render_catalog_sections(q) or "").strip()
+    except Exception as e:
+        app.logger.exception("render_catalog_sections failed")
+
+        # Keep a human-readable notice in the response (but still return 200 + text)
+        text = f"(Temporary fallback) Catalog engine error. Reason: {e}. Showing heuristic picks below.\n"
+
+    # ---- Fallback: if catalog returned nothing, synthesize a useful answer
+    if not text or text.strip() == "":
+        picks = []
+
+        # Heuristic tags by keywords
+        if "indoor" in t:
+            picks += [
+                "Non-marking tires (NM Cushion / NM Pneumatic)",
+                "LED Blue Pedestrian Light",
+                "Red/Blue ‘Halo’ (Red Zone) Light",
+                "Full OPS / Operator Presence System",
+            ]
+        if "pedestrian" in t or "foot traffic" in t or "people" in t:
+            picks += [
+                "Backup Handle with Horn Button",
+                "360° Rotating Beacon",
+                "Forward/Reverse Strobes",
+                "Programmable Speed Limit Profile",
+            ]
+        if "freezer" in t or "cold" in t:
+            picks += ["Cold Storage Package (seals, heaters, rated wiring)"]
+        if "food" in t or "pharma" in t or "clean" in t or "gmp" in t:
+            picks += ["Stainless Hardware Pack", "Food-grade Hydraulic Hoses", "Non-marking tires"]
+        if "dust" in t or "paper" in t or "sawmill" in t:
+            picks += ["Severe-Duty Air Filter + Service Indicator", "Cab Filtration Upgrade"]
+        if "outdoor" in t or "yard" in t or "rough" in t:
+            picks += ["Pneumatic Tires", "Work Lights (front/rear)", "Wiper/Washer Kit"]
+        if "clamp" in t or "bale" in t or "carton" in t:
+            picks += ["Hydraulic Function: 4/5 Valve with Handle", "Sideshift/Rotator as needed"]
+        # Generic “good to have”
+        if not picks:
+            picks = [
+                "LED Blue Pedestrian Light",
+                "Red Zone Light",
+                "Backup Handle with Horn",
+                "Full OPS",
+            ]
+
+        synth = "Recommended options & attachments:\n- " + "\n- ".join(dict.fromkeys(picks))
+        text = (text + "\n\n" + synth).strip() if text else synth
+
+    # Guarantee a non-empty, UI-friendly payload
+    if not text.strip():
+        text = "No catalog items were returned. Check server logs and configuration."
+
     return jsonify({"ok": True, "response": text, "text": text, "message": text})
-
 
 # Backward-compat alias routes (some of your JS may still post here)
 @app.route("/api/options", methods=["POST"])
@@ -178,7 +243,6 @@ def api_options_alias():
 @app.route("/api/options_attachments", methods=["POST"])
 def api_options_attachments_alias():
     return api_options_attachments_chat()
-
 
 # (Optional) quick echo for debugging your network calls
 @app.post("/api/echo")
@@ -1020,30 +1084,36 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     lines.append(f"Local total {cat_col}: ${total_scope:,.0f}")
     return "\n".join(lines)
 
-# ─────────────────────────────────────────────────────────────────────────
-# Chat API (Recommendation + Inquiry + Coach + Catalog)
-# ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
     try:
-        data   = request.get_json(force=True) or {}
-        user_q = (data.get("question") or "").strip()
-        mode   = (data.get("mode") or "recommendation").lower()
+        data = request.get_json(force=True) or {}
 
-        # Empty question guard
+        # Accept older/front-end variants too
+        user_q = (
+            data.get("question")
+            or data.get("q")
+            or data.get("message")
+            or data.get("text")
+            or ""
+        ).strip()
+
+        mode = (data.get("mode") or "recommendation").lower()
+
         if not user_q:
-            return _ok_payload("Please enter a description of the customer’s needs."), 400
+            # Return 200 so strict front-ends don't drop the body on 400s
+            return _ok_payload("Please enter a description of the customer’s needs.")
 
-        # Intent shim: auto-route simple list requests to "catalog"
+        # --- Intent shim: auto-route simple list requests to "catalog"
         t = user_q.lower()
         if mode not in {"catalog", "contact_finder"}:
-            if ("list" in t or "show" in t or "give me" in t) and (
-                "option" in t or "attachment" in t or "tire" in t
+            if (("list" in t) or ("show" in t) or ("give me" in t)) and (
+                ("option" in t) or ("attachment" in t) or ("tire" in t)
             ):
                 mode = "catalog"
 
-        app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
+        app.logger.info(f"/api/chat mode={mode} q='{user_q[:80]}'")
 
         # Contact Finder (CSV lookup)
         if mode == "contact_finder":
@@ -1060,10 +1130,16 @@ def chat():
                 app.logger.exception("Contact Finder error: %s", e)
                 return _ok_payload(f"❌ Contact Finder error: {e}"), 500
 
+        # Catalog (non-interactive list builder)
+        if mode == "catalog":
+            # Use the safe non-interactive combiner we wired earlier
+            text = render_catalog_sections(user_q)
+            return _ok_payload(text or "_No catalog items matched._")
+
         # Sales Coach
         if mode == "coach":
             ai_reply = run_sales_coach(user_q)
-            return _ok_payload(ai_reply)
+            return _ok_payload(ai_reply or "_No response produced._")
 
         # Inquiry
         if mode == "inquiry":
@@ -1153,17 +1229,7 @@ def chat():
                 ai_reply = f"❌ Internal error: {e}"
 
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
-            ai_reply = _strip_prompt_leak(ai_reply)
-            return _ok_payload(f"{tag}\n{ai_reply}" if ai_reply else "_No response generated._")
-
-        # Catalog (non-interactive list builder)
-        if mode == "catalog":
-            try:
-                text = render_catalog_sections(user_q)
-            except Exception as e:
-                app.logger.exception("catalog mode error: %s", e)
-                text = f"❌ Catalog error: {e}"
-            return _ok_payload(text or "_No catalog items matched._")
+            return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
@@ -1181,7 +1247,6 @@ def chat():
             if promo_lines:
                 ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
 
-        # FINAL return for /api/chat default path
         return _ok_payload(ai_reply or "_No response produced._")
 
     except Exception as e:
