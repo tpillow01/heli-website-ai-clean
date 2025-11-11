@@ -146,28 +146,40 @@ except Exception as e:
     def debug_parse_and_rank(*args, **kwargs):
         return {"parsed": {}, "top": []}
 
-# -----------------------------------------------------------------------------
-# Compatibility alias to prevent 404s from older frontend code:
-# /api/options_attachments_chat → same behavior as /api/options
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
+# OPTIONS / ATTACHMENTS CHAT (non-auth) — returns multiple common keys so any UI works
+# ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/options_attachments_chat", methods=["POST"])
 def api_options_attachments_chat():
     data = request.get_json(silent=True) or {}
     q = (data.get("q") or data.get("query") or "").strip()
-
-    # Empty prompt -> short help text
     if not q:
-        return jsonify({
-            "ok": True,
-            "response": "Ask about options, attachments, tires, or say 'list all options & attachments'."
-        })
+        msg = "Ask about options, attachments, list all, or a specific item (e.g., Fork Positioner)."
+        # IMPORTANT: include multiple keys so front-ends reading response/text/message all work
+        return jsonify({"ok": True, "response": msg, "text": msg, "message": msg})
 
-    try:
-        result = render_catalog_sections(q)  # <- always returns a string
-    except Exception as e:
-        result = f"Error generating catalog response: {e}"
+    # Use your imported helper (already defined earlier in your file)
+    text = render_catalog_sections(q)
 
-    return jsonify({"ok": True, "response": result})
+    # CRITICAL: return all three keys
+    return jsonify({"ok": True, "response": text, "text": text, "message": text})
+
+
+# Backward-compat alias routes (some of your JS may still post here)
+@app.route("/api/options", methods=["POST"])
+def api_options_alias():
+    return api_options_attachments_chat()
+
+@app.route("/api/options_attachments", methods=["POST"])
+def api_options_attachments_alias():
+    return api_options_attachments_chat()
+
+
+# (Optional) quick echo for debugging your network calls
+@app.post("/api/echo")
+def api_echo():
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, "received": payload})
 
 # ------------------------------------------------------------------------------
 
