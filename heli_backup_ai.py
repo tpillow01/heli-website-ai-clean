@@ -1026,9 +1026,26 @@ def chat():
     mode   = (data.get("mode") or "recommendation").lower()
 
     if not user_q:
-        return jsonify({"response": "Please enter a description of the customer’s needs."}), 400
+        return jsonify({"ok": False, "response": "Please enter a description of the customer’s needs.", "text": "Please enter a description of the customer’s needs."}), 400
 
     app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
+
+    # ───────── CATALOG FAST-PATH ─────────
+    # If the user asks to show/list options or attachments (or sets mode to catalog),
+    # answer immediately using the non-interactive catalog builder.
+    if (
+        mode in {"catalog", "options", "attachments"}
+        or re.search(r"\b(show|list|all)\s+(options?|attachments?)\b", user_q, re.I)
+        or (re.search(r"\b(options?|attachments?)\b", user_q, re.I) and "recommend" not in user_q.lower())
+    ):
+        try:
+            text = _catalog_noninteractive(user_q)
+            return jsonify({"ok": True, "response": text, "text": text, "message": text})
+        except Exception as e:
+            app.logger.exception("catalog fast-path error: %s", e)
+            err = f"❌ Catalog error: {e}"
+            return jsonify({"ok": False, "response": err, "text": err}), 500
+    # ─────────────────────────────────────
 
     # Contact Finder (CSV lookup)
     if mode == "contact_finder":
@@ -1041,21 +1058,22 @@ def chat():
                 resp = _cf_handler()
             payload = resp.get_json() if hasattr(resp, "get_json") else (resp or {})
             text = payload.get("text") or payload.get("error") or "_No contacts found._"
-            return jsonify({"response": text})
+            return jsonify({"ok": True, "response": text, "text": text})
         except Exception as e:
             app.logger.exception("Contact Finder error: %s", e)
-            return jsonify({"response": f"❌ Contact Finder error: {e}"}), 500
+            err = f"❌ Contact Finder error: {e}"
+            return jsonify({"ok": False, "response": err, "text": err}), 500
 
     # Sales Coach
     if mode == "coach":
         ai_reply = run_sales_coach(user_q)
-        return jsonify({"response": ai_reply})
+        return jsonify({"ok": True, "response": ai_reply, "text": ai_reply})
 
     # Inquiry
     if mode == "inquiry":
         structured = try_structured_top_spend_answer(user_q)
         if structured:
-            return jsonify({"response": structured})
+            return jsonify({"ok": True, "response": structured, "text": structured})
 
         from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
 
@@ -1073,12 +1091,9 @@ def chat():
         probe = chosen_name or user_q
         brief = build_inquiry_brief(probe)
         if not brief:
-            return jsonify({
-                "response": (
-                    "I couldn’t locate that customer in the report/billing data. "
-                    "Please include the company name as it appears in your system."
-                )
-            })
+            msg = ("I couldn’t locate that customer in the report/billing data. "
+                   "Please include the company name as it appears in your system.")
+            return jsonify({"ok": True, "response": msg, "text": msg})
 
         recent_block = ""
         if brief.get("recent_invoices"):
@@ -1143,7 +1158,8 @@ def chat():
 
         tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
         ai_reply = _strip_prompt_leak(ai_reply)
-        return jsonify({"response": f"{tag}\n{ai_reply}"})
+        out = f"{tag}\n{ai_reply}"
+        return jsonify({"ok": True, "response": out, "text": out})
 
     def _catalog_noninteractive(q: str, max_per_section: int = 6) -> str:
         """
@@ -1162,7 +1178,6 @@ def chat():
             "speed limiter", "slow", "turn", "mirror", "led", "light"
         }
         NOISE_KWS = {"white noise", "quiet", "low noise", "indoor"}
-        TIRE_KWS = {"non-marking", "cushion"}
 
         indoor_intent = any(k in text for k in INDOOR_KWS)
         people_intent = any(k in text for k in PEOPLE_KWS)
@@ -1263,10 +1278,15 @@ def chat():
 
         return "\n".join(blocks).strip()
 
-    # Catalog (non-interactive list builder)
+    # Catalog (explicit mode)
     if mode == "catalog":
-        text = _catalog_noninteractive(user_q)
-        return jsonify({"response": text})
+        try:
+            text = _catalog_noninteractive(user_q)
+            return jsonify({"ok": True, "response": text, "text": text})
+        except Exception as e:
+            app.logger.exception("catalog mode error: %s", e)
+            err = f"❌ Catalog error: {e}"
+            return jsonify({"ok": False, "response": err, "text": err}), 500
 
     # Recommendation (default)
     ai_reply = run_recommendation_flow(user_q)
@@ -1285,7 +1305,8 @@ def chat():
         if promo_lines:
             ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
 
-    return jsonify({"response": ai_reply})
+    return jsonify({"ok": True, "response": ai_reply, "text": ai_reply})
+
 
 @app.post("/api/debug_recommend")
 def api_debug_recommend():
