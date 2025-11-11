@@ -249,104 +249,6 @@ def _score_row(name: str, benefit: str, kw: set[str]) -> float:
         score += 2.0
     return score
 
-# ---------------- Render (main entry used by router) --------------------------
-def render_catalog_sections(user_q: str) -> str:
-    """
-    Returns plain text with Tires / Attachments / Options sections,
-    filtered by query intent:
-      - type gating (attachments-only, tires-only, etc.)
-      - subcategory gating
-      - simple keyword relevance sort
-    """
-    # Load current catalogs you prepared elsewhere (must exist)
-    cats = load_catalogs()  # should return dicts: {"options":[...], "attachments":[...], "tires":[...]}
-    opts = cats.get("options") or []
-    atts = cats.get("attachments") or []
-    tires = cats.get("tires") or []
-
-    want = _interpret_query(user_q)
-    wanted_types = want["wanted_types"]     # empty → auto
-    subcat = want["subcategory"]
-    kw = want["keywords"]
-    list_all = want["list_all"]
-
-    # If user asks “which attachment …” force attachments mode
-    if not wanted_types:
-        if re.search(r"\bwhich\s+attachment\b", user_q.lower()):
-            wanted_types = {"attachment"}
-
-    # If subcategory present, narrow to that subcategory only
-    def _subcat_match(row):
-        if not subcat:
-            return True
-        s = (row.get("subcategory") or "").strip()
-        return s.lower() == subcat.lower()
-
-    # Helper to prepare a list with relevance
-    def _prep(rows):
-        out = []
-        for r in rows:
-            nm = r.get("name","").strip()
-            be = r.get("benefit","").strip()
-            if not nm:
-                continue
-            if not _subcat_match(r):
-                continue
-            score = _score_row(nm, be, kw)
-            out.append((score, nm, be))
-        # If user said "list all", keep original-ish order (no sort by score)
-        if list_all:
-            return [(_, n, b) for (_, n, b) in out]
-        # Otherwise sort best-first
-        return sorted(out, key=lambda x: x[0], reverse=True)
-
-    # Decide which sections to show
-    show_tires = ("tire" in wanted_types) if wanted_types else False
-    show_atts  = ("attachment" in wanted_types) if wanted_types else False
-    show_opts  = ("option" in wanted_types) if wanted_types else False
-
-    # Auto-mode: if the user didn’t name a type and didn’t ask list-all,
-    # default to *Attachments* when the question starts with “which attachment …”,
-    # otherwise default to Options (general) and include Tires only if tirey words appear.
-    if not wanted_types:
-        text_low = user_q.lower()
-        tirey = bool(re.search(r"\b(non-?mark|pneumatic|cushion|tire|tyre|dual)\b", text_low))
-        if re.search(r"\bwhich\s+attachment\b", text_low):
-            show_atts = True
-        else:
-            show_opts = True
-            show_tires = tirey
-
-    # Build sections
-    lines = []
-
-    if show_tires:
-        rows = _prep(tires)
-        lines.append("Tires (recommended):" if rows else "Tires (recommended):\n- Not specified")
-        for _, n, b in rows[:30]:
-            lines.append(f"- {n} - {b}")
-        lines.append("")  # spacer
-
-    if show_atts:
-        rows = _prep(atts)
-        lines.append("Attachments (relevant):" if rows else "Attachments (relevant):\n- Not specified")
-        for _, n, b in rows[:30]:
-            lines.append(f"- {n} - {b}")
-        lines.append("")
-
-    if show_opts:
-        rows = _prep(opts)
-        lines.append("Options (relevant):" if rows else "Options (relevant):\n- Not specified")
-        for _, n, b in rows[:30]:
-            lines.append(f"- {n} - {b}")
-        lines.append("")
-
-    # If nothing matched anything at all, be explicit
-    if not any([show_tires, show_atts, show_opts]):
-        lines.append("No matching items. Try specifying a type (attachments/options/tires) or a subcategory.")
-
-    return "\n".join(lines).strip()
-
 @lru_cache(maxsize=1)
 def load_catalogs() -> tuple[dict, dict, dict]:
     """
@@ -1074,6 +976,19 @@ def _line(n, b):
     b = (b or "").strip()
     return f"- {n}" + (f" — {b}" if b else "")
 
+def _plain(s: str) -> str:
+    if not isinstance(s, str):
+        return s
+    s = (s
+         .replace("“", '"').replace("”", '"')
+         .replace("‘", "'").replace("’", "'")
+         .replace("—", "-").replace("–", "-")
+         .replace("\u00a0", " "))
+    s = s.replace("**", "").replace("__", "")
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r" ?\n ?", "\n", s)
+    return s.strip()
+
 def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
     """
     Never asks clarifying questions. Either:
@@ -1180,54 +1095,6 @@ def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
 def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:
     """Compatibility wrapper. Old code imports this name; route to non-prompting renderer."""
     return render_catalog_sections(user_q, max_per_section=max_per_section)
-
-# --- Catalog intent parser: stop the endless "both lists?" loop ---------
-_BOTH_PAT = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+and\s+attachments)\b', re.I)
-_OPT_PAT  = re.compile(r'\b(options?\s+only|options?)\b', re.I)
-_ATT_PAT  = re.compile(r'\b(attachments?\s+only|attachments?)\b', re.I)
-
-# Plain-text cleaner (ASCII punctuation, no markdown)
-if "_plain" not in globals():
-    def _plain(s: str) -> str:
-        if not isinstance(s, str):
-            return s
-        s = (s
-             .replace("“", '"').replace("”", '"')
-             .replace("‘", "'").replace("’", "'")
-             .replace("—", "-").replace("–", "-")
-             .replace("\u00a0", " "))
-        s = s.replace("**", "").replace("__", "")
-        s = re.sub(r"[ \t]+", " ", s)
-        s = re.sub(r" ?\n ?", "\n", s)
-        return s.strip()
-
-def parse_catalog_intent(user_q: str) -> dict:
-    """
-    Returns:
-      {
-        'which': 'attachments' | 'options' | 'both' | None,
-        'list_all': bool   # user asked to list all items (not just relevant)
-      }
-    """
-    t = (user_q or "").strip().lower()
-    which = None
-    if _BOTH_PAT.search(t):
-        which = "both"
-    elif "attachments" in t and "options" in t:
-        which = "both"
-    elif _ATT_PAT.search(t):
-        which = "attachments"
-    elif _OPT_PAT.search(t):
-        which = "options"
-
-    # Treat “list/show/give/display all …” as list_all
-    list_all = (
-        bool(re.search(r'\b(list|show|give|display)\b.*\ball\b', t)) or
-        bool(re.search(r'\b(full|complete)\b.*\b(list|catalog)\b', t)) or
-        "all attachments" in t or "all options" in t or "all tires" in t
-    )
-
-    return {"which": which, "list_all": list_all}
 
 # --- maintenance: refresh Excel-driven caches ----------------------------
 def refresh_catalog_caches():
