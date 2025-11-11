@@ -35,6 +35,11 @@ app.config.update(
 
 logging.basicConfig(level=logging.INFO)
 
+def _ok_payload(msg: str):
+    """Always return both keys so old UIs reading `text` still work."""
+    safe = (msg or "").strip() or "_No response produced._"
+    return jsonify({"response": safe, "text": safe})
+
 # --- Options & Attachments API (blueprint) ---
 try:
     from options_attachments_router import options_bp
@@ -1016,29 +1021,23 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────────────────
 # Chat API (Recommendation + Inquiry + Coach + Catalog)
 # ─────────────────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
-    data   = request.get_json(force=True) or {}
-    user_q = (data.get("question") or "").strip()
-    raw_mode = (data.get("mode") or "recommendation")
-
-    if not user_q:
-        return jsonify({"response": "Please enter a description of the customer’s needs."}), 400
-
-    # --- Normalize mode coming from the UI --------------------------------
-    mode = str(raw_mode).lower().strip()
-    # If the UI label contains these words, force catalog mode
-    if any(k in mode for k in ["attach", "option", "catalog"]):
-        mode = "catalog"
-
-    app.logger.info(f"/api/chat normalized_mode={mode} raw_mode={raw_mode} qlen={len(user_q)}")
-
     try:
-        # ----------------------------- Contact Finder -----------------------------
+        data   = request.get_json(force=True) or {}
+        user_q = (data.get("question") or "").strip()
+        mode   = (data.get("mode") or "recommendation").lower()
+
+        if not user_q:
+            # early validation → include both keys
+            return _ok_payload("Please enter a description of the customer’s needs."), 400
+
+        app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
+
+        # Contact Finder (CSV lookup)
         if mode == "contact_finder":
             try:
                 from contact_finder import chat_contact_finder as _cf_handler
@@ -1048,24 +1047,23 @@ def chat():
                     resp = _cf_handler()
                 payload = resp.get_json() if hasattr(resp, "get_json") else (resp or {})
                 text = payload.get("text") or payload.get("error") or "_No contacts found._"
-                return jsonify({"response": text})
+                return _ok_payload(text)
             except Exception as e:
                 app.logger.exception("Contact Finder error: %s", e)
-                return jsonify({"response": f"❌ Contact Finder error: {e}"}), 500
+                return _ok_payload(f"❌ Contact Finder error: {e}"), 500
 
-        # ------------------------------- Coach ------------------------------------
+        # Sales Coach
         if mode == "coach":
             ai_reply = run_sales_coach(user_q)
-            return jsonify({"response": ai_reply or "_No advice returned._"})
+            return _ok_payload(ai_reply)
 
-        # ------------------------------ Inquiry -----------------------------------
+        # Inquiry
         if mode == "inquiry":
             structured = try_structured_top_spend_answer(user_q)
             if structured:
-                return jsonify({"response": structured})
+                return _ok_payload(structured)
 
             from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
-
             qnorm = _norm_name(user_q)
             chosen_name = None
             try:
@@ -1080,12 +1078,10 @@ def chat():
             probe = chosen_name or user_q
             brief = build_inquiry_brief(probe)
             if not brief:
-                return jsonify({
-                    "response": (
-                        "I couldn’t locate that customer in the report/billing data. "
-                        "Please include the exact company name from your system."
-                    )
-                })
+                return _ok_payload(
+                    "I couldn’t locate that customer in the report/billing data. "
+                    "Please include the company name as it appears in your system."
+                )
 
             recent_block = ""
             if brief.get("recent_invoices"):
@@ -1105,7 +1101,7 @@ def chat():
                 "content": (
                     "You are a sales strategist for a forklift dealership. Use the INQUIRY context verbatim; do not invent numbers.\n"
                     f"Customer name is: {brief['inferred_name']}.\n\n"
-                    "Write the answer with these exact section headers and spacing. Use short, one-sentence bullets with hyphens. No bold or markdown.\n\n"
+                    "Write the answer with these exact section headers and spacing. Use short, one-sentence bullets with hyphens. No bold.\n\n"
                     "Segmentation: <LETTER><NUMBER>\n"
                     "- Account Size: <LETTER>\n"
                     "- Relationship: <NUMBER>\n"
@@ -1116,16 +1112,16 @@ def chat():
                     "- Top offerings: e.g., Parts ($#,###), Service ($#,###)\n"
                     "- Frequency: Average of N days between invoices\n\n"
                     "Visit Plan\n"
-                    "- Lead with: <one offering> — why\n"
-                    "- Optional backup: <one secondary area>\n\n"
-                    "Next Level (next tier only)\n"
-                    "- Relationship requirement: how many new distinct offerings\n"
-                    "- Best candidates to add: 1–3 offerings\n"
-                    "- Size path (only if applicable): R12 target\n\n"
+                    "- Lead with: <one offering> — choose the highest billing total.\n"
+                    "- Optional backup: <secondary area> tied to next-highest category.\n\n"
+                    "Next Level (from <LETTER><NUM> → next better only)\n"
+                    "- Relationship requirement: how many new distinct offerings needed.\n"
+                    "- Best candidates to add: 1–3 offerings.\n"
+                    "- Size path (only if applicable): R12 target for next size.\n\n"
                     "Next Actions\n"
-                    "- Three concrete tasks\n\n"
+                    "- Three concrete tasks.\n\n"
                     "Recent Invoices\n"
-                    "- Up to 5 lines: YYYY-MM-DD | Type | $Amount | Description\n"
+                    "- Up to 5 as: YYYY-MM-DD | Type | $Amount | Description\n"
                 )
             }
 
@@ -1142,145 +1138,52 @@ def chat():
                     model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
                     messages=messages,
                     max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
-                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35")),
+                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35"))
                 )
                 ai_reply = (resp.choices[0].message.content or "").strip()
             except Exception as e:
-                app.logger.exception("Inquiry LLM error: %s", e)
                 ai_reply = f"❌ Internal error: {e}"
 
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             ai_reply = _strip_prompt_leak(ai_reply)
-            return jsonify({"response": f"{tag}\n{ai_reply}" if ai_reply else "_No response generated._"})
+            return _ok_payload(f"{tag}\n{ai_reply}" if ai_reply else "_No response generated._")
 
-        # ------------------------------ Catalog -----------------------------------
-        def _catalog_noninteractive(q: str, max_per_section: int = 6) -> str:
-            text = (q or "").lower()
-
-            INDOOR_KWS = {"indoor", "warehouse", "inside", "aisle", "dock", "racking"}
-            PEOPLE_KWS = {"pedestrian", "people", "traffic", "crowd", "bystander", "workers"}
-            SAFETY_KWS = {
-                "blue", "red zone", "proximity", "detection", "presence", "camera",
-                "beacon", "strobe", "horn", "alarm", "white noise", "speed limit",
-                "speed limiter", "slow", "turn", "mirror", "led", "light"
-            }
-            NOISE_KWS = {"white noise", "quiet", "low noise", "indoor"}
-
-            indoor_intent = any(k in text for k in INDOOR_KWS)
-            people_intent = any(k in text for k in PEOPLE_KWS)
-
-            # Pull sheet-driven recs if available
+       # Catalog (non-interactive list builder) — no follow-ups, always both keys
+        if mode == "catalog":
             try:
-                rec = recommend_options_from_sheet(q) or {}
+                text = render_catalog_sections(user_q, max_per_section=12)
             except Exception as e:
-                app.logger.warning(f"recommend_options_from_sheet failed: {e}")
-                rec = {}
+                text = f"❌ Catalog error: {e}"
 
-            attachments = (rec.get("attachments") or rec.get("others") or [])[:50]
-            options = (rec.get("options") or [])[:50]
-            tire = rec.get("tire") or {}
+            # Hard fallback if the helper returned nothing/garbage
+            if not isinstance(text, str) or not text.strip():
+                text = "Tire Type:\n- Not specified\nAttachments:\n- Not specified\nOptions:\n- Not specified"
 
-            def _score_item(item: dict) -> float:
-                name = (item.get("name") or "").lower()
-                ben = (item.get("benefit") or "").lower()
-                blob = f"{name} {ben}"
-                score = 0.0
-                if indoor_intent:
-                    score += sum(k in blob for k in INDOOR_KWS)
-                if people_intent:
-                    score += 2.0 * sum(k in blob for k in PEOPLE_KWS)
-                    score += 2.5 * sum(k in blob for k in SAFETY_KWS)
-                score += 1.0 * sum(k in blob for k in NOISE_KWS)
-                if any(w in name for w in ["safety", "pedestrian", "visibility"]):
-                    score += 1.0
-                return score
+            return _ok_payload(text)
 
-            def _pick(items: list[dict]) -> list[dict]:
-                best = {}
-                for it in items:
-                    nm = (it.get("name") or "").strip()
-                    if not nm:
-                        continue
-                    sc = _score_item(it)
-                    if nm not in best or sc > best[nm][0]:
-                        best[nm] = (sc, it)
-                ranked = sorted(best.values(), key=lambda t: t[0], reverse=True)
-                out = [it for sc, it in ranked]
-                return out if ranked and ranked[0][0] > 0 else items
-
-            top_attachments = _pick(attachments)[:max_per_section]
-            top_options = _pick(options)[:max_per_section]
-
-            tire_line = None
-            if tire.get("name"):
-                ben = (tire.get("benefit") or "").strip()
-                tire_line = f"- {tire['name']}" + (f" — {ben}" if ben else "")
-            elif indoor_intent:
-                tire_line = "- Cushion, non-marking — protects floors; best for smooth indoor concrete"
-
-            def _mk_lines(items: list[dict]) -> list[str]:
-                lines = []
-                for it in items:
-                    nm = (it.get("name") or "").strip()
-                    if not nm:
-                        continue
-                    ben = (it.get("benefit") or "").strip()
-                    low = nm.lower()
-                    if not ben:
-                        if "blue" in low or "red" in low or "light" in low:
-                            ben = "boosts pedestrian visibility in busy aisles"
-                        elif "white noise" in low or "alarm" in low:
-                            ben = "audible alert that’s clearer (and less disruptive) indoors"
-                        elif any(k in low for k in ["speed", "slow", "turn"]):
-                            ben = "reduces risk in high-traffic areas"
-                        elif "camera" in low or "mirror" in low:
-                            ben = "improves line-of-sight near pedestrians and racking"
-                        elif any(k in low for k in ["presence", "proximity", "detection"]):
-                            ben = "alerts operator to nearby people"
-                    lines.append(f"- {nm}" + (f" — {ben}" if ben else ""))
-                return lines or ["- Not specified"]
-
-            headline_bits = []
-            if indoor_intent: headline_bits.append("indoor warehouse")
-            if people_intent: headline_bits.append("high pedestrian traffic")
-            headline = "Recommended attachments & options" if not headline_bits else "Recommended for " + " with ".join(headline_bits)
-
-            blocks = [headline]
-            if tire_line:
-                blocks.append("Tire Type:\n" + tire_line)
-            blocks.append("Attachments:\n" + "\n".join(_mk_lines(top_attachments)))
-            blocks.append("Options:\n" + "\n".join(_mk_lines(top_options)))
-            return "\n".join(blocks).strip()
-
-        # If the normalized mode is catalog OR the question clearly asks for options/attachments, use catalog.
-        if (mode == "catalog") or re.search(r"\b(option|attachment|accessory|tire|non[-\s]?mark)\b", user_q, re.I):
-            text = _catalog_noninteractive(user_q)
-            return jsonify({"response": text or "_No catalog items matched._"})
-
-        # ----------------------- Recommendation (default) --------------------------
+        # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
-        ai_reply = (ai_reply or "").strip()
 
         # Inject Current Promotions
-        try:
-            meta = top_pick_meta(user_q)
-            if meta:
-                top_code, top_class, top_power = meta
-                if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
-                elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
-                elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
-                promo_list = promos_for_context(top_code, top_class, top_power or "")
-                promo_lines = render_promo_lines(promo_list)
-                if promo_lines:
-                    ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
-        except Exception as e:
-            app.logger.warning(f"promo inject failed: {e}")
+        meta = top_pick_meta(user_q)
+        if meta:
+            top_code, top_class, top_power = meta
+            if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
+            elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
+            elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
 
-        return jsonify({"response": ai_reply or "_No recommendation produced._"})
+            promo_list = promos_for_context(top_code, top_class, top_power or "")
+            promo_lines = render_promo_lines(promo_list)
+            if promo_lines:
+                ai_reply = _inject_section(ai_reply, "Current Promotions", promo_lines)
+
+        # FINAL return for /api/chat default path
+        return _ok_payload(ai_reply or "_No response produced._")
 
     except Exception as e:
         app.logger.exception("Unhandled /api/chat error: %s", e)
-        return jsonify({"response": f"❌ Unhandled error in /api/chat: {e}"}), 500
+        # global except → include both keys AND 500 status
+        return _ok_payload(f"❌ Unhandled error in /api/chat: {e}"), 500
 
 # ─────────────────────────────────────────────────────────────────────────
 # Modes list
