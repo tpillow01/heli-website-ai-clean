@@ -36,9 +36,9 @@ app.config.update(
 logging.basicConfig(level=logging.INFO)
 
 def _ok_payload(msg: str):
-    """Always return both keys so old UIs reading `text` still work."""
+    """Return with all legacy keys so any frontend can read it."""
     safe = (msg or "").strip() or "_No response produced._"
-    return jsonify({"response": safe, "text": safe})
+    return jsonify({"ok": True, "response": safe, "text": safe, "message": safe})
 
 # --- Options & Attachments API (blueprint) ---
 try:
@@ -1031,9 +1031,17 @@ def chat():
         user_q = (data.get("question") or "").strip()
         mode   = (data.get("mode") or "recommendation").lower()
 
+        # Empty question guard
         if not user_q:
-            # early validation → include both keys
             return _ok_payload("Please enter a description of the customer’s needs."), 400
+
+        # Intent shim: auto-route simple list requests to "catalog"
+        t = user_q.lower()
+        if mode not in {"catalog", "contact_finder"}:
+            if ("list" in t or "show" in t or "give me" in t) and (
+                "option" in t or "attachment" in t or "tire" in t
+            ):
+                mode = "catalog"
 
         app.logger.info(f"/api/chat mode={mode} qlen={len(user_q)}")
 
@@ -1148,18 +1156,14 @@ def chat():
             ai_reply = _strip_prompt_leak(ai_reply)
             return _ok_payload(f"{tag}\n{ai_reply}" if ai_reply else "_No response generated._")
 
-       # Catalog (non-interactive list builder) — no follow-ups, always both keys
+        # Catalog (non-interactive list builder)
         if mode == "catalog":
             try:
-                text = render_catalog_sections(user_q, max_per_section=12)
+                text = render_catalog_sections(user_q)
             except Exception as e:
+                app.logger.exception("catalog mode error: %s", e)
                 text = f"❌ Catalog error: {e}"
-
-            # Hard fallback if the helper returned nothing/garbage
-            if not isinstance(text, str) or not text.strip():
-                text = "Tire Type:\n- Not specified\nAttachments:\n- Not specified\nOptions:\n- Not specified"
-
-            return _ok_payload(text)
+            return _ok_payload(text or "_No catalog items matched._")
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
@@ -1182,7 +1186,6 @@ def chat():
 
     except Exception as e:
         app.logger.exception("Unhandled /api/chat error: %s", e)
-        # global except → include both keys AND 500 status
         return _ok_payload(f"❌ Unhandled error in /api/chat: {e}"), 500
 
 # ─────────────────────────────────────────────────────────────────────────
