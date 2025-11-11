@@ -23,6 +23,43 @@ _OPTIONS_XLSX = os.environ.get(
     os.path.join(os.path.dirname(__file__), "data", "forklift_options_benefits.xlsx")
 )
 
+# ── Canonicalize subcategories + lightweight auto-tagging ─────────────────
+import time, hashlib
+
+# Fix common typos/spacing in Subcategory values coming from Excel
+CANON = {
+    "hyrdaulic assist": "Hydraulic Assist",
+    "filtration/ cooling": "Filtration/Cooling",
+    "fork handling": "Fork Handling",
+}
+def _canon_subcat(s: str) -> str:
+    s0 = (s or "").strip()
+    key = " ".join(s0.split()).lower()  # collapse multiple spaces
+    return CANON.get(key, s0)
+
+# Simple tag rules (used later to let responses react to context words)
+TAG_RULES = [
+    ("cold",       r"cold|freez|sub\s*zero|heater|wiper|windshield|cab|enclos|winter|snow|ice"),
+    ("comfort",    r"comfort|seat|suspension|armrest|vibration|ergonom"),
+    ("dust",       r"dust|debris|screen|pre\s*air|dual\s*air\s*filter|belly\s*pan|radiator\s*screen"),
+    ("visibility", r"light|beacon|blue|spot|led|radar|camera|wiper|windshield"),
+    ("safety",     r"ops|radar|camera|red\s*line|blue\s*spot"),
+    ("hydraulic",  r"hydraulic|valve|finger"),
+    ("outdoor",    r"pneumatic|dual|traction|snow|ice|rough\s*terrain|yard|gravel|dirt"),
+    ("indoor",     r"non[-\s]?mark|cushion|solid|warehouse|smooth|polished"),
+    ("handling",   r"clamp|carton|bale|drum|roll|fork\s*position|extensions?|rotator|push|pull|single\s*double|turnaload"),
+]
+def _auto_tags(name: str, benefit: str, subcat: str) -> set[str]:
+    text = f"{name} {benefit} {subcat}".lower()
+    tags = set(lbl for lbl, rx in TAG_RULES if re.search(rx, text))
+    # Tires: enforce indoor/outdoor hints if the name itself says so
+    if "tire" in text or "tyre" in text:
+        if re.search(r"non[-\s]?mark|cushion|press[-\s]?on", text):
+            tags.add("indoor")
+        if re.search(r"pneumatic|solid|dual|rough|yard|gravel|dirt", text):
+            tags.add("outdoor")
+    return tags
+
 def _make_code(name: str) -> str:
     s = (name or "").upper()
     s = re.sub(r"[^\w\+\s-]", " ", s)      # remove odd chars
@@ -39,7 +76,10 @@ def _read_catalog_df():
       - benefit      (from 'Benefit' | 'Desc' | 'Description' or empty)
       - type         (from 'Type' | 'Category' or inferred; values: option | attachment | tire)
       - subcategory  (optional, from 'Subcategory')
-    Returns a pandas DataFrame with columns ['name','benefit','type','subcategory'] or None if missing.
+
+    Returns a pandas DataFrame with columns:
+      ['name', 'benefit', 'type', 'subcategory']
+    or None if missing.
     """
     if _pd is None or not os.path.exists(_OPTIONS_XLSX):
         print(f"[ai_logic] Excel not found or pandas missing: {_OPTIONS_XLSX}")
@@ -54,6 +94,7 @@ def _read_catalog_df():
         print("[ai_logic] Excel read but empty.")
         return None
 
+    # Map lowercase headers -> original headers
     cols = {str(c).lower().strip(): c for c in df.columns}
     name_col    = cols.get("name") or cols.get("option")
     benefit_col = cols.get("benefit") or cols.get("desc") or cols.get("description")
@@ -64,10 +105,10 @@ def _read_catalog_df():
         print("[ai_logic] Excel must have a 'Name' or 'Option' column.")
         return None
 
-    # Start from a copy so we can create defaults before selecting
+    # Work on a copy so we don't mutate the original df
     df = df.copy()
 
-    # Create standardized columns (ensure they exist even if source missing)
+    # --- Standardize core columns ---------------------------------------
     df["__name__"] = df[name_col].astype(str).str.strip()
 
     if benefit_col:
@@ -85,7 +126,11 @@ def _read_catalog_df():
     else:
         df["__subcategory__"] = ""
 
-    # Normalize type labels
+    # --- NEW: clean up Subcategory typos/spacing using _canon_subcat -----
+    # (_canon_subcat was defined above after _OPTIONS_XLSX)
+    df["__subcategory__"] = df["__subcategory__"].map(_canon_subcat)
+
+    # --- Normalize type labels from sheet --------------------------------
     df["__type__"] = df["__type__"].replace({
         "options": "option",
         "opt": "option",
@@ -94,26 +139,40 @@ def _read_catalog_df():
         "tires": "tire"
     })
 
-    # Fallback: infer type if missing/blank
+    # --- Fallback: infer type if missing/blank ---------------------------
     def _infer_type(nm: str, tp: str) -> str:
         if tp:
             return tp
         ln = (nm or "").lower()
+        # treat common clamp/sideshift/etc. as attachments
         if any(k in ln for k in (
             "clamp","sideshift","side shift","side-shift","positioner","rotator",
             "boom","pole","ram","fork extension","extensions","push/ pull","push/pull",
             "slip-sheet","slipsheet","bale","carton","drum","load stabilizer","inverta"
         )):
             return "attachment"
+        # treat anything with tire language as tire
         if any(k in ln for k in ("tire","tyre","pneumatic","cushion","non-mark","dual")):
             return "tire"
+        # otherwise it's a regular option
         return "option"
 
-    df["__type__"] = df.apply(lambda r: _infer_type(r["__name__"], r["__type__"]), axis=1)
+    df["__type__"] = df.apply(
+        lambda r: _infer_type(r["__name__"], r["__type__"]),
+        axis=1
+    )
 
-    # Build final, drop empties
-    out = df.loc[df["__name__"] != "", ["__name__","__benefit__","__type__","__subcategory__"]].rename(
-        columns={"__name__":"name","__benefit__":"benefit","__type__":"type","__subcategory__":"subcategory"}
+    # --- Final shape: drop blanks, return normalized columns -------------
+    out = df.loc[
+        df["__name__"] != "",
+        ["__name__", "__benefit__", "__type__", "__subcategory__"]
+    ].rename(
+        columns={
+            "__name__": "name",
+            "__benefit__": "benefit",
+            "__type__": "type",
+            "__subcategory__": "subcategory"
+        }
     )
 
     return out
@@ -1021,6 +1080,10 @@ def refresh_catalog_caches():
         pass
     try:
         options_lookup_by_name.cache_clear()
+    except Exception:
+        pass
+    try:
+        load_catalog_rows.cache_clear()   # <-- important: also clear the raw rows cache
     except Exception:
         pass
 
