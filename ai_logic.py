@@ -134,9 +134,12 @@ def _read_catalog_df():
     df["__type__"] = df["__type__"].replace({
         "options": "option",
         "opt": "option",
+        "option": "option",            # added
         "attachments": "attachment",
         "att": "attachment",
-        "tires": "tire"
+        "attachment": "attachment",    # added
+        "tires": "tire",
+        "tire": "tire"                 # added
     })
 
     # --- Fallback: infer type if missing/blank ---------------------------

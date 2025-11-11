@@ -28,7 +28,7 @@
     <div class="topbar">
       <div class="brand"><span class="accent">Tynan</span> Equipment AI</div>
       <div class="topbar-right">
-        <span class="heli-text">HELI</span>
+        <span class="heli-text" style="font-family:'Exo 2', sans-serif; letter-spacing:1px;">HELI</span>
       </div>
     </div>
 
@@ -46,24 +46,25 @@
       <div class="nav-actions">
         <div class="mode-wrap">
           <span class="mode-label">Mode</span>
-          <select id="modeSelect" class="mode-select"></select>
+          <select id="modeSelect" class="mode-select" aria-label="Chat Mode"></select>
         </div>
       </div>
     </div>
 
     <!-- Stage + animation -->
     <div class="stage">
-      <div class="forklift-animation" id="forklift-animation">
+      <div class="forklift-animation" id="forklift-animation" aria-hidden="true">
         <div class="forklift-unit">
           <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
         </div>
       </div>
 
-      <div id="response-area" class="response-area"></div>
+      <div id="response-area" class="response-area" role="log" aria-live="polite"></div>
     </div>
 
     <!-- Input: arrow Send inside textarea -->
     <form id="chat-form" class="input-form">
+      <label for="userInput" class="sr-only">Your message</label>
       <textarea id="userInput" rows="3" placeholder="Enter a message..." required autofocus></textarea>
       <button type="submit" class="send-btn" aria-label="Send message">➤</button>
     </form>
@@ -72,6 +73,7 @@
   </div>
 
   <script>
+    // ------- Elements -------
     const form = document.getElementById('chat-form');
     const input = document.getElementById('userInput');
     const responseArea = document.getElementById('response-area');
@@ -80,121 +82,126 @@
     const modeSelect = document.getElementById('modeSelect');
     let animationInterval, isForward = true;
 
+    // ------- Load Modes -------
     async function loadModes() {
       try {
         const res = await fetch('/api/modes');
         const modes = await res.json();
-        modeSelect.innerHTML =
-          modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
-      } catch (e) { console.error('Failed to load modes', e); }
+        modeSelect.innerHTML = modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      } catch (e) {
+        console.error('Failed to load modes', e);
+      }
     }
     document.addEventListener('DOMContentLoaded', loadModes);
 
-    function formatLabels(text){
+    // ------- Formatting Helpers -------
+    function formatLabels(text) {
+      // Highlight common section labels you use
       return text.replace(
-        /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
+        /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Tires \(recommended\):|Attachments \(relevant\):|Options \(relevant\):|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
         '<span class="section-label">$1</span>'
       );
     }
 
-    function renderBubble(textOrHtml, sender='ai'){
-      if(sender==='ai') stopAnimation();
+    function renderBubble(textOrHtml, sender='ai') {
+      if (sender === 'ai') stopAnimation();
       const el = document.createElement('div');
       el.className = `response-bubble ${sender}`;
-
-      // If the server returned HTML (e.g., <ul>…</ul>), render as HTML.
       const looksLikeHtml = /<\s*\w+[^>]*>/.test(textOrHtml);
       if (looksLikeHtml) {
         el.innerHTML = textOrHtml;
       } else {
-        el.innerHTML = formatLabels(textOrHtml).split('\n').map(l=>`<div>${l}</div>`).join('');
+        el.innerHTML = formatLabels(textOrHtml)
+          .split('\n')
+          .map(line => `<div>${line}</div>`)
+          .join('');
       }
-
       responseArea.appendChild(el);
-      el.scrollIntoView({behavior:'smooth'});
+      el.scrollIntoView({ behavior:'smooth' });
     }
 
-    function startAnimationLoop(){
-      forkliftAnim.style.display='block';
-      forkliftUnit.style.left='0'; isForward=true;
-      animationInterval=setInterval(animateForklift,2000);
+    // ------- Forklift Animation -------
+    function startAnimationLoop() {
+      forkliftAnim.style.display = 'block';
+      forkliftUnit.style.left = '0';
+      isForward = true;
+      clearInterval(animationInterval);
+      animationInterval = setInterval(animateForklift, 2000);
     }
-    function animateForklift(){
-      const dist=`calc(100% - ${forkliftUnit.offsetWidth}px)`;
+    function animateForklift() {
+      const dist = `calc(100% - ${forkliftUnit.offsetWidth}px)`;
       forkliftUnit.style.left = isForward ? dist : '0';
       isForward = !isForward;
     }
-    function stopAnimation(){
+    function stopAnimation() {
       clearInterval(animationInterval);
-      forkliftAnim.style.display='none';
+      forkliftAnim.style.display = 'none';
     }
 
-    // ------- NEW: helpers for Options & Attachments routing -------
+    // ------- Mode Routing Helpers -------
     function isOptionsAttachmentsMode() {
-      // We support either an explicit id or a label match to keep this robust.
+      // Robustly detect your Options/Attachments mode by id OR label
       const opt = modeSelect.options[modeSelect.selectedIndex];
       const id = (opt?.value || '').toLowerCase();
       const label = (opt?.textContent || '').toLowerCase();
       return id === 'options_attachments'
-             || id === 'attachments_options'
-             || label.includes('option')
-             || label.includes('attachment');
+          || id === 'attachments_options'
+          || label.includes('option')
+          || label.includes('attachment');
     }
 
+    // ------- API Calls -------
     async function askOptionsAttachments(userText) {
-  const res = await fetch("/api/options_attachments_chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ q: userText }) // <-- IMPORTANT: server expects "q"
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
+      const res = await fetch('/api/options_attachments_chat', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ q: userText }) // server expects "q"
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.html || data.response || data.text || data.message || '(no response)';
+    }
 
-  // Prefer HTML if present; fall back gracefully
-  return data.html || data.response || data.text || data.message || '(no response)';
-}
+    async function askGeneralChat(userText, mode) {
+      const res = await fetch('/api/chat', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ question:userText, mode })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.html || data.response || data.text || data.message || '✓';
+    }
 
-   async function askGeneralChat(userText, mode) {
-  const res = await fetch('/api/chat', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ question:userText, mode })
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-
-  // Handle either plain text or html if your /api/chat ever returns it
-  return data.html || data.response || data.text || data.message || '✓';
-}
-
-    // -------------------------------------------------------------
-
-    form.addEventListener('submit', async (e)=>{
+    // ------- Form Submit -------
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const q=input.value.trim(); if(!q) return;
-      const mode=modeSelect?.value || 'recommendation';
+      const q = input.value.trim();
+      if (!q) return;
+      const mode = modeSelect?.value || 'recommendation';
 
-      renderBubble(q,'user');
-      input.value=''; startAnimationLoop();
+      renderBubble(q, 'user');
+      input.value = '';
+      startAnimationLoop();
 
-      try{
+      try {
         let answer;
         if (isOptionsAttachmentsMode()) {
-          // Route to new focused endpoint for this mode
           answer = await askOptionsAttachments(q);
         } else {
-          // Existing behavior for all other modes
           answer = await askGeneralChat(q, mode);
         }
-        renderBubble(answer,'ai');
-      }catch(err){
-        renderBubble(`❌ Error: ${err.message}`,'ai');
+        renderBubble(answer, 'ai');
+      } catch (err) {
+        renderBubble(`❌ Error: ${err.message}`, 'ai');
       }
     });
 
-    input.addEventListener('keydown', e=>{
-      if(e.key==='Enter' && !e.shiftKey){
-        e.preventDefault(); form.dispatchEvent(new Event('submit'));
+    // ------- Enter-to-send -------
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.dispatchEvent(new Event('submit'));
       }
     });
   </script>

@@ -53,6 +53,15 @@ try:
 except Exception as e:
     logging.warning("options_attachments_router not available (%s)", e)
 
+@app.route("/admin/reload_options", methods=["POST", "GET"])
+def admin_reload_options():
+    try:
+        from ai_logic import refresh_catalog_caches
+        refresh_catalog_caches()
+        return "OK: Catalog caches reloaded.", 200
+    except Exception as e:
+        return f"ERR: {e}", 500
+
 # -----------------------------------------------------------------------------
 # Safe/optional helpers: only import AFTER app exists to avoid circular imports
 # -----------------------------------------------------------------------------
