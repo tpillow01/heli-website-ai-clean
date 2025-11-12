@@ -780,6 +780,94 @@ def debug_parse_and_rank(user_q: str, limit: int = 10):
     return {"parsed": want, "top": rows[:limit]}
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Option / attachment / tire recommender used by api_options & router imports
+# ─────────────────────────────────────────────────────────────────────────────
+def _kw_score(q: str, name: str, benefit: str) -> float:
+    ql = _lower(q)
+    text = _lower(name + " " + (benefit or ""))
+    hits = 0.0
+    # Generic matching
+    for w in ("indoor", "warehouse", "outdoor", "yard", "dust", "debris", "visibility",
+              "lighting", "safety", "cold", "freezer", "rain", "snow", "heat",
+              "cab", "comfort", "vibration", "filtration", "cooling", "radiator",
+              "air filter", "pre-cleaner", "screen", "pneumatic", "cushion", "non-mark"):
+        if w in ql and w in text:
+            hits += 1.0
+
+    # Special boosts
+    if any(k in ql for k in ("cold", "freezer", "winter")):
+        if any(k in text for k in ("cab", "heater", "wiper", "rain", "glass", "defrost")):
+            hits += 1.5
+    if any(k in ql for k in ("dark", "poor lighting", "dim")):
+        if any(k in text for k in ("light", "beacon", "led", "blue light", "work light")):
+            hits += 1.2
+    if any(k in ql for k in ("dust", "debris", "dirty", "recycling", "paper", "sawmill")):
+        if any(k in text for k in ("radiator", "screen", "pre air cleaner", "dual air filter", "filtration", "protection", "belly pan")):
+            hits += 1.2
+    if any(k in ql for k in ("non mark", "non-mark", "no scuff", "epoxy", "polished")):
+        if any(k in text for k in ("non-mark", "non marking")):
+            hits += 1.5
+    return hits
+
+def _rank_bucket(q: str, bucket: dict[str, str], limit: int = 6) -> list[dict]:
+    if not bucket:
+        return []
+    scored = []
+    for name, benefit in bucket.items():
+        s = _kw_score(q, name, benefit)
+        # tiny baseline so items still appear for broad queries
+        scored.append((s + 0.01, {"name": name, "benefit": benefit}))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    out = [row for _, row in scored if _lower(row["name"]).strip()]
+    return out[:limit] if limit and limit > 0 else out
+
+def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
+    """
+    Returns a dict with ranked picks drawn from the Excel catalog:
+      {
+        "tires":        [ {name, benefit}, ... ],
+        "attachments":  [ {name, benefit}, ... ],
+        "options":      [ {name, benefit}, ... ],
+        "telemetry":    [ {name, benefit}, ... ]   # subset of options
+      }
+
+    It respects the user's intent so routes can show ONLY the section asked.
+    """
+    intent = parse_catalog_intent(user_q)
+    which = intent["which"]
+    options, attachments, tires = load_catalogs()
+
+    # Telemetry subset from options
+    telemetry = {n: b for n, b in options.items()
+                 if re.search(r"\b(fics|fleet\s*management|telemetry|portal)\b", _lower(n + " " + b))}
+
+    result = {"tires": [], "attachments": [], "options": [], "telemetry": []}
+
+    if which == "tires":
+        result["tires"] = _rank_bucket(user_q, tires, limit)
+        return result
+    if which == "attachments":
+        result["attachments"] = _rank_bucket(user_q, attachments, limit)
+        return result
+    if which == "telemetry":
+        result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
+        return result
+    if which == "options":
+        # If the wording hints at telemetry, prefer telemetry only
+        if _TELEM_PAT.search(_lower(user_q)):
+            result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
+        else:
+            result["options"] = _rank_bucket(user_q, options, limit)
+        return result
+
+    # Fallback: broad question — give a few from each
+    result["tires"]        = _rank_bucket(user_q, tires, limit)
+    result["attachments"]  = _rank_bucket(user_q, attachments, limit)
+    result["options"]      = _rank_bucket(user_q, options, limit)
+    result["telemetry"]    = _rank_bucket(user_q, telemetry, limit)
+    return result
+
+# ─────────────────────────────────────────────────────────────────────────────
 # “Defined but not accessed” silencer (legacy)
 # ─────────────────────────────────────────────────────────────────────────────
 def _is_attachment(name: str) -> bool:
