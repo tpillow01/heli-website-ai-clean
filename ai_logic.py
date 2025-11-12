@@ -868,6 +868,155 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
     return result
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Catalog intent + cold-aware option/attachment selector (no tires unless asked)
+# ─────────────────────────────────────────────────────────────────────────────
+_TELEM_PAT = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
+_ATTACH_HINT = re.compile(r"\b(attach(ment)?|clamp|sideshift|positioner|fork|boom|pole|ram|push\s*/?\s*pull|slip[-\s]?sheet|paper\s*roll)\b", re.I)
+
+def parse_catalog_intent(user_q: str) -> dict:
+    t = (user_q or "").strip().lower()
+    which = None
+    if ("attachments" in t and "options" in t) or "both" in t:
+        which = "both"
+    elif "attachments" in t or "attachment" in t:
+        which = "attachments"
+    elif "options" in t or "option" in t:
+        which = "options"
+    elif re.search(r"\b(tires?|tyres?)\b", t):
+        which = "tires"
+    elif _TELEM_PAT.search(t):
+        which = "telemetry"
+    list_all = bool(re.search(r'\b(list|show|give|display)\b.*\b(all|full|everything)\b', t))
+    return {"which": which, "list_all": list_all}
+
+def _lower(s: str) -> str:
+    return (s or "").lower()
+
+def _kw_score(q: str, name: str, benefit: str) -> float:
+    """Lightweight scorer with context boosts/penalties (esp. for cold)."""
+    ql = _lower(q)
+    text = _lower(name + " " + (benefit or ""))
+
+    score = 0.01  # small baseline so items can appear for broad queries
+
+    # Generic keyword alignments
+    for w in ("indoor","warehouse","outdoor","yard","dust","debris","visibility",
+              "lighting","safety","cold","freezer","rain","snow","cab","comfort",
+              "vibration","filtration","cooling","radiator","screen","pre air cleaner",
+              "dual air filter","non-mark","pneumatic","cushion","heater","wiper"):
+        if w in ql and w in text:
+            score += 0.8
+
+    # Cold-focused boosts
+    if any(k in ql for k in ("cold","freezer","subzero","winter")):
+        if any(k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")):
+            score += 1.8
+        # Penalize AC in cold-only asks
+        if "air conditioner" in text or "a/c" in text:
+            score -= 1.2
+        # Slight boost to lighting in “dark” queries
+        if any(k in ql for k in ("dark","dim","poor lighting","night")) and any(k in text for k in ("light","led","beacon","blue light","work light")):
+            score += 1.2
+
+    # Dust/debris yards
+    if any(k in ql for k in ("dust","debris","recycling","sawmill","dirty")):
+        if any(k in text for k in ("radiator","screen","pre air cleaner","dual air filter","filtration","belly pan","protection")):
+            score += 1.3
+
+    # Telemetry alignment (when asked generally)
+    if _TELEM_PAT.search(ql) and _TELEM_PAT.search(text):
+        score += 2.0
+
+    return score
+
+def _rank_bucket(q: str, bucket: dict[str, str], limit: int = 6) -> list[dict]:
+    if not bucket:
+        return []
+    scored = []
+    for name, benefit in bucket.items():
+        s = _kw_score(q, name, benefit)
+        scored.append((s, {"name": name, "benefit": benefit}))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    out = [row for _, row in scored if _lower(row["name"]).strip()]
+    return out[:limit] if isinstance(limit, int) and limit > 0 else out
+
+def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
+    """
+    Returns ONLY what the user asked for (attachments, options, telemetry, tires).
+    Cold-specific logic suppresses unrelated clamps unless explicitly requested.
+    {
+      "attachments": [...], "options": [...], "telemetry": [...], "tires": [...]
+    } — keys omitted (or empty) if not requested.
+    """
+    intent = parse_catalog_intent(user_q)
+    which = intent["which"]
+    ql = _lower(user_q)
+
+    # Load buckets
+    options, attachments, tires = load_catalogs()
+
+    # Telemetry is a named subset of options
+    telemetry = {n: b for n, b in options.items() if _TELEM_PAT.search(_lower(n + " " + b))}
+
+    # Helper: in cold-only asks, hide generic attachments unless user names one
+    cold_only = any(k in ql for k in ("cold","freezer","subzero","winter"))
+    mentions_attach = bool(_ATTACH_HINT.search(ql))
+
+    result: dict[str, list] = {"attachments": [], "options": [], "telemetry": [], "tires": []}
+
+    # Section routers — return ONLY what was asked
+    if which == "tires":
+        result["tires"] = _rank_bucket(user_q, tires, limit)
+        return result
+
+    if which == "telemetry":
+        result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
+        return result
+
+    if which == "attachments":
+        if cold_only and not mentions_attach:
+            # Nothing explicitly attachment-y was asked; avoid random clamps
+            result["attachments"] = []
+        else:
+            result["attachments"] = _rank_bucket(user_q, attachments, limit)
+        return result
+
+    if which == "options":
+        # If “options” and they actually meant telemetry, prefer that
+        if _TELEM_PAT.search(ql):
+            result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
+        else:
+            # Rank options with cold-aware scoring; filter out AC in cold-only
+            ranked = _rank_bucket(user_q, options, limit=0)  # get all, then post-filter
+            if cold_only:
+                ranked = [o for o in ranked if "air conditioner" not in _lower(o["name"])]
+            result["options"] = ranked[:limit] if limit and limit > 0 else ranked
+        return result
+
+    if which == "both":
+        # Attachments + Options only (no tires)
+        if cold_only and not mentions_attach:
+            result["attachments"] = []
+        else:
+            result["attachments"] = _rank_bucket(user_q, attachments, limit)
+        ranked_opts = _rank_bucket(user_q, options, limit=0)
+        if cold_only:
+            ranked_opts = [o for o in ranked_opts if "air conditioner" not in _lower(o["name"])]
+        result["options"] = ranked_opts[:limit] if limit and limit > 0 else ranked_opts
+        return result
+
+    # Fallback (broad question): still prefer to avoid noise
+    result["options"] = _rank_bucket(user_q, options, limit)
+    result["attachments"] = _rank_bucket(user_q, attachments, limit=4)
+    # Do NOT include tires unless user hinted at tires
+    if re.search(r"\b(tires?|tyres?|tire\s*types?)\b", ql):
+        result["tires"] = _rank_bucket(user_q, tires, limit=4)
+    # Include telemetry only if hinted
+    if _TELEM_PAT.search(ql):
+        result["telemetry"] = _rank_bucket(user_q, telemetry, limit=3)
+    return result
+
+# ─────────────────────────────────────────────────────────────────────────────
 # “Defined but not accessed” silencer (legacy)
 # ─────────────────────────────────────────────────────────────────────────────
 def _is_attachment(name: str) -> bool:
