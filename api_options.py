@@ -2,21 +2,24 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
-# ── Imports from your codebase (NO generate_catalog_mode_response here) ──
-from ai_logic import load_options, recommend_options_from_sheet
-from options_attachments_router import respond_options_attachments, reload_catalogs
+# ⬇️ Your logic (new selector + catalogs)
+from ai_logic import load_catalogs, recommend_from_query
+
+# ⬇️ Keep your focused chat & its hot-reload hook
+from options_attachments_router import respond_options_attachments, reload_catalogs as router_reload_catalogs
 
 bp_options = Blueprint("bp_options", __name__)  # no url_prefix so paths match your frontend
 
+
 # ─────────────────────────────────────────────────────────────────────────
-# Small helper: infer a coarse category for /api/options listing
-# (kept in sync with your existing logic so the UI grouping stays stable)
+# Helper: infer a coarse UI category for /api/options listing
+# (intentionally conservative so your existing UI groupings remain stable)
 # ─────────────────────────────────────────────────────────────────────────
 def _infer_category(name: str) -> str:
     n = (name or "").lower()
-    if "tire" in n:
+    if "tire" in n or "pneumatic" in n or "cushion" in n:
         return "Tires"
     if "valve" in n or "finger control" in n:
         return "Hydraulics / Controls"
@@ -24,7 +27,7 @@ def _infer_category(name: str) -> str:
         return "Lighting / Safety"
     if any(k in n for k in ["seat", "cab", "windshield", "wiper", "heater", "air conditioner", "rain-proof"]):
         return "Cab / Comfort"
-    if any(k in n for k in ["radiator", "screen", "belly pan", "protection bar", "fan"]):
+    if any(k in n for k in ["radiator", "screen", "belly pan", "protection bar", "fan", "filter"]):
         return "Protection / Cooling"
     if "brake" in n:
         return "Braking"
@@ -40,54 +43,75 @@ def _infer_category(name: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# GET /api/options  → flat list for your UI (code, name, benefit, category)
+# GET /api/options → flat list for your UI
+# Returns a unified list (options + tires) with {code?, name, benefit, category}
+# Note: We build this from load_catalogs() so you don’t depend on load_options().
 # ─────────────────────────────────────────────────────────────────────────
 @bp_options.get("/api/options")
-def list_options():
+def list_options() -> Any:
     try:
-        items = load_options()  # [{code, name, benefit}]
+        options, attachments, tires = load_catalogs()
     except Exception as e:
-        return jsonify({"error": f"Failed to load options: {e}"}), 500
+        return jsonify({"error": f"Failed to load catalogs: {e}"}), 500
 
     out: List[Dict[str, Any]] = []
-    for o in items or []:
-        nm = o.get("name", "")
+
+    # Options
+    for name, benefit in (options or {}).items():
         out.append({
-            "code": o.get("code", ""),
-            "name": nm,
-            "benefit": o.get("benefit", "") or "",
-            "category": _infer_category(nm),
+            "code": "",  # kept for backward compatibility (not all rows have codes)
+            "name": name,
+            "benefit": benefit or "",
+            "category": _infer_category(name),
+            "type": "option",
         })
+
+    # Tires (many UIs previously showed tires within options; keep that behavior)
+    for name, benefit in (tires or {}).items():
+        out.append({
+            "code": "",
+            "name": name,
+            "benefit": benefit or "",
+            "category": "Tires",
+            "type": "tire",
+        })
+
+    # Attachments are not included here on purpose (your UI likely lists them elsewhere).
     return jsonify(out)
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# POST /api/recommend  → Excel-driven picks (tire, attachments, options)
+# POST /api/recommend → scenario-driven picks (1 tire + short, relevant lists)
 # Body: { "query": "<free text>" }
 # ─────────────────────────────────────────────────────────────────────────
 @bp_options.post("/api/recommend")
-def recommend():
+def api_recommend() -> Any:
     data: Dict[str, Any] = request.get_json(silent=True) or {}
     q = (data.get("query") or "").strip()
     if not q:
-        # Provide a safe default so the endpoint always returns shape the UI expects
-        q = "mixed indoor/outdoor, 10000 lb, pallets, busy aisles"
+        # Safe default so shape is always consistent
+        q = "mixed indoor/outdoor, pallets, busy aisles"
 
     try:
-        rec = recommend_options_from_sheet(q)
-        # Shape: {"tire": {...}, "attachments": [...], "options": [...]}
-        return jsonify(rec)
+        sel = recommend_from_query(q, top_attachments=5, top_options=5)
+        return jsonify({
+            "query": q,
+            "context_tags": sel.debug.get("tags", []),
+            "tire": [{"name": n, "benefit": b} for (n, b) in sel.tire_primary],  # usually length 1
+            "attachments": [{"name": n, "benefit": b} for (n, b) in sel.attachments_top],
+            "options": [{"name": n, "benefit": b} for (n, b) in sel.options_top],
+        })
     except Exception as e:
         return jsonify({"error": f"Failed to recommend: {e}"}), 500
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# POST /api/options_attachments_chat  → Focused chat (no follow-up loops)
+# POST /api/options_attachments_chat → Focused chat answer (HTML/plain)
 # Body: { "message": "<user text>" }
-# Returns: { "answer": "<plain text or HTML>" }
+# Keeps your existing curated router behavior for “list all”, “just options”, etc.
 # ─────────────────────────────────────────────────────────────────────────
 @bp_options.post("/api/options_attachments_chat")
-def options_attachments_chat():
+def options_attachments_chat() -> Any:
     data: Dict[str, Any] = request.get_json(silent=True) or {}
     user_text = (data.get("message") or "").strip()
     if not user_text:
@@ -99,9 +123,6 @@ def options_attachments_chat():
         })
 
     try:
-        # respond_options_attachments handles:
-        #  - 'options only' / 'attachments only' / 'both lists' / 'list all'
-        #  - environment-aware suggestions when user_text is a scenario
         answer = respond_options_attachments(user_text)
         return jsonify({"answer": answer})
     except Exception as e:
@@ -109,20 +130,36 @@ def options_attachments_chat():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# POST /api/reload_catalogs  → hot-reload Excel catalogs without restart
+# POST /api/reload_catalogs → hot-reload Excel without restart
+# Clears ai_logic.load_catalogs() cache and calls your router’s reload for parity.
 # ─────────────────────────────────────────────────────────────────────────
 @bp_options.post("/api/reload_catalogs")
-def api_reload_catalogs():
+def api_reload_catalogs() -> Any:
     try:
-        reload_catalogs()
+        # Clear ai_logic cache
+        try:
+            load_catalogs.cache_clear()  # type: ignore[attr-defined]
+        except Exception:
+            # If Python version/type checker complains, just ignore
+            pass
+
+        # Keep router in sync (it loads the same Excel via your other path)
+        try:
+            router_reload_catalogs()
+        except Exception:
+            # Router may be optional — do not fail the endpoint if absent
+            pass
+
+        # Touch catalogs once to repopulate cache (and to surface early errors)
+        load_catalogs()
         return jsonify({"ok": True, "message": "Catalogs reloaded from Excel."})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Failed to reload catalogs: {e}"}), 500
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Optional tiny health probe so Render can show green checks quickly
+# Tiny health probe
 # ─────────────────────────────────────────────────────────────────────────
 @bp_options.get("/api/health")
-def health():
+def health() -> Any:
     return jsonify({"ok": True})

@@ -68,6 +68,20 @@ def _make_code(name: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s[:64] or "UNKNOWN_OPTION"
 
+# --- NEW: strict type guards so tires/attachments/options never bleed into each other ---
+def _is_tire(row: Dict[str, Any]) -> bool:
+    t = (row.get("Type", "") or "").strip().lower()
+    s = (row.get("Subcategory", "") or "").strip().lower()
+    # Only treat as tire when the sheet says Type == "Tires"
+    # and Subcategory either contains "tire" or is blank (some rows use "Tire" / "Tires" / empty)
+    return t == "tires" and ("tire" in s or s == "")
+
+def _is_attachment(row: Dict[str, Any]) -> bool:
+    return (row.get("Type", "") or "").strip().lower() == "attachments"
+
+def _is_option(row: Dict[str, Any]) -> bool:
+    return (row.get("Type", "") or "").strip().lower() == "options"
+
 # ---------------- Core typed loader ----------------
 def _read_catalog_df():
     """
@@ -253,22 +267,47 @@ def _score_row(name: str, benefit: str, kw: set[str]) -> float:
 def load_catalogs() -> tuple[dict, dict, dict]:
     """
     Returns three dictionaries keyed by exact 'name':
-      - options:     { name: benefit }    (includes tires when you use load_options() below)
+      - options:     { name: benefit }
       - attachments: { name: benefit }
       - tires:       { name: benefit }
+
+    Notes:
+    - Enforces allowed types only ('option', 'attachment', 'tire')
+    - Trims whitespace
+    - De-dupes by name case-insensitively (last row wins)
     """
     df = _read_catalog_df()
     if df is None or df.empty:
         print("[ai_logic] load_catalogs(): 0/0/0 (Excel missing or empty)")
         return {}, {}, {}
 
-    opts_df = df[df["type"] == "option"][["name","benefit"]]
-    atts_df = df[df["type"] == "attachment"][["name","benefit"]]
-    tire_df = df[df["type"] == "tire"][["name","benefit"]]
+    # Normalize columns we depend on
+    required_cols = {"name", "type", "benefit"}
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise KeyError(f"[ai_logic] Missing required columns in catalog: {missing}")
 
-    options     = {r["name"]: (r["benefit"] or "") for _, r in opts_df.iterrows()}
-    attachments = {r["name"]: (r["benefit"] or "") for _, r in atts_df.iterrows()}
-    tires       = {r["name"]: (r["benefit"] or "") for _, r in tire_df.iterrows()}
+    # normalize/trim
+    df = df.copy()
+    df["name"]    = df["name"].astype(str).str.strip()
+    df["benefit"] = df["benefit"].fillna("").astype(str).str.strip()
+    df["type"]    = df["type"].astype(str).str.strip().str.lower()
+
+    # allow only known buckets
+    allowed = {"option", "attachment", "tire"}
+    df = df[df["type"].isin(allowed)]
+
+    # de-dupe per bucket by name (case-insensitive): keep last
+    def bucket_dict(t: str) -> dict[str, str]:
+        sub = df[df["type"] == t]
+        # drop duplicates by lowercased name, keeping last
+        sub = sub.loc[~sub["name"].str.lower().duplicated(keep="last")]
+        # build dict keyed by the original 'name' (display form)
+        return {row["name"]: row["benefit"] for _, row in sub.iterrows()}
+
+    options     = bucket_dict("option")
+    attachments = bucket_dict("attachment")
+    tires       = bucket_dict("tire")
 
     print(f"[ai_logic] load_catalogs(): options={len(options)} attachments={len(attachments)} tires={len(tires)}")
     return options, attachments, tires

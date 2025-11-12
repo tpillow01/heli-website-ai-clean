@@ -40,7 +40,7 @@ def _ok_payload(msg: str):
     safe = (msg or "").strip() or "_No response produced._"
     return jsonify({"ok": True, "response": safe, "text": safe, "message": safe})
 
-# --- Options & Attachments API (blueprint) ---
+# --- Options & Attachments Router (existing blueprint) ---
 try:
     from options_attachments_router import options_bp
     # Avoid duplicate registration on hot-reloads (use the blueprint's actual name)
@@ -52,6 +52,18 @@ try:
         logging.info("ℹ️ Blueprint already registered: %s", bp_name)
 except Exception as e:
     logging.warning("options_attachments_router not available (%s)", e)
+
+# --- Options API (new blueprint providing /api/options, /api/recommend, etc.) ---
+try:
+    from api_options import bp_options
+    bp_name = getattr(bp_options, "name", "bp_options")
+    if bp_name not in app.blueprints:
+        app.register_blueprint(bp_options)  # no url_prefix; endpoints start with /api/...
+        logging.info("✅ Registered blueprint: %s", bp_name)
+    else:
+        logging.info("ℹ️ Blueprint already registered: %s", bp_name)
+except Exception as e:
+    logging.warning("api_options not available (%s)", e)
 
 @app.route("/admin/reload_options", methods=["POST", "GET"])
 def admin_reload_options():
