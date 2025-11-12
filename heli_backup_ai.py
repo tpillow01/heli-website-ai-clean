@@ -22,7 +22,7 @@ except Exception:
     OpenAI = None  # safe fallback
 
 # -----------------------------------------------------------------------------
-# App init (create the app FIRST, then import blueprints/modules)
+# App init (create the app FIRST, then import/register blueprints)
 # -----------------------------------------------------------------------------
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")  # set env in prod
@@ -40,10 +40,11 @@ def _ok_payload(msg: str):
     safe = (msg or "").strip() or "_No response produced._"
     return jsonify({"ok": True, "response": safe, "text": safe, "message": safe})
 
-# --- Options & Attachments Router (existing blueprint) ---
+# -----------------------------------------------------------------------------
+# 1) Existing: Options & Attachments router (your focused catalog chat endpoints)
+# -----------------------------------------------------------------------------
 try:
     from options_attachments_router import options_bp
-    # Avoid duplicate registration on hot-reloads (use the blueprint's actual name)
     bp_name = getattr(options_bp, "name", "options_attachments")
     if bp_name not in app.blueprints:
         app.register_blueprint(options_bp)
@@ -53,18 +54,23 @@ try:
 except Exception as e:
     logging.warning("options_attachments_router not available (%s)", e)
 
-# --- Options API (new blueprint providing /api/options, /api/recommend, etc.) ---
+# -----------------------------------------------------------------------------
+# 2) NEW (Step 2): Register catalog listing/recommend endpoints (api_options.py)
+#     This block comes *after* the options_attachments_router registration above.
+# -----------------------------------------------------------------------------
 try:
     from api_options import bp_options
-    bp_name = getattr(bp_options, "name", "bp_options")
-    if bp_name not in app.blueprints:
-        app.register_blueprint(bp_options)  # no url_prefix; endpoints start with /api/...
-        logging.info("✅ Registered blueprint: %s", bp_name)
+    if bp_options.name not in app.blueprints:
+        app.register_blueprint(bp_options)
+        logging.info("✅ Registered blueprint: %s", bp_options.name)
     else:
-        logging.info("ℹ️ Blueprint already registered: %s", bp_name)
+        logging.info("ℹ️ Blueprint already registered: %s", bp_options.name)
 except Exception as e:
     logging.warning("api_options not available (%s)", e)
 
+# -----------------------------------------------------------------------------
+# Admin: hot-reload catalogs without restarting the service
+# -----------------------------------------------------------------------------
 @app.route("/admin/reload_options", methods=["POST", "GET"])
 def admin_reload_options():
     try:
