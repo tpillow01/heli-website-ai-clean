@@ -28,7 +28,6 @@ from ai_logic import (
     refresh_catalog_caches,
 )
 
-
 def _answer_catalog_reactive(user_text: str) -> str:
     """
     Returns a context-aware, *filtered* catalog answer grounded to the Excel sheet.
@@ -42,7 +41,6 @@ def _answer_catalog_reactive(user_text: str) -> str:
         # Defensive fallback — never crash your API
         return f"Options/Attachments (fallback): {str(e)}"
 
-
 def _help_text() -> str:
     return (
         "Ask about options, attachments, or tires — e.g.:\n"
@@ -51,7 +49,6 @@ def _help_text() -> str:
         "- 'List all attachments' or 'show all options'\n"
         "- 'What tire types are available?'"
     )
-
 
 def _make_payload(q: str) -> dict:
     """
@@ -62,7 +59,22 @@ def _make_payload(q: str) -> dict:
     # Keep 'html' key for clients that expect it; plain text is safest
     return {"ok": True, "text": text, "html": text}
 
+# ─────────────────────────────────────────────────────────────────────────
+# PUBLIC EXPORTS (for api_options.py or other callers)
+# ─────────────────────────────────────────────────────────────────────────
+def respond_options_attachments(user_text: str) -> str:
+    """Programmatic entrypoint: return the same text your endpoints would return."""
+    return _answer_catalog_reactive(user_text or "")
 
+def reload_catalogs() -> None:
+    """Programmatic hot-reload of Excel-backed caches."""
+    refresh_catalog_caches()
+
+__all__ = ["options_bp", "respond_options_attachments", "reload_catalogs"]
+
+# ─────────────────────────────────────────────────────────────────────────
+# Flask endpoints
+# ─────────────────────────────────────────────────────────────────────────
 if options_bp is not None:
 
     # ---- Primary endpoint ------------------------------------------------
