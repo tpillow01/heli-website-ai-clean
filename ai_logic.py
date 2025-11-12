@@ -849,3 +849,106 @@ _LEGACY_EXPORTS: Dict[str, Any] = {
 }
 if hashlib.md5(str(sorted(_LEGACY_EXPORTS.keys())).encode()).hexdigest():
     pass
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compatibility + safety block (place at the very bottom of ai_logic.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- Shims required by older blueprints/routes ---
+
+# Ensure TYPE_KEYS exists (some callers expect it)
+try:
+    TYPE_KEYS  # noqa: F401
+except NameError:
+    TYPE_KEYS = ["Type","Category","Segment","Class","Class/Type","Truck Type"]
+
+def _class_of(row: Dict[str, Any]) -> str:
+    t = ""
+    for k in TYPE_KEYS:
+        v = row.get(k)
+        if v:
+            t = str(v)
+            break
+    m = re.search(r'\bclass\s*([ivx]+)\b', t or "", re.I)
+    if m:
+        return m.group(1).upper()
+    tU = (t or "").strip().upper()
+    return tU if tU in {"I","II","III","IV","V"} else ""
+
+def model_meta_for(row: Dict[str, Any]) -> tuple[str, str, str]:
+    """Return (model_code, class_roman, power_text) for a model row."""
+    code = _safe_model_name(row)
+    cls  = _class_of(row)
+    pwr  = _power_of(row) or ""
+    return (code, cls, pwr)
+
+def top_pick_meta(user_q: str):
+    """Returns (model_code, class_roman, power_text) for the single best match, or None."""
+    hits = filter_models(user_q, limit=1)
+    if not hits:
+        return None
+    return model_meta_for(hits[0])
+
+# --- Cache refresh hook expected by other modules ---
+def refresh_catalog_caches() -> None:
+    """Clears memoized Excel/model lookups if they exist (safe even if some are missing)."""
+    for name in [
+        "load_catalogs",
+        "load_catalog_rows",
+        "load_options",
+        "load_attachments",
+        "load_tires_as_options",
+        "options_lookup_by_name",
+    ]:
+        fn = globals().get(name)
+        cache_clear = getattr(fn, "cache_clear", None)
+        if callable(cache_clear):
+            try:
+                cache_clear()  # type: ignore[misc]
+            except Exception:
+                pass
+
+# --- Guarantee a non-empty string from the main responder ---
+def _ensure_nonempty(s: str) -> str:
+    s = (s or "").strip()
+    return s if s else "(none found)"
+
+# Keep original impl and wrap it safely
+try:
+    _orig_generate = generate_catalog_mode_response  # type: ignore[misc]
+except NameError:
+    _orig_generate = None
+
+def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:  # type: ignore[override]
+    try:
+        if _orig_generate:
+            out = _orig_generate(user_q, max_per_section=max_per_section)  # type: ignore[misc]
+        else:
+            # Fallback: extremely minimal responder if something got pruned
+            rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
+            parts = []
+            if rec.get("tire"):
+                t = rec["tire"]; parts.append(f"**Tires:**\n- {t.get('name','')} — {t.get('benefit','')}".rstrip(" —"))
+            if rec.get("attachments"):
+                ats = "\n".join(f"- {a.get('name','')} — {a.get('benefit','')}".rstrip(" —") for a in rec["attachments"])
+                parts.append(f"**Attachments:**\n{ats}" if ats else "**Attachments:**\n- (none found)")
+            if rec.get("options"):
+                ops = "\n".join(f"- {o.get('name','')} — {o.get('benefit','')}".rstrip(" —") for o in rec["options"])
+                parts.append(f"**Options:**\n{ops}" if ops else "**Options:**\n- (none found)")
+            out = "\n".join(parts)
+    except Exception as e:
+        logging.exception("[ai_logic] generate_catalog_mode_response error: %s", e)
+        return "(none found)"
+    return _ensure_nonempty(out)
+
+# --- Export symbols so imports succeed ---
+try:
+    __all__.extend([
+        "model_meta_for", "top_pick_meta", "refresh_catalog_caches",
+        "generate_catalog_mode_response",
+    ])
+except Exception:
+    __all__ = [
+        "model_meta_for", "top_pick_meta", "refresh_catalog_caches",
+        "generate_catalog_mode_response",
+    ]
