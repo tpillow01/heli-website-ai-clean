@@ -190,64 +190,76 @@ def _canon_subcat(s: str) -> str:
     return canon.get(key, s if isinstance(s, str) else str(s))
 
 def _read_catalog_df():
-    if _pd is None:
-        log.warning("pandas not installed; catalog disabled.")
+    """
+    Returns a DataFrame with standardized columns: name, benefit, type, subcategory
+    Types normalized to: option | attachment | tire
+    """
+    if _pd is None or not os.path.exists(_OPTIONS_XLSX):
+        logging.warning("[ai_logic] Excel not found or pandas missing: %s", _OPTIONS_XLSX)
         return None
-    if not os.path.exists(_OPTIONS_XLSX):
-        log.warning("[ai_logic] catalog Excel not found: %s", _OPTIONS_XLSX)
-        return None
+
     try:
         df = _pd.read_excel(_OPTIONS_XLSX, engine="openpyxl")
     except Exception:
         df = _pd.read_excel(_OPTIONS_XLSX)
+
     if df is None or df.empty:
-        log.warning("[ai_logic] Excel loaded but empty.")
+        logging.warning("[ai_logic] Excel read but empty.")
         return None
 
+    # Column detection (case/space tolerant)
     cols = {str(c).lower().strip(): c for c in df.columns}
     name_col    = cols.get("name") or cols.get("option")
-    benefit_col = cols.get("benefit") or cols.get("description") or cols.get("desc")
+    benefit_col = cols.get("benefit") or cols.get("desc") or cols.get("description")
     type_col    = cols.get("type") or cols.get("category")
     subcat_col  = cols.get("subcategory")
 
     if not name_col:
-        log.error("[ai_logic] Excel must have a 'Name' or 'Option' column.")
+        logging.error("[ai_logic] Excel must have a 'Name' or 'Option' column.")
         return None
 
     df = df.copy()
-    df["__name__"] = df[name_col].astype(str).str.strip()
-    df["__benefit__"] = (df[benefit_col].astype(str).str.strip() if benefit_col else "")
-    df["__type__"] = (df[type_col].astype(str).str.strip().str.lower() if type_col else "")
+    df["__name__"]        = df[name_col].astype(str).str.strip()
+    df["__benefit__"]     = (df[benefit_col].astype(str).str.strip() if benefit_col else "")
+    df["__type__"]        = (df[type_col].astype(str).str.strip().str.lower() if type_col else "")
     df["__subcategory__"] = (df[subcat_col].astype(str).str.strip() if subcat_col else "")
     df["__subcategory__"] = df["__subcategory__"].map(_canon_subcat)
 
-    # normalize type buckets
+    # 👉 Name fixes MUST live inside this function (where `df` exists)
+    _NAME_FIXES = {
+        "Bag Pushe": "Bag Pusher",
+        "Blue spot Light": "Blue Spot Light",
+        # add more as you encounter them…
+    }
+    df["__name__"] = df["__name__"].map(lambda s: _NAME_FIXES.get(s, s))
+
+    # Normalize type labels
     df["__type__"] = df["__type__"].replace({
-        "options": "option","opt":"option","option":"option",
-        "attachments":"attachment","att":"attachment","attachment":"attachment",
-        "tires":"tire","tire":"tire"
+        "options": "option", "opt": "option", "option": "option",
+        "attachments": "attachment", "att": "attachment", "attachment": "attachment",
+        "tires": "tire", "tire": "tire"
     })
 
-    # infer type if missing, based on name
     def _infer_type(nm: str, tp: str) -> str:
-        if tp: return tp
+        if tp:
+            return tp
         ln = (nm or "").lower()
         if any(k in ln for k in (
             "clamp","sideshift","side shift","side-shift","positioner","rotator",
             "boom","pole","ram","fork extension","extensions","push/ pull","push/pull",
-            "slip-sheet","slipsheet","bale","carton","drum","load stabilizer","inverta","bag push"
+            "slip-sheet","slipsheet","bale","carton","drum","load stabilizer","inverta"
         )):
             return "attachment"
-        if any(k in ln for k in ("tire","tyre","pneumatic","cushion","non-mark","dual","solid tire")):
+        if any(k in ln for k in ("tire","tyre","pneumatic","cushion","non-mark","dual")):
             return "tire"
         return "option"
 
     df["__type__"] = df.apply(lambda r: _infer_type(r["__name__"], r["__type__"]), axis=1)
 
+    # Final standardized view
     out = df.loc[df["__name__"] != "", ["__name__","__benefit__","__type__","__subcategory__"]].rename(
         columns={"__name__":"name","__benefit__":"benefit","__type__":"type","__subcategory__":"subcategory"}
     )
-    log.info("[ai_logic] Using catalog: %s (exists=%s)", _OPTIONS_XLSX, os.path.exists(_OPTIONS_XLSX))
     return out
 
 @lru_cache(maxsize=1)
@@ -821,51 +833,96 @@ def _rank_bucket(q: str, bucket: dict[str, str], limit: int = 6) -> list[dict]:
     out = [row for _, row in scored if _lower(row["name"]).strip()]
     return out[:limit] if limit and limit > 0 else out
 
+_TELEM_PAT = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
+_ATTACH_HINT = re.compile(r"\b(attach(ment)?|clamp|sideshift|positioner|fork|boom|pole|ram|push\s*/?\s*pull|slip[-\s]?sheet|paper\s*roll)\b", re.I)
+
 def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
     """
-    Returns a dict with ranked picks drawn from the Excel catalog:
-      {
-        "tires":        [ {name, benefit}, ... ],
-        "attachments":  [ {name, benefit}, ... ],
-        "options":      [ {name, benefit}, ... ],
-        "telemetry":    [ {name, benefit}, ... ]   # subset of options
-      }
-
-    It respects the user's intent so routes can show ONLY the section asked.
+    Returns ONLY what the user asked for (attachments, options, telemetry, tires).
+    Cold-specific logic promotes cab/heater/wipers/lights, hides A/C,
+    and suppresses random clamps unless the user explicitly mentions them.
     """
     intent = parse_catalog_intent(user_q)
-    which = intent["which"]
+    which = intent.get("which")
+    ql = (user_q or "").lower()
+
     options, attachments, tires = load_catalogs()
+    telemetry = {n: b for n, b in options.items() if _TELEM_PAT.search((n + " " + (b or "")).lower())}
 
-    # Telemetry subset from options
-    telemetry = {n: b for n, b in options.items()
-                 if re.search(r"\b(fics|fleet\s*management|telemetry|portal)\b", _lower(n + " " + b))}
+    cold = any(k in ql for k in ("cold","freezer","subzero","winter"))
+    dark = any(k in ql for k in ("dark","dim","poor lighting","night"))
+    mentions_attach = bool(_ATTACH_HINT.search(ql))
 
-    result = {"tires": [], "attachments": [], "options": [], "telemetry": []}
+    def _rank_bucket(q: str, bucket: dict[str, str], limit_n: int) -> list[dict]:
+        if not bucket:
+            return []
+        scored = []
+        ql_ = q.lower()
+        for name, benefit in bucket.items():
+            text = (name + " " + (benefit or "")).lower()
+            s = 0.01
+            # generic keyword alignment
+            for w in ("indoor","warehouse","outdoor","yard","dust","debris","visibility",
+                      "lighting","safety","cold","freezer","rain","snow","cab","comfort",
+                      "vibration","filtration","cooling","radiator","screen","pre air cleaner",
+                      "dual air filter","non-mark","pneumatic","cushion","heater","wiper"):
+                if w in ql_ and w in text:
+                    s += 0.8
+            # cold boosts
+            if cold and any(k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")):
+                s += 1.8
+            if cold and ("air conditioner" in text or "a/c" in text):
+                s -= 1.5
+            if dark and any(k in text for k in ("light","led","beacon","blue light","work light")):
+                s += 1.2
+            if any(k in ql_ for k in ("dust","debris","recycling","sawmill","dirty")) and any(k in text for k in ("radiator","screen","pre air cleaner","dual air filter","filtration","belly pan","protection")):
+                s += 1.3
+            if _TELEM_PAT.search(ql_) and _TELEM_PAT.search(text):
+                s += 2.0
+
+            scored.append((s, {"name": name, "benefit": benefit}))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        out = [row for _, row in scored]
+        return out[:limit_n] if isinstance(limit_n, int) and limit_n > 0 else out
+
+    result: dict[str, list] = {}
 
     if which == "tires":
         result["tires"] = _rank_bucket(user_q, tires, limit)
         return result
-    if which == "attachments":
-        result["attachments"] = _rank_bucket(user_q, attachments, limit)
-        return result
+
     if which == "telemetry":
         result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
         return result
-    if which == "options":
-        # If the wording hints at telemetry, prefer telemetry only
-        if _TELEM_PAT.search(_lower(user_q)):
-            result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
-        else:
-            result["options"] = _rank_bucket(user_q, options, limit)
+
+    if which == "attachments":
+        result["attachments"] = [] if (cold and not mentions_attach) else _rank_bucket(user_q, attachments, limit)
         return result
 
-    # Fallback: broad question — give a few from each
-    result["tires"]        = _rank_bucket(user_q, tires, limit)
-    result["attachments"]  = _rank_bucket(user_q, attachments, limit)
-    result["options"]      = _rank_bucket(user_q, options, limit)
-    result["telemetry"]    = _rank_bucket(user_q, telemetry, limit)
+    if which == "options":
+        ranked_opts = _rank_bucket(user_q, options, limit=0)
+        if cold:
+            ranked_opts = [o for o in ranked_opts if "air conditioner" not in o["name"].lower()]
+        result["options"] = ranked_opts[:limit] if limit else ranked_opts
+        return result
+
+    if which == "both":
+        result["attachments"] = [] if (cold and not mentions_attach) else _rank_bucket(user_q, attachments, limit)
+        ranked_opts = _rank_bucket(user_q, options, limit=0)
+        if cold:
+            ranked_opts = [o for o in ranked_opts if "air conditioner" not in o["name"].lower()]
+        result["options"] = ranked_opts[:limit] if limit else ranked_opts
+        return result
+
+    # Fallback (broad): options + a few attachments; include tires/telemetry only if hinted
+    result["options"] = _rank_bucket(user_q, options, limit)
+    result["attachments"] = _rank_bucket(user_q, attachments, limit=4)
+    if re.search(r"\b(tires?|tyres?|tire\s*types?)\b", ql):
+        result["tires"] = _rank_bucket(user_q, tires, limit=4)
+    if _TELEM_PAT.search(ql):
+        result["telemetry"] = _rank_bucket(user_q, telemetry, limit=3)
     return result
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Catalog intent + cold-aware option/attachment selector (no tires unless asked)
@@ -1016,6 +1073,31 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
         result["telemetry"] = _rank_bucket(user_q, telemetry, limit=3)
     return result
 
+def render_sections_markdown(result: dict) -> str:
+    """
+    Render only the sections that actually have items. Sections may include:
+    'tires', 'attachments', 'options', 'telemetry'. Anything absent/empty is skipped.
+    """
+    order = ["tires", "attachments", "options", "telemetry"]
+    labels = {
+        "tires": "Tires",
+        "attachments": "Attachments",
+        "options": "Options",
+        "telemetry": "Telemetry"
+    }
+    lines: list[str] = []
+    for key in order:
+        arr = result.get(key) or []
+        if not arr:
+            continue
+        lines.append(f"**{labels[key]}:**")
+        for item in arr:
+            name = (item.get("name") or "").strip()
+            ben  = (item.get("benefit") or "").strip()
+            lines.append(f"- {name}" + (f" — {ben}" if ben else ""))
+    return "\n".join(lines) if lines else "(no matching items)"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # “Defined but not accessed” silencer (legacy)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1032,6 +1114,9 @@ __all__ = [
     "load_catalogs", "load_catalog_rows", "refresh_catalog_caches",
     "load_options", "load_attachments", "load_tires_as_options", "load_tires",
     "options_lookup_by_name", "option_benefit",
+    "recommend_options_from_sheet",
+    "render_sections_markdown",
+
 
     # Scenario picks & catalog renderers
     "render_catalog_sections", "parse_catalog_intent",
