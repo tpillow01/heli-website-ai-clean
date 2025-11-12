@@ -68,6 +68,12 @@ def _make_code(name: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s[:64] or "UNKNOWN_OPTION"
 
+# ── Catalog intent regexes (also used by options_attachments_router) ──
+_BOTH_PAT  = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+and\s+attachments)\b', re.I)
+_ATT_PAT   = re.compile(r'\b(attachments?\s+only|attachments?)\b', re.I)
+_OPT_PAT   = re.compile(r'\b(options?\s+only|options?)\b', re.I)
+_TIRES_PAT = re.compile(r'\b(tires?|tyres?|tire\s*types?)\b', re.I)
+
 # --- NEW: strict type guards so tires/attachments/options never bleed into each other ---
 def _is_tire(row: Dict[str, Any]) -> bool:
     t = (row.get("Type", "") or "").strip().lower()
@@ -311,6 +317,198 @@ def load_catalogs() -> tuple[dict, dict, dict]:
 
     print(f"[ai_logic] load_catalogs(): options={len(options)} attachments={len(attachments)} tires={len(tires)}")
     return options, attachments, tires
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context → Recommendation selector (DROP-IN)
+# ─────────────────────────────────────────────────────────────────────────────
+import re
+from dataclasses import dataclass
+from typing import List, Dict, Tuple
+
+@dataclass
+class SelectorOutput:
+    tire_primary: List[Tuple[str, str]]          # [(name, benefit)]
+    attachments_top: List[Tuple[str, str]]       # [(name, benefit)]
+    options_top: List[Tuple[str, str]]           # [(name, benefit)]
+    debug: Dict[str, any]                         # trace (optional to show)
+
+# Simple keyword buckets you can expand any time
+_KEYWORDS = {
+    "indoor":        [r"\bindoor\b", r"\binside\b", r"\bpolished\b", r"\bepoxy\b"],
+    "outdoor":       [r"\boutdoor\b", r"\byard\b", r"\bconstruction\b"],
+    "pedestrians":   [r"\bpedestrian", r"\bfoot traffic", r"\bpeople\b", r"\bbusy aisles\b"],
+    "tight":         [r"\btight\b", r"\bnarrow\b", r"\baisle", r"\bturn\b"],
+    "cold":          [r"\bcold\b", r"\bfreezer\b", r"\b\-?20", r"\bsubzero\b", r"\bcooler\b"],
+    "wet":           [r"\bwet\b", r"\bslick\b", r"\bspill", r"\brain", r"\bice\b"],
+    "debris":        [r"\bdebris\b", r"\bnails\b", r"\bscrap\b", r"\bpuncture\b"],
+    "soft_ground":   [r"\bsoft\b", r"\bgravel\b", r"\bdirt\b", r"\bgrass\b", r"\bsoil\b", r"\bsand\b"],
+    "heavy_loads":   [r"\bheavy\b", r"\bmax load\b", r"\bcapacity\b"],
+    "long_runs":     [r"\blong runs\b", r"\blong distance\b", r"\bcontinuous\b"],
+}
+
+# Map environment → tire rule (1 best pick).
+# Names must match your Tire names in Excel (case-insensitive comparison is used).
+_TIRE_RULES = [
+    # Ultra-indoor / floor protection
+    ({"indoor"}, lambda names: _pick_any(names, ["Non-Marking Tires","Non-Marking Cushion","NM Cushion","Non-Marking Pneumatic","NM Pneumatic","Solid Tires"])),
+    # Pedestrians + tight aisles (still indoor-leaning)
+    ({"indoor","pedestrians"}, lambda names: _pick_any(names, ["Non-Marking Tires","Non-Marking Cushion","NM Cushion","Solid Tires"])),
+    ({"tight"}, lambda names: _pick_any(names, ["Non-Marking Tires","Solid Tires","Non-Marking Cushion","NM Cushion"])),
+    # Debris / puncture-risk
+    ({"debris"}, lambda names: _pick_any(names, ["Solid Tires","Dual Solid Tires"])),
+    # Soft ground / rough
+    ({"soft_ground"}, lambda names: _pick_any(names, ["Dual Tires","Dual Solid Tires"])),
+    # Cold (electric specifics handled in options; tire could just be solid/non-marking)
+    ({"cold"}, lambda names: _pick_any(names, ["Solid Tires","Non-Marking Tires","Non-Marking Pneumatic","NM Pneumatic"])),
+    # Fallbacks
+    (set(), lambda names: _pick_any(names, ["Solid Tires","Non-Marking Tires","Dual Tires","Dual Solid Tires"]))
+]
+
+# Subcategory hints to boost ranking for attachments/options
+# (ensure your Excel "Subcategory" values align with these labels where possible)
+_SUBCAT_HINTS = {
+    "Safety Lighting": ["pedestrians", "tight"],
+    "Hydraulic Control": ["attachments", "heavy_loads"],
+    "Weather/Cab": ["cold", "wet", "outdoor"],
+    "Cooling/Filtration": ["dust", "debris", "long_runs", "outdoor"],
+    "Protection": ["debris", "outdoor"],
+}
+
+# Item-level keyword boosts (name/benefit contains… → add points)
+_ITEM_BOOSTS = {
+    "Blue Light": ["pedestrians", "tight", "busy aisles"],
+    "Blue spot Light": ["pedestrians", "tight", "busy aisles"],
+    "LED Rotating Light": ["pedestrians"],
+    "Visible backward radar": ["pedestrians"],
+    "Full OPS": ["pedestrians"],
+    "Backup Handle": ["pedestrians"],
+    "Fork Positioner": ["tight"],
+    "Sideshifter": ["tight"],
+    "Cold storage": ["cold"],
+    "Heater": ["cold"],
+    "Cab": ["cold", "outdoor", "wet"],
+    "Windshield": ["wet", "outdoor"],
+    "Top Rain-proof Glass": ["wet", "outdoor"],
+    "Pre air cleaner": ["debris", "dust", "outdoor"],
+    "Dual Air Filter": ["debris", "dust", "outdoor"],
+    "Radiator protection": ["debris", "outdoor"],
+    "Steel Belly Pan": ["debris", "outdoor"],
+}
+
+def _match_any(text: str, patterns: List[str]) -> bool:
+    t = text.lower()
+    return any(re.search(p, t) for p in patterns)
+
+def _classify(query: str) -> set:
+    tags = set()
+    q = (query or "").lower()
+    for tag, pats in _KEYWORDS.items():
+        if any(re.search(p, q) for p in pats):
+            tags.add(tag)
+    return tags
+
+def _pick_any(available_names: List[str], preferred_order: List[str]) -> List[str]:
+    # case-insensitive match in order of preference
+    avail_lower = {n.lower(): n for n in available_names}
+    for want in preferred_order:
+        hit = avail_lower.get(want.lower())
+        if hit:
+            return [hit]
+    # fallback: just return the first tire
+    return [available_names[0]] if available_names else []
+
+def _rank_items(bucket: Dict[str, str], tags: set, subcats: Dict[str, str]) -> List[Tuple[str, float]]:
+    out = []
+    for name, benefit in bucket.items():
+        score = 0.0
+        display = f"{name} {benefit}".lower()
+
+        # Subcategory signal
+        sub = (subcats.get(name) or "").strip()
+        if sub:
+            for tag, tagset in _SUBCAT_HINTS.items():
+                # If the subcategory itself is the key, check its mapped tags
+                if sub.lower().startswith(tag.lower()):
+                    for t in tagset:
+                        if t in tags:
+                            score += 2.5  # subcategory alignment
+
+        # Keyword/name/benefit boosts
+        for key, tag_list in _ITEM_BOOSTS.items():
+            if key.lower() in display:
+                for t in tag_list:
+                    if t in tags:
+                        score += 1.5
+
+        # Generic signals
+        if "pedestrian" in display and "pedestrians" in tags:
+            score += 1.2
+        if "cold" in display and "cold" in tags:
+            score += 1.2
+        if "rain" in display and "wet" in tags:
+            score += 1.2
+        if any(w in display for w in ["protection","guard","shield","screen"]) and ("debris" in tags or "outdoor" in tags):
+            score += 1.2
+
+        # Very small tie-breaker on length (avoid empty benefits floating to top)
+        if benefit:
+            score += 0.05
+
+        out.append((name, score))
+    # highest first
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
+
+def recommend_from_query(
+    query: str,
+    *,
+    top_attachments: int = 5,
+    top_options: int = 5,
+) -> SelectorOutput:
+    """
+    Main entry: pass the user's free-text query.
+    Uses your Excel (via load_catalogs) and returns tight picks.
+    """
+    options, attachments, tires = load_catalogs()
+
+    # We also need Subcategory to improve ranking → read once here
+    df = _read_catalog_df() or None
+    subcats: Dict[str,str] = {}
+    if df is not None and not df.empty and "Subcategory" in df.columns and "name" in df.columns:
+        sub = df[["name","Subcategory"]].copy()
+        sub["name"] = sub["name"].astype(str).str.strip()
+        subcats = {r["name"]: (r["Subcategory"] or "") for _, r in sub.iterrows()}
+
+    tags = _classify(query)
+
+    # 1) Pick ONE best tire (rule-based)
+    tire_names = list(tires.keys())
+    best_tire_list: List[str] = []
+    for req_tags, chooser in _TIRE_RULES:
+        if req_tags and not req_tags.issubset(tags):
+            continue
+        best_tire_list = chooser(tire_names)
+        if best_tire_list:
+            break
+    # if nothing hit, final fallback
+    if not best_tire_list and tire_names:
+        best_tire_list = [tire_names[0]]
+
+    tire_primary: List[Tuple[str,str]] = [(n, tires.get(n,"")) for n in best_tire_list]
+
+    # 2) Score & trim attachments and options
+    att_ranked = _rank_items(attachments, tags, subcats)
+    opt_ranked = _rank_items(options, tags, subcats)
+
+    attachments_top = [(n, attachments[n]) for n, _ in att_ranked[:top_attachments]]
+    options_top     = [(n, options[n])     for n, _ in opt_ranked[:top_options]]
+
+    return SelectorOutput(
+        tire_primary=tire_primary,
+        attachments_top=attachments_top,
+        options_top=options_top,
+        debug={"tags": sorted(list(tags))}
+    )
 
 # ---------------- Legacy-compatible helpers (used by endpoints/router) --------
 @lru_cache(maxsize=1)
@@ -745,8 +943,9 @@ def _pick_tire_from_flags(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, 
 
 def _pick_attachments_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, Any]], max_items: int = 6) -> List[Dict[str, Any]]:
     """
-    Picks only relevant attachments. If nothing explicit is triggered but it's clearly a pallet/indoor scenario,
-    we add Sideshifter as a sensible default (and Fork Positioner only when 'varied_width' is true).
+    Cold-aware, compact attachments:
+      - If 'cold' flagged: only add Sideshifter (and Fork Positioner if varied_width).
+      - Otherwise: same behavior as before (sensible defaults).
     """
     out: List[Dict[str, Any]] = []
     t = (flags.get("_raw_text") or "").lower()
@@ -756,9 +955,21 @@ def _pick_attachments_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dic
         for nm, default_ben in names:
             row = excel_lut.get(_norm(nm))
             if row:
-                out.append(_get_with_default(excel_lut, nm, default_ben))
+                item = _get_with_default(excel_lut, nm, default_ben)
+                # dedupe
+                if all(_norm(x["name"]) != _norm(item["name"]) for x in out):
+                    out.append(item)
 
-    # Explicit cues → attachments
+    # --- COLD MODE: keep attachments minimal unless cues justify them
+    if flags.get("cold"):
+        # Only alignment/tight aisles/varied width justify Sideshifter/Positioner
+        if flags.get("alignment_frequent") or "tight aisle" in t or pallets_mentioned:
+            maybe_add([("Sideshifter", "Aligns loads without repositioning the truck—faster, cleaner placement.")])
+        if flags.get("varied_width"):
+            maybe_add([("Fork Positioner", "Adjust fork spread from the seat for mixed pallet sizes.")])
+        return out[:max_items]
+
+    # --- Normal (non-cold) path (your existing logic) ---------------------
     if flags.get("alignment_frequent"):
         maybe_add([("Sideshifter", "Aligns loads without repositioning the truck—faster, cleaner placement.")])
     if flags.get("varied_width"):
@@ -772,33 +983,22 @@ def _pick_attachments_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dic
     if flags.get("long_loads"):
         maybe_add([("Fork Extensions", "Supports longer or over-length loads safely.")])
     if flags.get("weighing"):
-        maybe_add([("Hydraulic weight system (+/-10% difference)", "On-truck weighing for faster ship/receive checks.")])
+        # weighing is really an option, but keep your original behavior if desired
+        pass
 
-    # If nothing explicit fired, add a sensible default for indoor pallet work
     if not out and (flags.get("indoor") or pallets_mentioned):
         maybe_add([("Sideshifter", "Aligns loads without repositioning the truck—faster, cleaner placement.")])
-        # only add Fork Positioner when we genuinely detect width variation
         if flags.get("varied_width"):
             maybe_add([("Fork Positioner", "Adjust fork spread from the seat for mixed pallet sizes.")])
 
-    # Dedup & trim
-    seen = set()
-    uniq = []
-    for it in out:
-        k = _norm(it["name"])
-        if k in seen:
-            continue
-        seen.add(k)
-        uniq.append(it)
-        if len(uniq) >= max_items:
-            break
-    return uniq
+    return out[:max_items]
+
 
 def _pick_options_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dict[str, Any]], max_items: int = 6) -> List[Dict[str, Any]]:
     """
-    Non-attachment options (lighting, cab/comfort, protection/cooling, controls,
-    brakes, telematics, speed control, LPG bits, cold storage, OPS).
-    Only returns items present in your Excel by name.
+    Compact, scenario-filtered options.
+    - If 'cold': strongly prefer climate items + a couple of visibility/safety helpers.
+    - Otherwise: keep your cue-driven adds, but remain compact.
     """
     picks: List[Dict[str, Any]] = []
 
@@ -806,182 +1006,288 @@ def _pick_options_from_excel(flags: Dict[str, Any], excel_lut: Dict[str, Dict[st
         row = excel_lut.get(_norm(name))
         if not row:
             return
-        # Skip items whose Benefit mentions supply suspended (as in your sheet note)
-        ben_txt = (row.get("benefit") or row.get("Benefit") or "").lower()
-        if "suspend" in ben_txt:
+        ben_txt = (row.get("benefit") or row.get("Benefit") or "")
+        if "suspend" in ben_txt.lower():
             return
         item = _get_with_default(excel_lut, name, default_benefit)
         if all(_norm(item["name"]) != _norm(x["name"]) for x in picks):
             picks.append(item)
 
-    # Pedestrian / visibility
+    # --- COLD MODE: prioritize climate items; then 1–2 visibility/safety ---
+    if flags.get("cold"):
+        climate_priority = [
+            ("Panel mounted Cab", "Weather protection for outdoor duty; reduces operator fatigue."),
+            ("Heater", "Keeps operator warm in cold environments; improves productivity."),
+            ("Glass Windshield with Wiper", "Visibility in rain/snow; safer outdoor travel."),
+            ("Top Rain-proof Glass", "Overhead visibility while shielding from precipitation."),
+            ("Rear Windshield Glass", "Reduces wind/snow ingress from the rear."),
+        ]
+        for nm, ben in climate_priority:
+            add_if_present(nm, ben)
+
+        # Cold storage only when electric/freezer context
+        if flags.get("electric"):
+            add_if_present("Added cost for the cold storage package (for electric forklift)",
+                           "Seals/heaters for freezer rooms; consistent performance in cold aisles.")
+
+        # A couple of visibility/safety helpers (keep compact)
+        vis_candidates = [
+            ("LED Rear Working Light", "Bright, low-draw rear work lighting for dim winter shifts."),
+            ("LED Rotating Light", "High-visibility 360° beacon to alert pedestrians."),
+            ("Blue Light", "Directional warning for blind corners and intersections."),
+            ("Visible backward radar, if applicable", "Audible/visual alerts while reversing."),
+        ]
+        for nm, ben in vis_candidates:
+            if len(picks) >= max_items:
+                break
+            add_if_present(nm, ben)
+
+        # Optional: policy/speed if hinted
+        if flags.get("ops_required"):
+            add_if_present("Full OPS", "Operator presence system for safety interlocks.")
+        if flags.get("speed_control") or flags.get("pedestrian_heavy"):
+            add_if_present("Speed Control system (not for diesel engine)", "Limits travel speed to enhance safety.")
+
+        return picks[:max_items]
+
+    # --- Non-cold path (kept compact, based on your cues) -----------------
     if flags.get("pedestrian_heavy") or flags.get("poor_visibility"):
         add_if_present("LED Rotating Light", "High-visibility 360° beacon to alert pedestrians.")
-        add_if_present("Blue spot Light", "Projects a visible spot ahead/behind to warn pedestrians at intersections.")
-        add_if_present("Red side line Light", "Creates a visual exclusion zone along the sides for safer aisles.")
-        add_if_present("Visible backward radar, if applicable", "Audible/visual alerts for obstacles while reversing.")
-        add_if_present("Rear Working Light", "Improves rear visibility for night or dim aisles.")
-        add_if_present("LED Rear Working Light", "Bright, low-draw rear work lighting for staging areas.")
-        add_if_present("Blue Light", "Extra directional warning for blind corners.")
+        add_if_present("Blue spot Light", "Projects a visible spot to warn pedestrians at intersections.")
+        add_if_present("Red side line Light", "Creates a visual exclusion zone along the sides.")
+        add_if_present("Visible backward radar, if applicable", "Audible/visual alerts while reversing.")
+        add_if_present("Rear Working Light", "Improves rear visibility in dim aisles.")
+        add_if_present("LED Rear Working Light", "Bright, low-draw rear lighting.")
+        add_if_present("Blue Light", "Directional warning for blind corners.")
 
-    # Cab / comfort / climate
-    if flags.get("outdoor") or flags.get("cold") or flags.get("hot"):
-        add_if_present("Panel mounted Cab", "Weather protection for outdoor duty; reduces operator fatigue.")
-        add_if_present("Heater", "Keeps operator warm in cold environments; improves productivity.")
-        add_if_present("Air conditioner", "Comfort in hot conditions; maintains focus during long shifts.")
-        add_if_present("Glass Windshield with Wiper", "Visibility in rain/snow and wind; safer outdoor travel.")
-        add_if_present("Top Rain-proof Glass", "Protects from precipitation while keeping overhead visibility.")
-        add_if_present("Rear Windshield Glass", "Reduces wind and rain ingress from the rear.")
+    if flags.get("outdoor") or flags.get("hot"):
+        add_if_present("Panel mounted Cab", "Weather protection for outdoor duty; reduces fatigue.")
+        add_if_present("Air conditioner", "Comfort in hot conditions; keeps productivity steady.")
+        add_if_present("Glass Windshield with Wiper", "Rain/dust visibility.")
+        add_if_present("Top Rain-proof Glass", "Keeps overhead visibility while shielding precipitation.")
+        add_if_present("Rear Windshield Glass", "Shields rear from wind/dust.")
 
-    # Protection / cooling / filtration
     if flags.get("rough") or flags.get("debris") or flags.get("yard") or flags.get("gravel"):
-        add_if_present("Radiator protection bar", "Shields radiator core from impacts and debris.")
-        add_if_present("Steel Belly Pan", "Protects underside from debris, ruts, and snagging.")
-        add_if_present("Removable radiator screen", "Keeps fins clear of debris; easier maintenance on dusty sites.")
+        add_if_present("Radiator protection bar", "Shields radiator from impacts/debris.")
+        add_if_present("Steel Belly Pan", "Protects the underside from debris and snags.")
+        add_if_present("Removable radiator screen", "Keeps fins clear; easy cleaning.")
         add_if_present("Dual Air Filter", "Improved filtration for dusty yards.")
-        add_if_present("Pre air cleaner", "Cyclonic pre-separation for heavy dust; longer filter life.")
-        add_if_present("Air filter service indicator", "Visual indicator for timely filter service on dusty routes.")
-        add_if_present("Tilt or Steering cylinder boot", "Protects cylinder rods from grit and pitting.")
+        add_if_present("Pre air cleaner", "Cyclonic pre-cleaning extends filter life.")
+        add_if_present("Air filter service indicator", "Prompts timely filter service.")
+        add_if_present("Tilt or Steering cylinder boot", "Protects cylinder rods from grit.")
 
-    # Hydraulics / controls (beyond attachments)
     if flags.get("extra_hydraulics") or flags.get("multi_function"):
         add_if_present("3 Valve with Handle", "Adds third function for attachments; simple handle control.")
         add_if_present("4 Valve with Handle", "Adds fourth hydraulic circuit for complex tools.")
         add_if_present("5 Valve with Handle", "Maximum hydraulic flexibility for specialized attachments.")
         add_if_present("Finger control system(2valve),if applicable.should work together with MSG65 seat",
-                       "Compact fingertip controls; less reach and wrist strain.")
+                       "Compact fingertip controls; less reach/wrist strain.")
         add_if_present("Finger control system(3valve),if applicable.should work together with MSG65 seat",
                        "Fingertip precision for three hydraulic functions; reduced fatigue.")
         add_if_present("Finger control system(4valve), if applicable, should work together with MSG65 seat",
-                       "Compact fingertip controls for complex four-function attachments.")
+                       "Fingertip controls for complex four-function attachments.")
 
-    # Brakes / axles (heavy IC duty)
     if flags.get("heavy_loads") or flags.get("long_runs") or flags.get("outdoor"):
         add_if_present("Wet Disc Brake axle for CPCD50-100", "Lower maintenance braking under heavy duty cycles.")
 
-    # Speed / safety systems
     if flags.get("speed_control"):
-        add_if_present("Speed Control system (not for diesel engine)", "Zone or global speed limiting for safer aisles.")
+        add_if_present("Speed Control system (not for diesel engine)", "Safer aisles via speed limiting.")
     if flags.get("ops_required"):
         add_if_present("Full OPS", "Operator presence system for OSHA-aligned safety interlocks.")
 
-    # Telematics
-    if flags.get("telematics"):
-        add_if_present("HELI smart fleet management system FICS (Standard version（U.S. market supply suspended temporarily. Await notice.）",
-                       "Track utilization, impacts, and maintenance; improve fleet uptime.")
-        add_if_present("HELI smart fleet management system FICS (Upgraded version（U.S. market supply suspended temporarily. Await notice.）",
-                       "Expanded analytics and controls for large fleets.")
-        add_if_present("Portal access fee of FICS (each truck per year)（U.S. market supply suspended temporarily. Await notice.）",
-                       "Annual portal access for data and dashboards.")
-
-    # Seats (comfort/ergonomics)
     if flags.get("ergonomics") or flags.get("long_runs"):
         add_if_present("Heli Suspension Seat with armrest", "Improves comfort and posture over long shifts.")
         add_if_present("Grammar Full Suspension Seat MSG65", "Premium suspension; pairs with fingertip controls.")
 
-    # LPG specifics
     if flags.get("power_lpg"):
         add_if_present("Swing Out Drop LPG Bracket", "Faster, safer tank changes; reduces strain.")
-        add_if_present("LPG Tank", "Extra tank for quick swaps on multi-shift operations.")
-        add_if_present("Low Fuel Indicator Light", "Prevents surprise stalls; prompts timely tank change.")
+        add_if_present("LPG Tank", "Extra tank for quick swaps on multi-shift ops.")
+        add_if_present("Low Fuel Indicator Light", "Prevents surprise stalls; prompt tank change.")
 
-    # Cold storage (electric only)
     if flags.get("electric") and flags.get("cold"):
         add_if_present("Added cost for the cold storage package (for electric forklift)",
-                       "Seals and heaters for cold rooms; consistent performance in freezer aisles.")
+                       "Seals/heaters for freezer rooms; consistent performance in cold aisles.")
 
-    # Overhead guard height (clearance needs)
     if flags.get("tall_operator") or flags.get("high_loads"):
         add_if_present("more 100mm higher overhead guard OHG as 2370mm (93”)",
                        "Extra headroom and load clearance where needed.")
 
-    # Special paint (brand/site requirement)
     if flags.get("special_color"):
         add_if_present("Special Color Painting", "Matches facility requirement or corporate branding.")
 
-    # Lifting eyes (site rigging/transport)
     if flags.get("rigging"):
         add_if_present("Lifting eyes", "Simplifies hoisting the truck safely during site work or transport.")
 
-    # Trim to budget
     return picks[:max_items]
 
-def recommend_options_from_sheet(user_q: str, max_total: int = 6) -> dict:
+# --- put this in ai_logic.py ---
+
+import re
+from functools import lru_cache
+from typing import Dict, List, Any, Tuple
+
+# we assume you already have: load_catalogs(), _make_code(), etc.
+
+def _norm_text(s: str) -> str:
+    s = (s or "").lower()
+    s = re.sub(r"[^a-z0-9\s/+-]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _kw_in(text: str, *alts: str) -> bool:
+    return any(a in text for a in alts)
+
+@lru_cache(maxsize=256)
+def _scenario_profiles() -> List[Dict[str, Any]]:
     """
-    Returns ONLY items that exist in /data/forklift_options_benefits.xlsx:
-      {
-        "tire": {"name","benefit"} | None,
-        "attachments": [{"name","benefit"}, ...],
-        "options": [{"name","benefit"}, ...]
-      }
+    Lightweight rules you can evolve quickly without touching the Excel.
+    Each profile provides:
+      - match: lambda text -> bool
+      - tire_preference: list of tire name substrings (in priority order)
+      - attach_hints / option_hints: lists of substrings we want
     """
-    try:
-        items = load_options()
-    except Exception:
-        items = []
+    return [
+        # Indoor polished floors, pedestrians, tight aisles
+        {
+            "name": "indoor+polished+tight_aisles",
+            "match": lambda t: (_kw_in(t, "indoor", "inside")
+                                and _kw_in(t, "polished", "smooth")
+                                and _kw_in(t, "tight aisle", "tight aisles", "narrow")
+                                ) or _kw_in(t, "pedestrian"),
+            "tire_preference": ["non-marking", "solid"],  # prefer NM, then solid
+            "attach_hints": ["sideshifter", "fork positioner", "fork extension"],
+            "option_hints": ["blue light", "blue spot", "red side line", "ops"],
+        },
+        # Cold storage / freezer
+        {
+            "name": "cold_storage",
+            "match": lambda t: _kw_in(t, "cold", "freezer", "cold storage", "refrigerated"),
+            "tire_preference": ["solid", "non-marking"],
+            "attach_hints": [],  # neutral
+            "option_hints": ["cold storage", "heater", "cab", "windshield", "wiper"],
+        },
+        # Rough terrain / yards / gravel / outdoors
+        {
+            "name": "rough_terrain",
+            "match": lambda t: _kw_in(t, "rough", "gravel", "yard", "outdoor", "construction"),
+            "tire_preference": ["dual", "solid"],  # duals/solid for puncture + footprint
+            "attach_hints": ["load stabilizer", "fork extension", "lifting arm"],
+            "option_hints": ["steel belly", "radiator protection", "rear working light"],
+        },
+        # Paper & packaging (clamps, rolls)
+        {
+            "name": "paper_packaging",
+            "match": lambda t: _kw_in(t, "paper", "packaging", "appliance", "roll", "carton"),
+            "tire_preference": ["solid", "non-marking"],
+            "attach_hints": ["carton clamp", "paper roll clamp", "fork positioner"],
+            "option_hints": ["blue light", "ops"],
+        },
+        # General indoor warehouse, busy aisles
+        {
+            "name": "indoor_busy",
+            "match": lambda t: _kw_in(t, "indoor", "warehouse", "polished", "smooth", "busy aisle", "busy aisles"),
+            "tire_preference": ["non-marking", "solid"],
+            "attach_hints": ["sideshifter", "fork positioner"],
+            "option_hints": ["blue light", "blue spot", "ops", "speed control"],
+        },
+    ]
 
-    lut = _lut_by_name(items)
+def _pick_tire(user_text: str, tires: Dict[str, str]) -> Tuple[str, str]:
+    """
+    Returns (tire_name, tire_benefit). Chooses one tire by scenario profile and fallback.
+    Only pulls from the TIRES dictionary (prevents 'Tyre Clamp' leaking in).
+    """
+    t = _norm_text(user_text)
+    tire_names = list(tires.keys())
 
-    # Start with your main flagger if present
-    flags = _need_flags_from_text(user_q) if '_need_flags_from_text' in globals() else {}
+    # try scenario-driven preference lists
+    for prof in _scenario_profiles():
+        if prof["match"](t):
+            for pref in prof["tire_preference"]:
+                # find best matching tire by substring
+                cand = next((n for n in tire_names if pref in n.lower()), None)
+                if cand:
+                    return cand, tires.get(cand, "")
 
-    # Keep the raw text for attachment defaults that key off wording like “pallets”
-    flags["_raw_text"] = user_q or ""
+    # simple heuristics if no profile matched
+    if _kw_in(t, "indoor", "polished", "warehouse", "pedestrian"):
+        cand = next((n for n in tire_names if "non-marking" in n.lower()), None)
+        if cand:
+            return cand, tires.get(cand, "")
+    if _kw_in(t, "rough", "gravel", "yard", "outdoor"):
+        cand = next((n for n in tire_names if "dual" in n.lower()), None)
+        if cand:
+            return cand, tires.get(cand, "")
 
-    # Lightweight power/env/text fallbacks so we don’t miss obvious cues
-    t = (user_q or "").lower()
-    flags.setdefault("power_lpg", bool(re.search(r'\b(lpg|propane|lp[-\s]?gas)\b', t)))
-    flags.setdefault("electric", bool(re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', t)))
+    # last resort: first tire in catalog (stable but deterministic)
+    if tire_names:
+        name = tire_names[0]
+        return name, tires.get(name, "")
+    return "", ""
 
-    # Surface non-marking / environment cues (helps tire pick ALWAYS return something sensible)
-    flags.setdefault("non_marking", bool(re.search(r'non[-\s]?mark|no\s*marks?|black\s*marks?|avoid\s*marks?|scuff', t)))
-    flags.setdefault("rough", bool(re.search(r'rough|uneven|broken|pothole|curb|rail|speed\s*bumps?', t)))
-    flags.setdefault("debris", bool(re.search(r'debris|nails|screws|scrap|glass|shavings|chips?', t)))
-    flags.setdefault("gravel", "gravel" in t)
-    flags.setdefault("yard", "yard" in t)
-    flags.setdefault("outdoor", bool(re.search(r'\boutdoor|dock|lot|asphalt|gravel|dirt|parking\b', t)))
-    flags.setdefault("indoor", bool(re.search(r'\bindoor|warehouse|inside|factory|floor\b', t)))
-    flags.setdefault("mixed", ("indoor" in t and "outdoor" in t) or ("mixed" in t) or ("both" in t))
+def _shortlist_by_hints(hints: List[str], pool: Dict[str, str], k: int) -> List[Dict[str, str]]:
+    """
+    From a dict {name: benefit}, keep up to k whose names contain any hint substrings.
+    If too few hits, backfill with other popular-sounding items.
+    """
+    hits: List[str] = []
+    lname = {n.lower(): n for n in pool.keys()}
+    for h in hints:
+        h = h.lower()
+        for ln, orig in lname.items():
+            if h in ln and orig not in hits:
+                hits.append(orig)
+                if len(hits) >= k:
+                    break
+        if len(hits) >= k:
+            break
 
-    # Attachment/option triggers that your main flagger might miss
-    flags.setdefault("alignment_frequent", bool(re.search(r'align|line\s*up|tight\s*aisles|staging', t)))
-    flags.setdefault("varied_width", bool(re.search(r'vary|mixed\s*pallet|different\s*width|multiple\s*widths|mix\s*of\s*\d+\s*["in]?\s*(?:and|&)\s*\d+\s*["in]?\s*pallets?', t)))
-    flags.setdefault("paper_rolls", bool(re.search(r'paper\s*roll|newsprint|tissue', t)))
-    flags.setdefault("slip_sheets", bool(re.search(r'slip[-\s]?sheet', t)))
-    flags.setdefault("carpet", "carpet" in t or "textile" in t)
-    flags.setdefault("long_loads", bool(re.search(r'long|oversize|over[-\s]?length|overhang|\b\d+\s*[- ]?ft\b|\b\d+\s*foot\b|\b\d+\s*feet\b|crate[s]?', t)))
-    flags.setdefault("weighing", bool(re.search(r'weigh|scale|check\s*weight', t)))
-    flags.setdefault("pedestrian_heavy", bool(re.search(r'pedestrian|foot\s*traffic|busy|congested|blind\s*corner|walkway', t)))
-    flags.setdefault("poor_visibility", bool(re.search(r'low\s*light|dim|night|second\s*shift|poor\s*lighting', t)))
-    flags.setdefault("extra_hydraulics", ("4th function" in t) or ("fourth function" in t))
-    flags.setdefault("multi_function", ("multiple clamp" in t) or ("multiple attachments" in t))
-    flags.setdefault("ergonomics", bool(re.search(r'ergonomic|fatigue|wrist|reach|comfort', t)))
-    flags.setdefault("long_runs", bool(re.search(r'long\s*shifts?|multi[-\s]?shift|continuous', t)))
-    flags.setdefault("cold", bool(re.search(r'cold|freezer|refrigerated|winter', t)))
-    flags.setdefault("hot", bool(re.search(r'hot|heat|summer|foundry|high\s*ambient', t)))
-    flags.setdefault("speed_control", bool(re.search(r'limit\s*speed|speeding|zoned\s*speed', t)))
-    flags.setdefault("ops_required", bool(re.search(r'ops|operator\s*presence|osha|insurance|audit|policy', t)))
-    flags.setdefault("tall_operator", ("tall operator" in t) or ("headroom" in t))
-    flags.setdefault("high_loads", bool(re.search(r'high\s*mast|tall\s*stacks|top\s*heavy|elevated', t)))
-    flags.setdefault("special_color", ("special color" in t) or ("paint" in t))
-    flags.setdefault("rigging", ("rigging" in t) or ("lift with crane" in t))
+    # backfill deterministically with the first items not yet picked
+    if len(hits) < k:
+        for n in pool.keys():
+            if n not in hits:
+                hits.append(n)
+            if len(hits) >= k:
+                break
 
-    # Tire (ALWAYS returns something if you used the updated _pick_tire_from_flags)
-    tire = _pick_tire_from_flags(flags, lut)
+    out = []
+    for n in hits[:k]:
+        out.append({"name": n, "benefit": pool.get(n, "")})
+    return out
 
-    # Attachments (relevant + default Sideshifter where sensible)
-    attachments = _pick_attachments_from_excel(flags, lut, max_items=min(6, max_total))
+def recommend_options_from_sheet(user_text: str) -> Dict[str, Any]:
+    """
+    Main entry: returns exactly one tire and short, relevant lists.
+    Shape:
+    {
+      "tire": {"name": ..., "benefit": ...},
+      "attachments": [{"name":..., "benefit":...}, ...],
+      "options": [{"name":..., "benefit":...}, ...]
+    }
+    """
+    options, attachments, tires = load_catalogs()  # each is {name: benefit}
 
-    # Options (strict cue-gated)
-    options = _pick_options_from_excel(flags, lut, max_items=min(6, max_total))
+    # 1) tire (strictly from tires dict)
+    tire_name, tire_benefit = _pick_tire(user_text, tires)
+    tire_block = {"name": tire_name, "benefit": tire_benefit} if tire_name else {}
 
-    return {"tire": tire, "attachments": attachments, "options": options}
+    # 2) scenario-driven shortlists
+    t = _norm_text(user_text)
+    chosen_prof = next((p for p in _scenario_profiles() if p["match"](t)), None)
+    attach_hints = chosen_prof["attach_hints"] if chosen_prof else []
+    option_hints = chosen_prof["option_hints"] if chosen_prof else []
 
-# --- Catalog intent parser: stop the endless "both lists?" loop & add TIRES ---
-_BOTH_PAT  = re.compile(r'\b(both\s+lists?|attachments\s+and\s+options|options\s+and\s+attachments)\b', re.I)
-_OPT_PAT   = re.compile(r'\b(options?\s+only|options?)\b', re.I)
-_ATT_PAT   = re.compile(r'\b(attachments?\s+only|attachments?)\b', re.I)
-_TIRES_PAT = re.compile(r'\b(tires?|tyres?|tire\s*types?)\b', re.I)  # NEW
+    # 3) shortlist (cap lengths)
+    attach_list = _shortlist_by_hints(attach_hints, attachments, k=5)  # <= 5
+    option_list = _shortlist_by_hints(option_hints, options, k=6)       # <= 6
+
+    # 4) never mix types (no tires in attachments/options; already guaranteed by dicts)
+    # 5) return
+    return {
+        "tire": tire_block,
+        "attachments": attach_list,
+        "options": option_list,
+    }
 
 def parse_catalog_intent(user_q: str) -> dict:
     """
@@ -1028,107 +1334,119 @@ def _plain(s: str) -> str:
     s = re.sub(r" ?\n ?", "\n", s)
     return s.strip()
 
-def render_catalog_sections(user_q: str, max_per_section: int = 6) -> str:
+# --- Intent helpers -------------------------------------------------------
+_LIST_ALL_PAT = re.compile(r'\b(list|show|display)\s+(all|everything)\b', re.I)
+_LIST_ALL_CATS = re.compile(r'\b(all\s+)?(attachments?|options?|tires?|tyres?)\b', re.I)
+
+def _list_all_requested(text: str) -> bool:
+    t = (text or "").lower()
+    # ask to list/show everything OR "list all attachments/options/tires"
+    return bool(_LIST_ALL_PAT.search(t)) and bool(_LIST_ALL_CATS.search(t))
+
+
+# --- Human-facing renderer used by options_attachments_router ------------------
+def render_catalog_sections(user_text: str, max_per_section: int = 6) -> str:
     """
-    Never asks clarifying questions. Either:
-    - Renders exactly the sections the user asked for (attachments/options/both; or *tires only*),
-    - Or returns the scenario-aware compact output (Tires, Attachments, Options).
+    If the user asks to 'list/show all' for options/attachments/tires,
+    list directly from Excel. Otherwise, run the scenario recommender which
+    uses the new _pick_* functions to keep answers compact and relevant.
     """
-    t = (user_q or "").strip().lower()
+    t = (user_text or "").strip()
+    tl = t.lower()
 
-    # --- Detect explicit "tires" listing requests (e.g., "what types of tires are available")
-    asks_for_tires_list = (
-        bool(re.search(r'\b(tires?|tyres?)\b', t)) and
-        bool(re.search(r'\b(types?|list|show|available|options?)\b', t)) and
-        ("attachment" not in t and "option" not in t)  # avoid conflicts if user mentions other sections
-    )
+    # Ensure these exist above (you already added them earlier):
+    # _BOTH_PAT, _OPT_PAT, _ATT_PAT, _TIRES_PAT
 
-    intent = parse_catalog_intent(user_q)
-    which = intent["which"]
-    want_all = intent["list_all"]
+    # 1) "List all ..." branches (pulled straight from Excel)
+    opts, atts, tires = load_catalogs()  # dicts: name -> benefit
 
-    # --- Pull catalog rows once; use the explicit 'type' column when present
-    rows = load_catalog_rows()  # [{name, benefit, type, subcategory}]
-    tires, atts, opts = [], [], []
+    def _fmt_lines(d: dict, limit: int | None = None) -> str:
+        items = sorted(d.items(), key=lambda kv: kv[0].lower())
+        if limit is not None:
+            items = items[:limit]
+        return "\n".join(f"- {name} — {(benefit or '').strip()}" for name, benefit in items)
 
-    for r in rows:
-        nm = r.get("name", "")
-        ben = r.get("benefit", "") or ""
-        tp = (r.get("type") or "").strip().lower()
-        nl = nm.lower()
+    list_all = any(w in tl for w in ("list", "show", "all", "full"))
 
-        if tp == "tire" or ("tire" in nl or "tyre" in nl):
-            tires.append((nm, ben))
-        elif tp == "attachment" or _is_attachment(nl):
-            atts.append((nm, ben))
-        else:
-            # default to option
-            opts.append((nm, ben))
+    # tires only
+    if _TIRES_PAT.search(tl) and list_all:
+        return "Tires:\n" + _fmt_lines(tires, None)
 
-    tires.sort(key=lambda x: x[0].lower())
-    atts.sort(key=lambda x: x[0].lower())
-    opts.sort(key=lambda x: x[0].lower())
+    # attachments only
+    if _ATT_PAT.search(tl) and list_all:
+        return "Attachments:\n" + _fmt_lines(atts, None)
 
-    # --- If the user explicitly asked for TIRES ONLY, honor that
-    if asks_for_tires_list:
-        out = ["Tires:"]
-        out.extend([f"- {n}" + (f" — {b.strip()}" if b.strip() else "") for n, b in tires] or ["- None found in catalog"])
-        return _plain("\n".join(out))
+    # options only
+    if _OPT_PAT.search(tl) and list_all:
+        return "Options:\n" + _fmt_lines(opts, None)
 
-    # --- If explicit request for attachments/options/both or "all", render lists directly
-    if which in ("both", "attachments", "options") or want_all:
-        out = []
-        if which == "attachments":
-            out.append("Attachments:")
-            out.extend([f"- {n}" + (f" — {b.strip()}" if b.strip() else "") for n, b in atts] or ["- None found in catalog"])
-        elif which == "options":
-            out.append("Options:")
-            out.extend([f"- {n}" + (f" — {b.strip()}" if b.strip() else "") for n, b in opts] or ["- None found in catalog"])
-        else:  # both or list_all
-            out.append("Attachments:")
-            out.extend([f"- {n}" + (f" — {b.strip()}" if b.strip() else "") for n, b in atts] or ["- None found in catalog"])
-            out.append("")
-            out.append("Options:")
-            out.extend([f"- {n}" + (f" — {b.strip()}" if b.strip() else "") for n, b in opts] or ["- None found in catalog"])
-            if want_all:
-                out.append("")
-                out.append("Tires:")
-                out.extend([f"- {n}" + (f" — {b.strip()}" if b.strip() else "") for n, b in tires] or ["- None found in catalog"])
-        return _plain("\n".join(out))
+    # both lists (full)
+    if _BOTH_PAT.search(tl) and list_all:
+        return (
+            "Attachments (all):\n" + _fmt_lines(atts, None) + "\n\n" +
+            "Options (all):\n" + _fmt_lines(opts, None)
+        )
 
-    # --- Otherwise: scenario-aware compact output (grounded to Excel)
-    rec = recommend_options_from_sheet(user_q, max_total=max_per_section)
-    tire_pick   = rec.get("tire")
-    attachments = rec.get("attachments", [])[:max_per_section]
-    options     = rec.get("options", [])[:max_per_section]
+    # 2) Scenario path → use the recommender (this CALLS your new _pick_* helpers)
+    rec = recommend_options_from_sheet(t, max_total=max_per_section)
 
-    lines: list[str] = []
-    lines.append("Tires (recommended):")
-    if tire_pick:
-        # Keep simple: use tire pick as-is (benefit already from Excel or defaulted)
-        lines.append("- " + tire_pick.get("name","") + (f" — {tire_pick.get('benefit','').strip()}" if (tire_pick.get("benefit","") or "").strip() else ""))
-    else:
-        lines.append("- Not specified")
+    parts: list[str] = []
 
-    lines.append("")
-    lines.append("Attachments (relevant):")
-    if attachments:
-        for a in attachments:
-            ben = (a.get("benefit","") or "").strip()
-            lines.append(f"- {a.get('name','')}" + (f" — {ben}" if ben else ""))
-    else:
-        lines.append("- Not specified")
+    # Tire (single)
+    tire = rec.get("tire")
+    if tire:
+        parts.append(f"Tire (recommended):\n- {tire.get('name', '').strip()} — {(tire.get('benefit') or '').strip()}")
 
-    lines.append("")
-    lines.append("Options (relevant):")
-    if options:
-        for o in options:
-            ben = (o.get("benefit","") or "").strip()
-            lines.append(f"- {o.get('name','')}" + (f" — {ben}" if ben else ""))
-    else:
-        lines.append("- Not specified")
+    # Attachments (compact)
+    at_list = rec.get("attachments") or []
+    if at_list:
+        lines = "\n".join(
+            f"- {a.get('name','').strip()} — {(a.get('benefit') or '').strip()}"
+            for a in at_list[:max_per_section]
+        )
+        parts.append(f"Attachments:\n{lines}")
 
-    return _plain("\n".join(lines))
+    # Options (compact)
+    op_list = rec.get("options") or []
+    if op_list:
+        lines = "\n".join(
+            f"- {o.get('name','').strip()} — {(o.get('benefit') or '').strip()}"
+            for o in op_list[:max_per_section]
+        )
+        parts.append(f"Options:\n{lines}")
+
+    # Fallback if somehow nothing matched
+    if not parts:
+        parts.append("No specific matches. Try: 'list all attachments' or describe your use case (e.g., 'cold warehouse, pedestrians, tight aisles').")
+
+    return "\n".join(parts)
+
+# --- List-all renderer (still grounded to Excel) --------------------------
+def _list_all_from_excel(user_text: str, max_per_section: int = 9999) -> str:
+    df = _read_catalog_df()
+    if df is None or df.empty:
+        return "Catalog is empty or not loaded."
+
+    def _dump(df_sub, header):
+        out = [f"**{header}:**"]
+        for _, r in df_sub.iterrows():
+            nm = (r.get("name") or "").strip()
+            b  = (r.get("benefit") or "").strip()
+            out.append(f"- {nm}" + (f" — {b}" if b else ""))
+        return out
+
+    atts = df[df["type"] == "attachment"]
+    opts  = df[df["type"] == "option"]
+    tires = df[df["type"] == "tire"]
+
+    lines = []
+    if not tires.empty:
+        lines += _dump(tires, "Tires")
+    if not atts.empty:
+        lines += _dump(atts, "Attachments")
+    if not opts.empty:
+        lines += _dump(opts, "Options")
+    return "\n".join(lines) if lines else "No items found in the catalog."
 
 # --- Back-compat shim so old imports keep working ------------------------
 def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:
