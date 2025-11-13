@@ -856,48 +856,54 @@ def _heuristic_tire_and_accessories(text: str):
 # Recommendation flow helper
 # ─────────────────────────────────────────────────────────────────────────
 def run_recommendation_flow(user_q: str) -> str:
+    """
+    Main forklift recommendation flow:
+    - Picks allowed HELI models from your JSON.
+    - Calls the LLM with a structured prompt.
+    - Post-processes to enforce Model section against the allowed list.
+    - Injects Tire Type, Attachments, Options from the Excel-driven catalog,
+      with extra emphasis on lights/telemetry in high-pedestrian environments.
+    """
     if not client:
         return ("AI is not configured on this server. "
                 "Set OPENAI_API_KEY to enable recommendations.")
 
-    # 1) Build context from accounts/models (same as before)
+    # ---- Context: account + forklift specs ---------------------------------
     acct = find_account_by_name(user_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
 
-    # 2) Ask ai_logic which HELI models are allowed for this use case
-    hits, allowed = select_models_for_question(user_q, k=5)
-    allowed_block = allowed_models_block(allowed)
+    # ---- Model selection: hits + allowed list ------------------------------
+    hits, allowed_raw = select_models_for_question(user_q, k=5)
+    allowed_block = allowed_models_block(allowed_raw)
+    print(f"[recommendation] allowed models (raw): {allowed_raw}")
 
-    # ---- Normalize allowed list to plain model codes (handles dicts or strings) ----
-    def _code_from_entry(e):
-        if isinstance(e, dict):
-            return (e.get("model") or e.get("Model") or e.get("Model Name") or "").strip()
-        return str(e or "").strip()
+    # Normalize allowed into a clean list of model codes (strings)
+    allowed_codes: list[str] = []
+    for item in (allowed_raw or []):
+        if isinstance(item, str):
+            code = item.strip()
+        elif isinstance(item, dict):
+            # Try common keys used in your sheets/JSON
+            code = (
+                str(item.get("Model Name")
+                    or item.get("model")
+                    or item.get("Model")
+                    or item.get("Model code")
+                    or item.get("Model Code")
+                    or "")
+            ).strip()
+        else:
+            code = ""
+        if code:
+            allowed_codes.append(code)
 
-    allowed_codes = [c for c in (_code_from_entry(a) for a in (allowed or [])) if c]
-
-    # Capacity-aware re-ordering so 5,000 lb comes before 6,000 lb if requested
-    desired_cap = _extract_capacity_lbs(user_q)
-    if desired_cap and allowed_codes:
-        scored = []
-        for code in allowed_codes:
-            mrec = _find_heli_model_by_code(code)
-            cap = mrec.get("_capacity_lb") if mrec else None
-            if cap is None and mrec is not None:
-                cap = _num_from_text(mrec.get("capacity"))
-            if cap is None:
-                score = float("inf")  # no capacity -> push to the bottom
-            else:
-                score = abs(cap - desired_cap)
-            scored.append((score, code))
-        scored.sort(key=lambda x: x[0])
-        allowed_codes = [c for _, c in scored]
-
-    print(f"[recommendation] allowed models: {allowed_codes}")
-
+    # De-duplicate while preserving order
+    seen = set()
+    allowed_codes = [c for c in allowed_codes if not (c in seen or seen.add(c))]
     top_pick_code = allowed_codes[0] if allowed_codes else None
+    print(f"[recommendation] allowed model codes: {allowed_codes}")
 
-    # 3) System prompt for the LLM (same structure you had before)
+    # ---- System prompt for the LLM -----------------------------------------
     system_prompt = {
         "role": "system",
         "content": (
@@ -918,10 +924,12 @@ def run_recommendation_flow(user_q: str) -> str:
             "- Each section header exactly as above, followed by lines that start with '- '. No other bullet symbols.\n"
             "- Keep spacing tight; no blank lines between a header and its bullets.\n"
             "- Use ONLY model codes from the ALLOWED MODELS block. Do not invent codes.\n"
-            "- Under Model: ONE line '- Top Pick: <code> — brief why'; ONE line '- Alternates: <codes...>' (up to 4). If none allowed, output exactly '- No exact match from our lineup.'\n"
+            "- Under Model: ONE line '- Top Pick: <code> — brief why'; ONE line '- Alternates: <codes...>' (up to 4). "
+            "If none allowed, output exactly '- No exact match from our lineup.'\n"
             "- Capacity/Tires/Attachments/Options: summarize needs; if missing, say 'Not specified'.\n"
-            "- Sales Pitch Techniques: concise but specific as instructed in earlier rules.\n"
-            "- Common Objections: 6–8 items, one line each in the pattern: '- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <fact>; Next: <action>'.\n"
+            "- Sales Pitch Techniques: concise but specific.\n"
+            "- Common Objections: 6–8 items, one line each in the pattern: "
+            "'- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <fact>; Next: <action>'.\n"
             "- Never invent pricing, availability, or specs not present in the context.\n"
         )
     }
@@ -932,7 +940,7 @@ def run_recommendation_flow(user_q: str) -> str:
         {"role": "user",   "content": prompt_ctx},
     ]
 
-    # 4) Call OpenAI to draft the answer
+    # ---- Call OpenAI -------------------------------------------------------
     try:
         t0 = time.perf_counter()
 
@@ -956,84 +964,232 @@ def run_recommendation_flow(user_q: str) -> str:
         duration_ms = int((time.perf_counter() - t0) * 1000)
         log_model_usage(
             resp, endpoint="/chat", action="chat_reply",
-            duration_ms=duration_ms, extra={"who": session.get("username")},
+            duration_ms=duration_ms, extra={"who": session.get("username")}
         )
         ai_reply = (resp.choices[0].message.content or "").strip()
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
-    # 5) Post-processing & formatting (keep your existing behavior)
-    ai_reply = _enforce_allowed_models(ai_reply, set(allowed_codes))
-    ai_reply = _unify_model_mentions(ai_reply, allowed_codes) if '_unify_model_mentions' in globals() else ai_reply
-    ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
-    ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
-    ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply
+    # ---- Cleanup: enforce model list & tidy structure ----------------------
+    try:
+        ai_reply = _enforce_allowed_models(ai_reply, set(allowed_codes))
+    except Exception as e:
+        print(f"[recommendation] _enforce_allowed_models error: {e}")
 
-    # 6) Enforce Tire / Attachments / Options from Excel,
-    #    with an environment-based fallback if Excel has no recs.
+    try:
+        if " _unify_model_mentions" in globals() or "_unify_model_mentions" in globals():
+            ai_reply = _unify_model_mentions(ai_reply, allowed_codes)
+    except Exception as e:
+        print(f"[recommendation] _unify_model_mentions error: {e}")
+
+    try:
+        if "_fix_labels_and_breaks" in globals():
+            ai_reply = _fix_labels_and_breaks(ai_reply)
+    except Exception as e:
+        print(f"[recommendation] _fix_labels_and_breaks error: {e}")
+
+    try:
+        if "_fix_common_objections" in globals():
+            ai_reply = _fix_common_objections(ai_reply)
+    except Exception as e:
+        print(f"[recommendation] _fix_common_objections error: {e}")
+
+    try:
+        ai_reply = _tidy_formatting(ai_reply)
+    except Exception:
+        pass
+
+    # ======================================================================
+    # Excel-driven Tire / Attachments / Options with pedestrian heuristics
+    # ======================================================================
     try:
         opt_rec = recommend_options_from_sheet(user_q) or {}
-    except Exception:
+    except Exception as e:
+        print(f"[recommendation] recommend_options_from_sheet error: {e}")
         opt_rec = {}
 
-    env_text = f"{user_q}\n{prompt_ctx}"
-    heur_tire, heur_atts, heur_opts = _heuristic_tire_and_accessories(env_text)
+    def _row_name(row: dict) -> str:
+        return (
+            str(
+                (row or {}).get("name")
+                or row.get("Option")
+                or row.get("Attachment")
+                or row.get("option")
+                or row.get("attachment")
+                or ""
+            )
+        ).strip()
 
-    # ---- Tire Type ----
-    tire_bullets = []
+    def _row_subcat(row: dict) -> str:
+        return str((row or {}).get("Subcategory") or row.get("subcategory") or "").strip()
+
+    env_text = f"{user_q}\n{prompt_ctx}".lower()
+
+    # ---------------- Tire Type --------------------------------------------
+    tire_bullets: list[str] = []
     tire = opt_rec.get("tire")
-    if tire and tire.get("name"):
-        benefit = (tire.get("benefit") or "").strip()
-        tire_bullets.append(f"{tire['name']} — {benefit}" if benefit else tire["name"])
-
-    if not tire_bullets:
-        if heur_tire:
-            tire_bullets = [heur_tire]
-        else:
-            tire_bullets = ["Not specified"]
+    if tire and _row_name(tire):
+        nm = _row_name(tire)
+        ben = (tire.get("benefit") or "").strip()
+        tire_bullets.append(f"{nm} — {ben}" if ben else nm)
+    else:
+        tire_bullets.append("Not specified")
 
     ai_reply = _inject_section(ai_reply, "Tire Type", tire_bullets)
 
-    # ---- Attachments (up to 5) ----
+    # ---------------- Attachments (up to 5) --------------------------------
     attach_rows = opt_rec.get("attachments") or opt_rec.get("others") or []
-    attach_bullets = []
-    for row in attach_rows[:5]:
-        nm = (row.get("name") or "").strip()
+
+    def _score_attachment(row: dict) -> int:
+        nm = _row_name(row).lower()
+        score = 0
+        # Make side shift + fork positioner float to the top for tight aisles / mixed pallets
+        if "sideshift" in nm or "side shift" in nm:
+            score -= 30
+        if "fork positioner" in nm:
+            score -= 25
+        if "push" in nm and "pull" in nm:
+            score -= 5
+        return score
+
+    attach_rows_sorted = sorted(attach_rows, key=_score_attachment)
+
+    attach_bullets: list[str] = []
+    for row in attach_rows_sorted[:5]:
+        nm = _row_name(row)
         if not nm:
             continue
         ben = (row.get("benefit") or "").strip()
-        attach_bullets.append(f"{nm} — {ben}" if ben else nm)
-
-    if not attach_bullets and heur_atts:
-        attach_bullets = heur_atts[:5]
+        sub = _row_subcat(row)
+        label = f"{nm} ({sub})" if sub else nm
+        attach_bullets.append(f"{label} — {ben}" if ben else label)
 
     if not attach_bullets:
         attach_bullets = ["Not specified"]
 
     ai_reply = _inject_section(ai_reply, "Attachments", attach_bullets)
 
-    # ---- Options (up to 5) ----
+    # ---------------- Options (with pedestrian/telemetry boost) ------------
+
     option_rows = opt_rec.get("options") or []
-    option_bullets = []
-    for row in option_rows[:5]:
-        nm = (row.get("name") or "").strip()
+
+    def _score_option(row: dict) -> int:
+        nm = _row_name(row).lower()
+        sub = _row_subcat(row).lower()
+        ben = (row.get("benefit") or "").lower()
+        txt = " ".join([nm, sub, ben])
+
+        score = 0
+
+        ped_env = any(
+            kw in env_text
+            for kw in [
+                "pedestrian", "foot traffic", "busy aisle", "busy aisles",
+                "walkway", "lots of people", "high traffic"
+            ]
+        )
+
+        # Safety lights in pedestrian environments → strong boost
+        if ped_env and any(
+            kw in txt
+            for kw in [
+                "blue light", "red zone", "halo", "warning light",
+                "pedestrian", "strobe", "beacon"
+            ]
+        ):
+            score -= 40
+
+        # OPS / presence / speed limiting in pedestrian environments
+        if ped_env and any(
+            kw in txt
+            for kw in [
+                "operator presence", "ops", "presence system",
+                "speed limit", "travel speed", "creep", "governor",
+            ]
+        ):
+            score -= 30
+
+        # Telemetry / impact monitoring / access control
+        if ped_env and any(
+            kw in txt
+            for kw in [
+                "telem", "telemetry", "fleet", "impact", "monitor",
+                "access control", "password", "pin code",
+            ]
+        ):
+            score -= 25
+
+        # Hydraulic valves alone get a slight *penalty* so they appear later
+        if "hydraulic" in sub or "valve" in nm:
+            score += 10
+
+        # Food-grade environment: favor stainless/cleanliness options
+        if any(kw in env_text for kw in ["food", "pharma", "clean room", "food-grade", "food grade"]):
+            if any(kw in txt for kw in ["stainless", "food", "washdown", "corrosion"]):
+                score -= 8
+
+        return score
+
+    option_rows_sorted = sorted(option_rows, key=_score_option)
+
+    option_bullets: list[str] = []
+    for row in option_rows_sorted[:6]:
+        nm = _row_name(row)
         if not nm:
             continue
         ben = (row.get("benefit") or "").strip()
-        option_bullets.append(f"{nm} — {ben}" if ben else nm)
+        sub = _row_subcat(row)
+        label = f"{nm} ({sub})" if sub else nm
+        option_bullets.append(f"{label} — {ben}" if ben else label)
 
-    if not option_bullets and heur_opts:
-        option_bullets = heur_opts[:5]
+    # Heuristic “must-have” safety/telemetry adds for high-pedestrian environments
+    ped_env = any(
+        kw in env_text
+        for kw in [
+            "pedestrian", "foot traffic", "busy aisle", "busy aisles",
+            "walkway", "lots of people", "high traffic"
+        ]
+    )
+    names_lower = [b.split(" — ", 1)[0].lower() for b in option_bullets]
 
-    if not option_bullets:
-        option_bullets = ["Not specified"]
+    def _add_if_missing(label: str, benefit: str):
+        if label.lower() not in names_lower:
+            option_bullets.append(f"{label} — {benefit}" if benefit else label)
+            names_lower.append(label.lower())
 
+    if ped_env:
+        _add_if_missing(
+            "LED Blue Pedestrian Light",
+            "Projects a bright blue spot on the floor ahead of the truck to warn walkers in busy aisles."
+        )
+        _add_if_missing(
+            "Red Zone / Halo Light",
+            "Creates a visible 'keep out' safety halo on the floor around the truck for pedestrians."
+        )
+        _add_if_missing(
+            "Full OPS (Operator Presence System)",
+            "Disables travel and hydraulics when the operator leaves the seat to reduce runaways."
+        )
+        _add_if_missing(
+            "Travel Speed Limit / Creep Profile",
+            "Caps truck speed in high-pedestrian zones for safer operation."
+        )
+        _add_if_missing(
+            "Onboard Telemetry / Impact Monitoring",
+            "Logs impacts, hours, and pre-shift checks for accountability in a busy building."
+        )
+
+    # Trim options list to something readable
+    option_bullets = option_bullets[:8] if option_bullets else ["Not specified"]
     ai_reply = _inject_section(ai_reply, "Options", option_bullets)
 
-    # 7) Comparison injection (unchanged)
+    # ---------------- Comparison injection ---------------------------------
     if top_pick_code:
-        peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
-        ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)
+        try:
+            peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
+            ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)
+        except Exception as e:
+            print(f"[recommendation] _build_peer_comparison_lines error: {e}")
 
     return ai_reply
 
