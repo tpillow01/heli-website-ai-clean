@@ -838,91 +838,125 @@ _ATTACH_HINT = re.compile(r"\b(attach(ment)?|clamp|sideshift|positioner|fork|boo
 
 def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
     """
-    Returns ONLY what the user asked for (attachments, options, telemetry, tires).
-    Cold-specific logic promotes cab/heater/wipers/lights, hides A/C,
-    and suppresses random clamps unless the user explicitly mentions them.
+    Scenario-aware selector. Shows ONLY the sections the user requested
+    (unless nothing requested, then returns a sensible default mix).
+    Cold: boost cab/heater/defrost/lights; hide A/C.
+    Indoor: prefer Sideshifter/Fork Positioner; suppress clamps unless mentioned.
     """
-    intent = parse_catalog_intent(user_q)
-    which = intent.get("which")
-    ql = (user_q or "").lower()
+    wants = _wants_sections(user_q)
+    env   = _env_flags(user_q)
 
     options, attachments, tires = load_catalogs()
-    telemetry = {n: b for n, b in options.items() if _TELEM_PAT.search((n + " " + (b or "")).lower())}
 
-    cold = any(k in ql for k in ("cold","freezer","subzero","winter"))
-    dark = any(k in ql for k in ("dark","dim","poor lighting","night"))
-    mentions_attach = bool(_ATTACH_HINT.search(ql))
+    # carve telemetry out of options by name/benefit text
+    telemetry = {
+        n: b for n, b in options.items()
+        if _TELEM_PAT.search((n + " " + (b or "")).lower())
+    }
 
-    def _rank_bucket(q: str, bucket: dict[str, str], limit_n: int) -> list[dict]:
+    def rank(bucket: dict[str, str]) -> list[dict]:
         if not bucket:
             return []
-        scored = []
-        ql_ = q.lower()
+        ql = (user_q or "").lower()
+        scored: list[tuple[float, dict]] = []
         for name, benefit in bucket.items():
             text = (name + " " + (benefit or "")).lower()
             s = 0.01
-            # generic keyword alignment
+
+            # generic alignment bumps
             for w in ("indoor","warehouse","outdoor","yard","dust","debris","visibility",
                       "lighting","safety","cold","freezer","rain","snow","cab","comfort",
-                      "vibration","filtration","cooling","radiator","screen","pre air cleaner",
-                      "dual air filter","non-mark","pneumatic","cushion","heater","wiper"):
-                if w in ql_ and w in text:
-                    s += 0.8
-            # cold boosts
-            if cold and any(k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")):
-                s += 1.8
-            if cold and ("air conditioner" in text or "a/c" in text):
-                s -= 1.5
-            if dark and any(k in text for k in ("light","led","beacon","blue light","work light")):
-                s += 1.2
-            if any(k in ql_ for k in ("dust","debris","recycling","sawmill","dirty")) and any(k in text for k in ("radiator","screen","pre air cleaner","dual air filter","filtration","belly pan","protection")):
-                s += 1.3
-            if _TELEM_PAT.search(ql_) and _TELEM_PAT.search(text):
+                      "vibration","filtration","radiator","screen","pre air cleaner",
+                      "dual air filter","heater","wiper","windshield","work light","led"):
+                if w in ql and w in text:
+                    s += 0.7
+
+            # cold
+            if env["cold"] and any(k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")):
                 s += 2.0
+            if env["cold"] and ("air conditioner" in text or "a/c" in text):
+                s -= 2.0
+
+            # dark
+            if env["dark"] and any(k in text for k in ("light","led","beacon","blue light","work light")):
+                s += 1.5
+
+            # indoor ergonomics/precision
+            if env["indoor"]:
+                if "sideshifter" in text or "side shifter" in text:
+                    s += 1.6
+                if "fork positioner" in text:
+                    s += 1.4
+
+            # debris/yard protection
+            if any(k in ql for k in ("debris","yard","gravel","dirty","recycling","foundry","sawmill")) \
+               and any(k in text for k in ("radiator","screen","pre air cleaner","dual air filter","filtration","belly pan","protection")):
+                s += 1.3
+
+            # telematics direct ask
+            if _TELEM_PAT.search(ql) and _TELEM_PAT.search(text):
+                s += 2.2
 
             scored.append((s, {"name": name, "benefit": benefit}))
         scored.sort(key=lambda t: t[0], reverse=True)
-        out = [row for _, row in scored]
-        return out[:limit_n] if isinstance(limit_n, int) and limit_n > 0 else out
+        return [row for _, row in scored]
 
     result: dict[str, list] = {}
 
-    if which == "tires":
-        result["tires"] = _rank_bucket(user_q, tires, limit)
+    # Decide which sections to produce
+    # If the user explicitly asked, show *only* those sections.
+    if wants["any"]:
+        if wants["tires"]:
+            # list all tires (ordered, but no extra filtering unless non-mark requested)
+            ranked_tires = rank(tires)
+            if env["asks_non_mark"]:
+                ranked_tires = [t for t in ranked_tires if "non-mark" in (t["name"] + " " + t.get("benefit","")).lower()] or ranked_tires
+            result["tires"] = ranked_tires[:limit] if limit else ranked_tires
+
+        if wants["attachments"]:
+            ranked_atts = rank(attachments)
+            # suppress clamps for indoor unless user actually mentions clamp/materials
+            if env["indoor"] and not env["mentions_clamp"]:
+                ranked_atts = [a for a in ranked_atts if not re.search(r"\bclamp\b", a["name"].lower())]
+            # prefer alignment tools when indoor
+            if env["indoor"] and (env["mentions_align"] or True):
+                # ensure sideshifter / positioner float to top
+                ranked_atts.sort(key=lambda a: int("sideshifter" in a["name"].lower() or "fork positioner" in a["name"].lower()), reverse=True)
+            result["attachments"] = ranked_atts[:limit] if limit else ranked_atts
+
+        if wants["options"]:
+            ranked_opts = rank(options)
+            if env["cold"]:
+                ranked_opts = [o for o in ranked_opts if "air conditioner" not in o["name"].lower()]
+            result["options"] = ranked_opts[:limit] if limit else ranked_opts
+
+        if wants["telemetry"]:
+            result["telemetry"] = rank(telemetry)[:limit] if limit else rank(telemetry)
+
         return result
 
-    if which == "telemetry":
-        result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
-        return result
+    # Broad question (no explicit section words): default to options + a few atts
+    ranked_opts = rank(options)
+    ranked_atts = rank(attachments)
 
-    if which == "attachments":
-        result["attachments"] = [] if (cold and not mentions_attach) else _rank_bucket(user_q, attachments, limit)
-        return result
+    # Indoor default: prefer alignment, cut random clamps if not asked
+    if env["indoor"] and not env["mentions_clamp"]:
+        ranked_atts = [a for a in ranked_atts if not re.search(r"\bclamp\b", a["name"].lower())]
+        ranked_atts.sort(key=lambda a: int("sideshifter" in a["name"].lower() or "fork positioner" in a["name"].lower()), reverse=True)
 
-    if which == "options":
-        ranked_opts = _rank_bucket(user_q, options, limit=0)
-        if cold:
-            ranked_opts = [o for o in ranked_opts if "air conditioner" not in o["name"].lower()]
-        result["options"] = ranked_opts[:limit] if limit else ranked_opts
-        return result
+    if env["cold"]:
+        ranked_opts = [o for o in ranked_opts if "air conditioner" not in o["name"].lower()]
 
-    if which == "both":
-        result["attachments"] = [] if (cold and not mentions_attach) else _rank_bucket(user_q, attachments, limit)
-        ranked_opts = _rank_bucket(user_q, options, limit=0)
-        if cold:
-            ranked_opts = [o for o in ranked_opts if "air conditioner" not in o["name"].lower()]
-        result["options"] = ranked_opts[:limit] if limit else ranked_opts
-        return result
+    result["options"] = ranked_opts[:limit]
+    result["attachments"] = ranked_atts[:4]
 
-    # Fallback (broad): options + a few attachments; include tires/telemetry only if hinted
-    result["options"] = _rank_bucket(user_q, options, limit)
-    result["attachments"] = _rank_bucket(user_q, attachments, limit=4)
-    if re.search(r"\b(tires?|tyres?|tire\s*types?)\b", ql):
-        result["tires"] = _rank_bucket(user_q, tires, limit=4)
-    if _TELEM_PAT.search(ql):
-        result["telemetry"] = _rank_bucket(user_q, telemetry, limit=3)
+    # Only add tires/telemetry if they are hinted
+    if _TIRES_PAT.search(user_q or ""):
+        result["tires"] = rank(tires)[:4]
+    if _TELEM_PAT.search(user_q or ""):
+        result["telemetry"] = rank(telemetry)[:3]
+
     return result
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Catalog intent + cold-aware option/attachment selector (no tires unless asked)
@@ -1075,28 +1109,65 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
 
 def render_sections_markdown(result: dict) -> str:
     """
-    Render only the sections that actually have items. Sections may include:
-    'tires', 'attachments', 'options', 'telemetry'. Anything absent/empty is skipped.
+    Render only sections that have items. Skips empty/absent sections.
+    Sections: 'tires', 'attachments', 'options', 'telemetry'
     """
     order = ["tires", "attachments", "options", "telemetry"]
-    labels = {
-        "tires": "Tires",
-        "attachments": "Attachments",
-        "options": "Options",
-        "telemetry": "Telemetry"
-    }
+    labels = {"tires": "Tires", "attachments": "Attachments", "options": "Options", "telemetry": "Telemetry"}
+
     lines: list[str] = []
     for key in order:
         arr = result.get(key) or []
         if not arr:
             continue
-        lines.append(f"**{labels[key]}:**")
+
+        seen = set()
+        section_lines = []
         for item in arr:
             name = (item.get("name") or "").strip()
-            ben  = (item.get("benefit") or "").strip()
-            lines.append(f"- {name}" + (f" — {ben}" if ben else ""))
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+
+            ben = (item.get("benefit") or "").strip().replace("\n", " ")
+            section_lines.append(f"- {name}" + (f" — {ben}" if ben else ""))
+
+        if section_lines:
+            lines.append(f"**{labels[key]}:**")
+            lines.extend(section_lines)
+
     return "\n".join(lines) if lines else "(no matching items)"
 
+# --- intent helpers ----------------------------------------------------------
+_TIRES_PAT    = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
+_ATTACH_PAT   = re.compile(r"\b(attach(ment)?s?)\b", re.I)
+_OPTIONS_PAT  = re.compile(r"\b(option|options)\b", re.I)
+_TELEM_PAT    = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
+
+def _wants_sections(q: str) -> dict[str, bool]:
+    t = (q or "")
+    return {
+        "tires": bool(_TIRES_PAT.search(t)),
+        "attachments": bool(_ATTACH_PAT.search(t)),
+        "options": bool(_OPTIONS_PAT.search(t)),
+        "telemetry": bool(_TELEM_PAT.search(t)),
+        "any": any([
+            _TIRES_PAT.search(t), _ATTACH_PAT.search(t), _OPTIONS_PAT.search(t), _TELEM_PAT.search(t)
+        ])
+    }
+
+def _env_flags(q: str) -> dict[str, bool]:
+    ql = (q or "").lower()
+    return {
+        "cold": any(k in ql for k in ("cold","freezer","subzero","winter")),
+        "indoor": any(k in ql for k in ("indoor","warehouse","inside","epoxy","polished","concrete")),
+        "outdoor": any(k in ql for k in ("outdoor","yard","rain","snow","dust","gravel","dirt")),
+        "dark": any(k in ql for k in ("dark","dim","night","poor lighting","low light")),
+        "mentions_clamp": bool(re.search(r"\bclamp|paper\s*roll|bale|drum|carton|block\b", ql)),
+        "mentions_align": bool(re.search(r"\balign|tight\s*aisle|narrow|staging\b", ql)),
+        "mentions_widths": bool(re.search(r"\bvar(y|ied)\s*width|mixed\s*pallet|different\s*width\b", ql)),
+        "asks_non_mark": bool(re.search(r"non[-\s]?mark", ql)),
+    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # “Defined but not accessed” silencer (legacy)
@@ -1109,16 +1180,17 @@ def _is_attachment(name: str) -> bool:
         "slip-sheet","slipsheet","bale","carton","drum","bag push","load stabilizer"
     ))
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Exports
+# ─────────────────────────────────────────────────────────────────────────────
 __all__ = [
     # Catalog IO / caches
     "load_catalogs", "load_catalog_rows", "refresh_catalog_caches",
     "load_options", "load_attachments", "load_tires_as_options", "load_tires",
     "options_lookup_by_name", "option_benefit",
-    "recommend_options_from_sheet",
-    "render_sections_markdown",
-
 
     # Scenario picks & catalog renderers
+    "recommend_options_from_sheet", "render_sections_markdown",
     "render_catalog_sections", "parse_catalog_intent",
     "generate_catalog_mode_response", "list_all_from_excel",
 
