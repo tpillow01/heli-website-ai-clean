@@ -649,11 +649,34 @@ def refresh_catalog_caches() -> dict:
         "tires_count": len(tires),
     }
 
-def render_catalog_sections(user_q: str, limit: int = 6) -> dict:
+def render_catalog_sections(
+    result: dict,
+    order: list | None = None,
+    labels: dict | None = None,
+    max_per_section: int | None = None,
+) -> str:
     """
-    Older router calls this. Delegate to the new selector so behavior stays consistent.
+    Wrapper that honors an optional max_per_section and then defers to
+    render_sections_markdown(). Keeps old callers working.
     """
-    return recommend_options_from_sheet(user_q, limit)
+    order = order or ["tires", "attachments", "options", "telemetry"]
+    labels = labels or {
+        "tires": "Tires",
+        "attachments": "Attachments",
+        "options": "Options",
+        "telemetry": "Telemetry",
+    }
+
+    # Slice per-section if requested, then render
+    limited: dict = {}
+    for k in order:
+        arr = result.get(k) or []
+        if max_per_section is not None and isinstance(arr, list):
+            arr = arr[:max_per_section]
+        limited[k] = arr
+
+    # render_sections_markdown already skips empty sections & dedups
+    return render_sections_markdown(limited)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # “Defined but not accessed” silencer (legacy)
