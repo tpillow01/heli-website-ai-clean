@@ -161,6 +161,48 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
             return str(m[k]).strip()
     return "N/A"
 
+def model_meta_for(m: Any) -> Dict[str, Any]:
+    """
+    Returns a consistent metadata dict for a model row or a string code.
+    Provides both 'tire_type' and 'tire' (alias) keys to satisfy older callers.
+    """
+    if isinstance(m, dict):
+        tire_val = _tire_of(m) or None
+        return {
+            "name": _safe_model_name(m),
+            "code": str(m.get("Code") or m.get("Model") or m.get("Model Name") or m.get("code") or "").strip() or None,
+            "power": _power_of(m) or None,
+            "capacity_lbs": _capacity_of(m),
+            "lift_height_in": _height_of(m),
+            "aisle_in": _aisle_of(m),
+            "tire_type": tire_val,
+            "tire": tire_val,  # <- alias to avoid KeyError in legacy code
+        }
+
+    if isinstance(m, (str, int, float)):
+        s = str(m).strip()
+        return {
+            "name": s,
+            "code": s,
+            "power": None,
+            "capacity_lbs": None,
+            "lift_height_in": None,
+            "aisle_in": None,
+            "tire_type": None,
+            "tire": None,
+        }
+
+    return {
+        "name": "Unknown",
+        "code": None,
+        "power": None,
+        "capacity_lbs": None,
+        "lift_height_in": None,
+        "aisle_in": None,
+        "tire_type": None,
+        "tire": None,
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Catalog loader (Excel) — robust to column name variations
 # ─────────────────────────────────────────────────────────────────────────────
@@ -653,15 +695,49 @@ def select_models_for_question(user_q: str, k: int = 5) -> Tuple[List[Dict[str, 
     hits = [m for _, m in scored[: max(1, k)]]
     return hits, allowed_models_block(hits)
 
-def top_pick_meta(model: Dict[str, Any]) -> Dict[str, Any]:
-    meta = model_meta_for(model)
+def top_pick_meta(user_q: str) -> Dict[str, Any]:
+    """
+    Returns a small dict describing the single best-matching model.
+    Tolerates different return shapes from select_models_for_question and
+    never assumes keys exist (uses .get with fallbacks).
+    """
+    sel = select_models_for_question(user_q, k=5)
+
+    # Tolerate either (hits, allowed) or just a list of allowed
+    try:
+        _, allowed = sel
+    except Exception:
+        allowed = sel if isinstance(sel, list) else []
+
+    if not allowed:
+        return {
+            "name": "No clear top pick",
+            "code": None,
+            "power": None,
+            "capacity_lbs": None,
+            "lift_height_in": None,
+            "aisle_in": None,
+            "tire": None,
+            "tire_type": None,
+            "reason": "No models matched the request.",
+            "notes": None,
+        }
+
+    m = allowed[0]
+    meta = model_meta_for(m)
+
     return {
-        "name": meta["name"],
-        "capacity_lbs": meta["capacity_lbs"],
-        "lift_height_in": meta["lift_height_in"],
-        "aisle_in": meta["aisle_in"],
-        "power": meta["power"],
-        "tire": meta["tire"],
+        "name": meta.get("name") or "N/A",
+        "code": meta.get("code"),
+        "power": meta.get("power"),
+        "capacity_lbs": meta.get("capacity_lbs"),
+        "lift_height_in": meta.get("lift_height_in"),
+        "aisle_in": meta.get("aisle_in"),
+        # Use either key; both exist now, but stay defensive:
+        "tire": meta.get("tire") or meta.get("tire_type"),
+        "tire_type": meta.get("tire_type") or meta.get("tire"),
+        "reason": f"Top match based on your request: {user_q[:120]}...",
+        "notes": None,
     }
 
 def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]] = None) -> str:
