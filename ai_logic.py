@@ -1,16 +1,16 @@
 """
 ai_logic.py
-Catalog helpers (tires / attachments / options), intent -> picks,
-and model recommendation utilities used across the Heli AI app.
+Single source of truth for:
+- Catalog Q&A (Tires / Attachments / Options / Telemetry) from Excel
+- Forklift Model Recommendation helpers used by heli_backup_ai.py
 """
 
 from __future__ import annotations
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Imports / logging
+# Imports / logging / typing
 # ─────────────────────────────────────────────────────────────────────────────
 import os, json, re, logging, hashlib
-from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,84 +19,24 @@ if not log.handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 try:
-    import pandas as _pd
+    import pandas as _pd  # Optional; file will still run without it
 except Exception:
-    _pd = None  # pandas optional
+    _pd = None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Paths / constants (auto-detect your catalog .xlsx)
+# Paths / constants
 # ─────────────────────────────────────────────────────────────────────────────
-def _find_catalog_xlsx() -> Optional[str]:
-    env = os.environ.get("HELI_CATALOG_XLSX", "").strip()
-    if env and os.path.isfile(env):
-        return env
-    here = os.path.dirname(__file__)
-    candidates = [
-        os.path.join(here, "data", "forklift_options_benefits.xlsx"),
-        os.path.join(here, "forklift_options_benefits.xlsx"),
-        os.path.join(os.getcwd(), "data", "forklift_options_benefits.xlsx"),
-        os.path.join(os.getcwd(), "forklift_options_benefits.xlsx"),
-    ]
-    for p in candidates:
-        if os.path.isfile(p):
-            return p
-    return None
+_OPTIONS_XLSX = os.environ.get(
+    "HELI_CATALOG_XLSX",
+    os.path.join(os.path.dirname(__file__), "data", "forklift_options_benefits.xlsx")
+)
 
-CATALOG_XLSX = _find_catalog_xlsx()
-log.info("[ai_logic] Catalog path resolved: %s (exists=%s)", CATALOG_XLSX, bool(CATALOG_XLSX and os.path.isfile(CATALOG_XLSX)))
+_MODELS_JSON_CANDIDATES = [
+    os.path.join(os.path.dirname(__file__), "data", "models.json"),
+    os.path.join(os.path.dirname(__file__), "models.json"),
+]
 
-# Fallback seeds (never return empty if Excel missing)
-_FALLBACK_TIRES: Dict[str, str] = {
-    "Solid Tires": "Puncture-proof, low-maintenance tires for debris-prone floors.",
-    "Dual Tires": "Wider footprint for better stability and traction on soft ground.",
-    "Dual Solid Tires": "Combines puncture resistance with extra stability and load support.",
-    "Non-Marking Tires": "Protect indoor floors by avoiding black scuff marks.",
-    "Non-Marking Dual Tires": "Floor-safe traction with a wider, more stable footprint.",
-}
-_FALLBACK_OPTIONS: Dict[str, str] = {
-    "Panel mounted Cab": "Enclosed cab panels for weather protection and operator comfort.",
-    "Heater": "Keeps the cab warm for safer, more comfortable cold-weather operation.",
-    "Air conditioner": "Cools the cab to reduce heat stress and maintain productivity.",
-    "Glass Windshield with Wiper": "Clear forward visibility in rain and dust.",
-    "Top Rain-proof Glass": "Overhead visibility while shielding the operator from rain.",
-    "Rear Windshield Glass": "Improves rear visibility and shields from wind and debris.",
-    "Dual Air Filter": "Enhanced engine air filtration for dusty environments.",
-    "Pre air cleaner": "Cyclonic pre-cleaning extends main air filter life.",
-    "Radiator protection bar": "Guards the radiator core from impacts.",
-    "Air filter service indicator": "Tells you exactly when to change the filter, avoiding guesswork.",
-    "LED Rear Working Light": "Bright, efficient rear lighting with long service life.",
-    "Blue Light": "Pedestrian warning light to increase visibility in busy aisles.",
-    "Backup Handle with Horn Button": "Safer reversing posture and quick horn access.",
-    "Added cost for the cold storage package (for electric forklift)": "Components rated for freezer temps to reduce condensation and failures.",
-    "HELI smart fleet management system FICS (Standard version（U.S. market supply suspended temporarily. Await notice.）": "Telematics for usage tracking, alerts, and basic analytics.",
-    "HELI smart fleet management system FICS (Upgraded version（U.S. market supply suspended temporarily. Await notice.）": "Adds advanced reporting, diagnostics, and fleet insights.",
-    "Portal access fee of FICS (each truck per year)（U.S. market supply suspended temporarily. Await notice.）": "Enables cloud portal access for data, reports, and alerts.",
-    "3 Valve with Handle": "Adds a third hydraulic function to run basic attachments.",
-    "4 Valve with Handle": "Enables two auxiliary functions for multi-function attachments.",
-    "5 Valve with Handle": "Maximum hydraulic flexibility for specialized attachments.",
-}
-_FALLBACK_ATTACHMENTS: Dict[str, str] = {
-    "Sideshifter": "Aligns loads without moving the truck; faster, cleaner placement.",
-    "Fork Positioner": "Adjusts fork spread from the seat for mixed pallet sizes.",
-    "Paper Roll Clamp": "Handles paper rolls gently without core damage.",
-    "Push/ Pull (Slip-Sheet)": "Replaces pallets with slip-sheets to cut shipping costs and weight.",
-    "Carpet Pole": "Handles coils, carpet, and tubing via a single pole/ram.",
-    "Fork Extensions": "Temporarily lengthen forks for occasional oversized loads.",
-    "Rotator": "Spins the carriage (often 180–360°) to dump bins or reorient loads.",
-    "Bale Clamp": "Grips bales (paper, cotton, recycling) without pallets.",
-    "Carton Clamp": "Pads squeeze large boxes/appliances so you can handle them pallet-free.",
-    "Block Clamp": "Handles concrete/stone blocks with high holding force.",
-    "Fork Clamp": "Forks that also clamp bulky or unpalletized items.",
-    "Drum Clamp": "Lifts/tilts one or multiple 55-gal drums safely.",
-    "Single Double Pallets Handler": "Switches between 1 wide pallet or 2 side-by-side.",
-    "Load Stabilizer": "Top clamp plate holds light/unstable stacks steady while traveling/stacking.",
-    "Bag Pusher": "Push plate drives big bags/sacks deep into a trailer or container.",
-    "Bar Arm Clamp": "Side arms cradle and clamp bar/rod/tube bundles.",
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Keys / normalizers (models)
-# ─────────────────────────────────────────────────────────────────────────────
+# Field tolerance for models.json variants
 CAPACITY_KEYS = [
     "Capacity_lbs","capacity_lbs","Capacity","Rated Capacity","Load Capacity",
     "Capacity (lbs)","capacity","LoadCapacity","capacityLbs","RatedCapacity",
@@ -113,14 +53,15 @@ AISLE_KEYS = [
 POWER_KEYS = ["Power","power","Fuel","fuel","Drive","Drive Type","Power Type","PowerType"]
 TYPE_KEYS  = ["Type","Category","Segment","Class","Class/Type","Truck Type"]
 
-def _slug(s: str) -> str:
-    s = (s or "").strip().lower()
-    s = re.sub(r"[^a-z0-9]+", "-", s)
-    return s.strip("-")
+# Intent patterns
+_TIRES_PAT   = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
+_ATTACH_PAT  = re.compile(r"\b(attach(ment)?s?)\b", re.I)
+_OPTIONS_PAT = re.compile(r"\b(option|options)\b", re.I)
+_TELEM_PAT   = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
 
-def _norm_spaces(s: str) -> str:
-    return " ".join((s or "").split())
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Small utils
+# ─────────────────────────────────────────────────────────────────────────────
 def _lower(s: Any) -> str:
     return str(s or "").lower()
 
@@ -190,12 +131,6 @@ def _normalize_aisle_in(row: Dict[str,Any]) -> Optional[float]:
             v = _num(s); return v
     return None
 
-def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
-    t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model","")) + " " + str(row.get("Model Name",""))).lower()
-    if any(word in t for word in ["reach","vna","order picker","turret"]):
-        return True
-    return bool(re.search(r"\b(cqd|rq|vna)\b", t))
-
 def _is_three_wheel(row: Dict[str,Any]) -> bool:
     drive = (_lower(row.get("Drive Type")) + " " + _lower(row.get("Drive")))
     model = (_lower(row.get("Model")) + " " + _lower(row.get("Model Name")))
@@ -213,6 +148,13 @@ def _height_of(row: Dict[str,Any]) -> Optional[float]:
 def _aisle_of(row: Dict[str,Any]) -> Optional[float]:
     return _normalize_aisle_in(row)
 
+def _tire_of(row: Dict[str,Any]) -> str:
+    t = _lower(row.get("Tire Type") or row.get("Tires") or row.get("Tire") or "")
+    if "non-mark" in t: return "non-marking cushion"
+    if "cushion" in t or "press" in t: return "cushion"
+    if "pneumatic" in t or "super elastic" in t or "solid" in t: return "pneumatic"
+    return t
+
 def _safe_model_name(m: Dict[str, Any]) -> str:
     for k in ("Model","Model Name","model","code","name","Code"):
         if m.get(k):
@@ -220,91 +162,113 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
     return "N/A"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Catalog loading
+# Catalog loader (Excel) — robust to column name variations
 # ─────────────────────────────────────────────────────────────────────────────
-def load_catalog_rows() -> List[Dict[str, str]]:
-    """Read rows from the options/attachments/tires Excel. Returns [] if missing."""
-    if not CATALOG_XLSX or not os.path.isfile(CATALOG_XLSX):
-        log.warning("[ai_logic] Catalog .xlsx not found; continuing with fallbacks.")
-        return []
-    if _pd is None:
-        log.warning("[ai_logic] pandas not available; cannot read Excel. Continuing with fallbacks.")
-        return []
-    try:
-        df = _pd.read_excel(CATALOG_XLSX)
-        cols = {c.lower().strip(): c for c in df.columns}
-        records: List[Dict[str, str]] = []
-        for _, row in df.iterrows():
-            rec = {
-                "Option":      str(row.get(cols.get("option", ""), "")).strip(),
-                "Benefit":     str(row.get(cols.get("benefit", ""), "")).strip(),
-                "Type":        str(row.get(cols.get("type", ""), "")).strip(),
-                "Subcategory": str(row.get(cols.get("subcategory", ""), "")).strip(),
-            }
-            if not (rec["Option"] or rec["Benefit"] or rec["Type"] or rec["Subcategory"]):
-                continue
-            records.append(rec)
-        log.info("[ai_logic] Loaded %d catalog rows from %s", len(records), os.path.basename(CATALOG_XLSX))
-        return records
-    except Exception as e:
-        log.exception("[ai_logic] Failed reading Excel %s: %s", CATALOG_XLSX, e)
-        return []
+def _catalog_exists() -> bool:
+    ok = os.path.exists(_OPTIONS_XLSX)
+    log.info("Catalog path resolved: %s (exists=%s)", _OPTIONS_XLSX, ok)
+    return ok
+
+def _normalize_cols(cols: List[str]) -> Dict[str, str]:
+    """Return mapping of lower->original for tolerant lookups."""
+    mapping: Dict[str,str] = {}
+    for c in cols:
+        mapping[_lower(re.sub(r"\s+", " ", c))] = c
+    return mapping
 
 @lru_cache(maxsize=1)
-def load_catalogs() -> Tuple[Dict[str,str], Dict[str,str], Dict[str,str]]:
-    """
-    Returns (options, attachments, tires) dicts mapping name -> benefit.
-    """
-    rows = load_catalog_rows()
-    options: Dict[str,str] = {}
-    attachments: Dict[str,str] = {}
-    tires: Dict[str,str] = {}
-    if not rows:
-        # Fallbacks
-        options.update(_FALLBACK_OPTIONS)
-        attachments.update(_FALLBACK_ATTACHMENTS)
-        tires.update(_FALLBACK_TIRES)
-        log.info("[ai_logic] Using fallback buckets: options=%d attachments=%d tires=%d",
-                 len(options), len(attachments), len(tires))
-        return options, attachments, tires
-
-    for r in rows:
-        name = r.get("Option","").strip()
-        ben  = r.get("Benefit","").strip()
-        typ  = (r.get("Type","") or "").strip().lower()
-        if not name:
-            continue
-        if typ == "tires" or typ == "tire":
-            tires[name] = ben
-        elif typ == "attachments" or typ == "attachment":
-            attachments[name] = ben
-        else:
-            # treat everything else as 'options' (includes Telemetry)
-            options[name] = ben
-
-    # ensure we never return empty tires
-    if not tires:
-        tires.update(_FALLBACK_TIRES)
-
-    log.info("[ai_logic] Buckets loaded: options=%d attachments=%d tires=%d", len(options), len(attachments), len(tires))
-    return options, attachments, tires
+def _load_catalog_df() -> Optional[Any]:
+    if not _catalog_exists():
+        return None
+    if _pd is None:
+        log.warning("pandas not available; Excel catalog disabled")
+        return None
+    try:
+        df = _pd.read_excel(_OPTIONS_XLSX)
+        return df
+    except Exception as e:
+        log.warning("Excel load failed: %s", e)
+        return None
 
 def refresh_catalog_caches() -> None:
-    """Allow external blueprints to refresh Excel caches at runtime."""
-    load_catalog_rows.cache_clear()  # type: ignore[attr-defined]
-    load_catalogs.cache_clear()      # type: ignore[attr-defined]
-    log.info("[ai_logic] Catalog caches refreshed.")
+    """Hot reload after Excel changes."""
+    try:
+        _load_catalog_df.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+def _rows_from_df() -> List[Dict[str, Any]]:
+    df = _load_catalog_df()
+    if df is None:
+        return []
+    # Normalize column names
+    cols_map = _normalize_cols(list(df.columns))
+    def col(name_variants: List[str]) -> Optional[str]:
+        for v in name_variants:
+            key = _lower(v)
+            if key in cols_map:
+                return cols_map[key]
+        return None
+
+    col_option = col(["Option"])
+    col_benefit = col(["Benefit"])
+    col_type = col(["Type"])
+    col_subcat = col(["Subcategory","Sub-category","Sub category"])
+    out: List[Dict[str,Any]] = []
+    for _, r in df.iterrows():
+        name = str(r.get(col_option, "")).strip()
+        ben  = str(r.get(col_benefit, "")).strip()
+        typ  = str(r.get(col_type, "")).strip()
+        sub  = str(r.get(col_subcat, "")).strip()
+        if not name:
+            continue
+        out.append({"name": name, "benefit": ben, "type": typ, "subcategory": sub})
+    return out
+
+def load_catalog_rows() -> List[Dict[str,Any]]:
+    return _rows_from_df()
+
+def _bucket(rows: List[Dict[str,Any]], kind: str) -> Dict[str,str]:
+    out: Dict[str,str] = {}
+    for r in rows:
+        if _lower(r.get("type")) == _lower(kind):
+            out[r["name"]] = r.get("benefit","")
+    return out
+
+def load_options() -> Dict[str,str]:
+    return _bucket(load_catalog_rows(), "Options")
+
+def load_attachments() -> Dict[str,str]:
+    return _bucket(load_catalog_rows(), "Attachments")
+
+def load_tires() -> Dict[str,str]:
+    return _bucket(load_catalog_rows(), "Tires")
+
+def load_tires_as_options() -> Dict[str,str]:
+    """For callers that unify buckets."""
+    return load_tires()
+
+def load_catalogs() -> Tuple[Dict[str,str], Dict[str,str], Dict[str,str]]:
+    """Return (options, attachments, tires)."""
+    return load_options(), load_attachments(), load_tires()
+
+def options_lookup_by_name(name: str) -> Optional[Dict[str,str]]:
+    nm = (name or "").strip().lower()
+    rows = load_catalog_rows()
+    for r in rows:
+        if r["name"].strip().lower() == nm:
+            return r
+    return None
+
+def option_benefit(name: str) -> str:
+    r = options_lookup_by_name(name)
+    return r.get("benefit","") if r else ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Intent detection & environment flags
+# Intent helpers for catalog mode
 # ─────────────────────────────────────────────────────────────────────────────
-_TIRES_PAT    = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
-_ATTACH_PAT   = re.compile(r"\b(attach(ment)?s?)\b", re.I)
-_OPTIONS_PAT  = re.compile(r"\b(option|options)\b", re.I)
-_TELEM_PAT    = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
-
 def _wants_sections(q: str) -> Dict[str, bool]:
-    t = (q or "")
+    t = q or ""
     return {
         "tires": bool(_TIRES_PAT.search(t)),
         "attachments": bool(_ATTACH_PAT.search(t)),
@@ -323,69 +287,40 @@ def _env_flags(q: str) -> Dict[str, bool]:
         "outdoor": any(k in ql for k in ("outdoor","yard","rain","snow","dust","gravel","dirt")),
         "dark": any(k in ql for k in ("dark","dim","night","poor lighting","low light")),
         "mentions_clamp": bool(re.search(r"\bclamp|paper\s*roll|bale|drum|carton|block\b", ql)),
-        "mentions_align": bool(re.search(r"\bsideshift(er)?\b|\bfork\s*positioner\b|\balign\b", ql)),
+        "mentions_align": bool(re.search(r"\balign|tight\s*aisle|narrow|staging\b", ql)),
+        "mentions_widths": bool(re.search(r"\bvar(y|ied)\s*width|mixed\s*pallet|different\s*width\b", ql)),
         "asks_non_mark": bool(re.search(r"non[-\s]?mark", ql)),
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ranking helpers
+# Catalog ranking & rendering
 # ─────────────────────────────────────────────────────────────────────────────
-def _prioritize_lighting(items: List[Dict[str, str]], q_lower: str) -> List[Dict[str, str]]:
-    """If the query is about dark/low light, float lighting to the top."""
-    if not any(k in q_lower for k in ("dark","dim","night","poor lighting","low light")):
-        return items
-    def is_light(x: Dict[str,str]) -> bool:
-        t = (x.get("name","") + " " + x.get("benefit","")).lower()
-        return any(w in t for w in ("light","led","beacon","work light","blue light","rear working light"))
-    lights   = [x for x in items if is_light(x)]
-    nonlight = [x for x in items if not is_light(x)]
-    return lights + nonlight
-
-def _drop_ac_when_cold(items: List[Dict[str, str]], q_lower: str) -> List[Dict[str, str]]:
-    """In cold-only contexts, remove A/C so heater/cab/wipers rise."""
-    if not any(k in q_lower for k in ("cold","freezer","subzero","winter")):
-        return items
-    new_list: List[Dict[str,str]] = []
-    for x in items:
-        t = (x.get("name","") + " " + x.get("benefit","")).lower()
-        if "air conditioner" in t or "a/c" in t:
-            continue
-        new_list.append(x)
-    return new_list
-
 def _kw_score(q: str, name: str, benefit: str) -> float:
-    """Lightweight scorer with context boosts/penalties."""
     ql = _lower(q)
     text = _lower(name + " " + (benefit or ""))
+    score = 0.01
 
-    score = 0.01  # small baseline
     for w in ("indoor","warehouse","outdoor","yard","dust","debris","visibility",
               "lighting","safety","cold","freezer","rain","snow","cab","comfort",
               "vibration","filtration","cooling","radiator","screen","pre air cleaner",
-              "dual air filter","non-mark","pneumatic","cushion","heater","wiper",
-              "windshield","work light","led"):
+              "dual air filter","non-mark","pneumatic","cushion","heater","wiper"):
         if w in ql and w in text:
             score += 0.7
 
-    if any(k in ql for k in ("cold","freezer","subzero","winter")) and any(
-        k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")
-    ):
-        score += 2.0
-    if any(k in ql for k in ("cold","freezer","subzero","winter")) and ("air conditioner" in text or "a/c" in text):
-        score -= 1.8
+    if any(k in ql for k in ("cold","freezer","subzero","winter")):
+        if any(k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")):
+            score += 2.0
+        if "air conditioner" in text or "a/c" in text:
+            score -= 2.0
+        if any(k in ql for k in ("dark","dim","poor lighting","night")) and any(k in text for k in ("light","led","beacon","work light")):
+            score += 1.2
 
-    if any(k in ql for k in ("dark","dim","poor lighting","night")) and any(
-        k in text for k in ("light","led","beacon","blue light","work light")
-    ):
-        score += 1.5
-
-    if any(k in ql for k in ("dust","debris","recycling","sawmill","dirty","foundry","yard")) and any(
-        k in text for k in ("radiator","screen","pre air cleaner","dual air filter","filtration","belly pan","protection")
-    ):
-        score += 1.3
+    if any(k in ql for k in ("dust","debris","recycling","sawmill","dirty","foundry","yard","gravel")):
+        if any(k in text for k in ("radiator","screen","pre air cleaner","dual air filter","filtration","belly pan","protection")):
+            score += 1.3
 
     if _TELEM_PAT.search(ql) and _TELEM_PAT.search(text):
-        score += 2.2
+        score += 2.0
 
     return score
 
@@ -400,78 +335,79 @@ def _rank_bucket(q: str, bucket: Dict[str, str], limit: int = 6) -> List[Dict[st
     out = [row for _, row in scored if _lower(row["name"]).strip()]
     return out[:limit] if isinstance(limit, int) and limit > 0 else out
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Public: catalog query
-# ─────────────────────────────────────────────────────────────────────────────
-def recommend_options_from_sheet(user_q: str, limit: int = 6) -> Dict[str, List[Dict[str, str]]]:
+def _prioritize_lighting(items: List[Dict[str,str]], q_lower: str) -> List[Dict[str,str]]:
+    if not any(k in q_lower for k in ("dark","dim","night","poor lighting","low light")):
+        return items
+    def _is_light(x: Dict[str,str]) -> bool:
+        t = (x.get("name","") + " " + x.get("benefit","")).lower()
+        return any(w in t for w in ("light","led","beacon","work light","blue light","rear working light"))
+    lights   = [x for x in items if _is_light(x)]
+    nonlight = [x for x in items if not _is_light(x)]
+    return lights + nonlight
+
+def _drop_ac_when_cold(items: List[Dict[str,str]], q_lower: str) -> List[Dict[str,str]]:
+    if not any(k in q_lower for k in ("cold","freezer","subzero","winter")):
+        return items
+    return [x for x in items if "air conditioner" not in (x.get("name","") + " " + x.get("benefit","")).lower()]
+
+def recommend_options_from_sheet(user_q: str, limit: int = 6) -> Dict[str, List[Dict[str,str]]]:
     """
     Scenario-aware selector. Shows ONLY the sections the user requested
-    (unless nothing requested, then returns a sensible default mix).
+    (unless nothing is requested, then returns a default mix).
     """
     wants = _wants_sections(user_q)
     env   = _env_flags(user_q)
-    ql    = (user_q or "").lower()
-
     options, attachments, tires = load_catalogs()
-    telemetry = {n: b for n, b in options.items() if _TELEM_PAT.search(_lower(n + " " + (b or "")))}
+    telemetry = {n:b for n,b in options.items() if _TELEM_PAT.search((n + " " + b).lower())}
+    ql = (user_q or "").lower()
 
-    result: Dict[str, List[Dict[str,str]]] = {}
+    result: Dict[str, List[Dict[str,str]]] = {"attachments": [], "options": [], "telemetry": [], "tires": []}
 
-    def _safe_limit(items: List[Dict[str,str]]) -> List[Dict[str,str]]:
-        return items[:limit] if (isinstance(limit, int) and limit > 0) else items
-
-    # If the user explicitly asked, return ONLY those sections
     if wants["any"]:
         if wants["tires"]:
-            ranked = _rank_bucket(user_q, tires, limit=0)
+            ranked = _rank_bucket(user_q, tires, 0)
             if env["asks_non_mark"]:
                 filtered = [t for t in ranked if "non-mark" in (t["name"] + " " + t.get("benefit","")).lower()]
                 ranked = filtered or ranked
-            result["tires"] = _safe_limit(ranked)
+            result["tires"] = ranked[:limit] if limit else ranked
 
         if wants["attachments"]:
-            ranked = _rank_bucket(user_q, attachments, limit=0)
+            atts = _rank_bucket(user_q, attachments, 0)
             if env["indoor"] and not env["mentions_clamp"]:
-                ranked = [a for a in ranked if not re.search(r"\bclamp\b", a["name"].lower())]
-                # prefer alignment tools when indoor
-                ranked.sort(key=lambda a: int(("sideshifter" in a["name"].lower()) or ("fork positioner" in a["name"].lower())), reverse=True)
-            result["attachments"] = _safe_limit(ranked)
+                atts = [a for a in atts if not re.search(r"\bclamp\b", a["name"].lower())]
+            if env["indoor"]:
+                atts.sort(key=lambda a: int(("sideshifter" in a["name"].lower()) or ("fork positioner" in a["name"].lower())), reverse=True)
+            result["attachments"] = atts[:limit] if limit else atts
 
         if wants["options"]:
-            ranked = _rank_bucket(user_q, options, limit=0)
-            ranked = _drop_ac_when_cold(ranked, ql)
-            ranked = _prioritize_lighting(ranked, ql)
-            result["options"] = _safe_limit(ranked)
+            opts = _rank_bucket(user_q, options, 0)
+            opts = _drop_ac_when_cold(opts, ql)
+            opts = _prioritize_lighting(opts, ql)
+            result["options"] = opts[:limit] if limit else opts
 
         if wants["telemetry"]:
-            result["telemetry"] = _safe_limit(_rank_bucket(user_q, telemetry, limit=0))
-
+            result["telemetry"] = _rank_bucket(user_q, telemetry, limit or 6)
         return result
 
-    # Broad question: give helpful defaults (no tires unless hinted)
-    ranked_opts = _rank_bucket(user_q, options, limit=0)
-    ranked_opts = _drop_ac_when_cold(ranked_opts, ql)
-    ranked_opts = _prioritize_lighting(ranked_opts, ql)
-
-    ranked_atts = _rank_bucket(user_q, attachments, limit=0)
+    # Broad question: produce a sensible default (no tires unless hinted)
+    opts = _rank_bucket(user_q, options, 0)
+    opts = _drop_ac_when_cold(opts, ql)
+    opts = _prioritize_lighting(opts, ql)
+    atts = _rank_bucket(user_q, attachments, 0)
     if env["indoor"] and not env["mentions_clamp"]:
-        ranked_atts = [a for a in ranked_atts if not re.search(r"\bclamp\b", a["name"].lower())]
-        ranked_atts.sort(key=lambda a: int(("sideshifter" in a["name"].lower()) or ("fork positioner" in a["name"].lower())), reverse=True)
+        atts = [a for a in atts if not re.search(r"\bclamp\b", a["name"].lower())]
+        atts.sort(key=lambda a: int(("sideshifter" in a["name"].lower()) or ("fork positioner" in a["name"].lower())), reverse=True)
 
-    result["options"] = _safe_limit(ranked_opts)
-    result["attachments"] = _safe_limit(ranked_atts[:4])
+    result["options"] = opts[: (limit or 6)]
+    result["attachments"] = atts[: 4]
 
     if _TIRES_PAT.search(user_q or ""):
-        result["tires"] = _safe_limit(_rank_bucket(user_q, tires, limit=4))
+        result["tires"] = _rank_bucket(user_q, tires, 4)
     if _TELEM_PAT.search(user_q or ""):
-        result["telemetry"] = _safe_limit(_rank_bucket(user_q, telemetry, limit=3))
-
+        result["telemetry"] = _rank_bucket(user_q, telemetry, 3)
     return result
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Rendering helpers
-# ─────────────────────────────────────────────────────────────────────────────
-def render_sections_markdown(result: Dict[str, Any]) -> str:
+def render_sections_markdown(result: Dict[str, List[Dict[str,str]]]) -> str:
     """
     Render only sections that have items. Skips empty/absent sections.
     Sections: 'tires', 'attachments', 'options', 'telemetry'
@@ -482,22 +418,19 @@ def render_sections_markdown(result: Dict[str, Any]) -> str:
     lines: List[str] = []
     for key in order:
         arr = result.get(key) or []
-        if not isinstance(arr, list) or not arr:
+        if not arr:
             continue
 
-        section_lines: List[str] = []
         seen = set()
+        section_lines: List[str] = []
         for item in arr:
             if not isinstance(item, dict):
-                # if something upstream sent a str by mistake, show it plainly
-                item = {"name": str(item)}
+                # defensive guard against accidental string entries
+                continue
             name = (item.get("name") or "").strip()
-            if not name:
+            if not name or name.lower() in seen:
                 continue
-            nl = name.lower()
-            if nl in seen:
-                continue
-            seen.add(nl)
+            seen.add(name.lower())
             ben = (item.get("benefit") or "").strip().replace("\n", " ")
             section_lines.append(f"- {name}" + (f" — {ben}" if ben else ""))
 
@@ -507,134 +440,239 @@ def render_sections_markdown(result: Dict[str, Any]) -> str:
 
     return "\n".join(lines) if lines else "(no matching items)"
 
-# Backward-compatible name some code calls elsewhere
-def render_catalog_sections(result: Dict[str, Any], max_per_section: Optional[int] = None) -> str:
-    """Thin wrapper; max_per_section kept for backward compat (ignored)."""
-    return render_sections_markdown(result)
+def parse_catalog_intent(user_q: str) -> Dict[str, Any]:
+    t = (user_q or "").strip().lower()
+    which: Optional[str] = None
+    if ("attachments" in t and "options" in t) or "both" in t:
+        which = "both"
+    elif "attachments" in t or "attachment" in t:
+        which = "attachments"
+    elif "options" in t or "option" in t:
+        which = "options"
+    elif re.search(r"\b(tires?|tyres?)\b", t):
+        which = "tires"
+    elif _TELEM_PAT.search(t):
+        which = "telemetry"
+    list_all = bool(re.search(r'\b(list|show|give|display)\b.*\b(all|full|everything)\b', t))
+    return {"which": which, "list_all": list_all}
 
-# Small helpers some modules import
-def options_lookup_by_name(name: str) -> Optional[str]:
-    options, attachments, tires = load_catalogs()
-    for bucket in (options, attachments, tires):
-        if name in bucket:
-            return bucket[name]
-    return None
+def list_all_from_excel(kind: str) -> List[Dict[str,str]]:
+    """Utility for callers that want a raw list from the sheet."""
+    kind_l = (kind or "").lower()
+    if kind_l.startswith("att"):
+        b = load_attachments()
+    elif kind_l.startswith("opt"):
+        b = load_options()
+    elif kind_l.startswith("tir"):
+        b = load_tires()
+    else:
+        b = {}
+    return [{"name": k, "benefit": v} for k,v in b.items()]
 
-def option_benefit(name: str) -> Optional[str]:
-    return options_lookup_by_name(name)
+def render_catalog_sections(user_text: str, max_per_section: int = 6) -> str:
+    """
+    Reactive entrypoint used by options_attachments_router.py.
+    - If user asks to list/show all X, dump the whole category from Excel.
+    - Otherwise, return scenario-aware picks for the requested sections only.
+    """
+    q = (user_text or "").strip()
+    intent = parse_catalog_intent(q)
+    which = intent["which"]
+    if intent["list_all"] and which in ("tires","attachments","options","telemetry"):
+        # Telemetry is a subset of options
+        if which == "telemetry":
+            options = load_options()
+            telem = {n:b for n,b in options.items() if _TELEM_PAT.search((n + " " + b).lower())}
+            rows = [{"name": k, "benefit": v} for k,v in telem.items()]
+            return render_sections_markdown({"telemetry": rows})
+        rows = list_all_from_excel(which)
+        return render_sections_markdown({which: rows})
+
+    picks = recommend_options_from_sheet(q, limit=max_per_section)
+    # Only include sections that have items (function already does so)
+    return render_sections_markdown(picks)
+
+def generate_catalog_mode_response(user_text: str) -> str:
+    """Alias for older callers."""
+    return render_catalog_sections(user_text, max_per_section=6)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Model recommendation stubs (kept minimal but won’t crash callers)
+# Forklift Recommendation Core (signature compatible with heli_backup_ai.py)
 # ─────────────────────────────────────────────────────────────────────────────
-@dataclass
-class ModelHit:
-    name: str
-    score: float
-    meta: Dict[str, Any]
-
 @lru_cache(maxsize=1)
-def _load_models_json() -> List[Dict[str, Any]]:
-    # Your app loads models elsewhere; we provide a tiny safe fallback.
-    candidates = [
-        os.path.join(os.path.dirname(__file__), "data", "models.json"),
-        os.path.join(os.getcwd(), "data", "models.json"),
-        os.path.join(os.getcwd(), "models.json"),
-    ]
-    for p in candidates:
-        try:
-            if os.path.isfile(p):
+def _load_models_cache() -> List[Dict[str, Any]]:
+    for p in _MODELS_JSON_CANDIDATES:
+        if os.path.exists(p):
+            try:
                 with open(p, "r", encoding="utf-8") as f:
-                    return json.load(f) or []
-        except Exception:
-            pass
+                    data = json.load(f)
+                if isinstance(data, dict) and "models" in data:
+                    return list(data["models"])
+                if isinstance(data, list):
+                    return data
+            except Exception as e:
+                log.warning("models.json load error at %s: %s", p, e)
+    log.warning("models.json not found; returning empty list")
     return []
 
-def filter_models(models: Optional[List[Dict[str,Any]]] = None) -> List[Dict[str,Any]]:
-    return models or _load_models_json()
+def model_meta_for(m: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "name": _safe_model_name(m),
+        "capacity_lbs": _capacity_of(m),
+        "lift_height_in": _height_of(m),
+        "aisle_in": _aisle_of(m),
+        "power": _power_of(m),
+        "tire": _tire_of(m),
+        "raw": m,
+    }
 
-def generate_forklift_context(*args, **kwargs) -> str:
-    """
-    Compatible with older calls like generate_forklift_context(user_q, acct).
-    Returns a lightweight prompt context summarizing detected needs.
-    """
-    user_q = args[0] if args else kwargs.get("user_q", "")
-    env = _env_flags(user_q)
-    bits = []
-    if env["indoor"]: bits.append("Indoor use")
-    if env["outdoor"]: bits.append("Outdoor/yard use")
-    if env["cold"]: bits.append("Cold / freezer")
-    if env["dark"]: bits.append("Low-light / lighting important")
-    return " | ".join(bits) or "General use"
-
-def select_models_for_question(user_q: str, k: int = 5) -> Tuple[List[ModelHit], List[str]]:
-    """
-    Very light keyword filter so upstream unpacking never fails.
-    Returns (hits, allowed_model_codes).
-    """
-    models = filter_models()
-    hits: List[ModelHit] = []
-    ql = (user_q or "").lower()
+def allowed_models_block(models: List[Dict[str, Any]]) -> str:
+    if not models:
+        return "_No candidate models found._"
+    lines: List[str] = []
     for m in models:
-        name = _safe_model_name(m)
-        t = (name + " " + json.dumps(m)).lower()
-        score = 0.0
-        if any(w in ql for w in ("rough", "yard", "outdoor")) and any(w in t for w in ("pneumatic","4x4","diesel","lp")):
-            score += 2.0
-        if any(w in ql for w in ("indoor","warehouse")) and any(w in t for w in ("cushion","electric","three wheel","3-wheel")):
-            score += 1.8
-        cap = _capacity_of(m) or 0
-        if re.search(r"\b(\d{4,5})\b", ql):
-            want = _num(re.search(r"\b(\d{4,5})\b", ql).group(1)) or 0
-            score -= abs((cap or 0) - want) / 5000.0
-        if score != 0.0:
-            hits.append(ModelHit(name=name, score=score, meta=m))
-    hits.sort(key=lambda h: h.score, reverse=True)
-    allowed = [h.name for h in hits[:k]]
-    return hits[:k], allowed
-
-def allowed_models_block(hits: List[ModelHit]) -> str:
-    if not hits:
-        return "No obvious top picks based on the brief."
-    lines = ["**Top Picks:**"]
-    for h in hits:
-        lines.append(f"- {h.name} (score {h.score:.2f})")
+        meta = model_meta_for(m)
+        cap   = f'{int(meta["capacity_lbs"]):,} lb' if meta.get("capacity_lbs") else "—"
+        ht    = f'{int(meta["lift_height_in"])} in' if meta.get("lift_height_in") else "—"
+        aisle = f'{int(meta["aisle_in"])} in'      if meta.get("aisle_in") else "—"
+        pwr   = (meta.get("power") or "—").title()
+        tire  = (meta.get("tire") or "—").title()
+        lines.append(f'- **{meta["name"]}** — {cap}, Lift {ht}, Aisle {aisle}, Power {pwr}, Tires {tire}')
     return "\n".join(lines)
 
-def model_meta_for(name: str) -> Dict[str, Any]:
-    for m in _load_models_json():
-        if _safe_model_name(m) == name:
-            return m
-    return {}
+def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Hook for downstream hard filters; currently passthrough."""
+    return models
 
-def top_pick_meta(hits: List[ModelHit]) -> Dict[str, Any]:
-    return hits[0].meta if hits else {}
+def _soft_contains(hay: str, needles: List[str]) -> bool:
+    h = (hay or "").lower()
+    return any((n or "").lower() in h for n in needles if n)
 
-def debug_parse_and_rank(q: str) -> Dict[str, Any]:
-    wants = _wants_sections(q)
-    env = _env_flags(q)
-    opts, atts, tires = load_catalogs()
-    out = {
-        "wants": wants,
-        "env": env,
-        "sample_options": _rank_bucket(q, opts, limit=5),
-        "sample_attachments": _rank_bucket(q, atts, limit=5),
-        "sample_tires": _rank_bucket(q, tires, limit=5),
+def _model_score(user_q: str, row: Dict[str, Any]) -> float:
+    ql = (user_q or "").lower()
+    score = 0.0
+    cap   = _capacity_of(row) or 0.0
+    h_in  = _height_of(row) or 0.0
+    aisle = _aisle_of(row) or 0.0
+    pwr   = _power_of(row) or ""
+    tire  = _tire_of(row) or ""
+
+    # Capacity hints
+    if any(k in ql for k in ("lb","lbs","pound","ton","capacity","lift")):
+        score += min(cap / 10000.0, 2.0)
+
+    # Aisle / tight
+    if any(k in ql for k in ("aisle","tight","narrow","vna","right-angle")):
+        score += (1.0 if aisle and aisle < 100 else 0.0)
+
+    # Height
+    if any(k in ql for k in ("height","stack","racking","high")):
+        score += min(h_in / 300.0, 1.5)
+
+    # Power/fuel matches
+    if _soft_contains(pwr, ["electric","lithium","diesel","lpg","gas"]):
+        if _soft_contains(ql, ["electric","lithium"]) and "electric" in pwr:
+            score += 1.0
+        if _soft_contains(ql, ["diesel"]) and "diesel" in pwr:
+            score += 1.0
+        if _soft_contains(ql, ["lpg","gas","propane"]) and ("lpg" in pwr or "gas" in pwr or "propane" in pwr):
+            score += 1.0
+
+    # Tires (indoor/outdoor)
+    if any(k in ql for k in ("indoor","warehouse","epoxy","polished")):
+        if "cushion" in tire:
+            score += 0.8
+    if any(k in ql for k in ("outdoor","yard","gravel","rough","debris")):
+        if "pneumatic" in tire or "super elastic" in tire:
+            score += 1.0
+
+    # Reach/VNA preference in tight aisles
+    name_text = (_lower(row.get("Model","")) + " " + _lower(row.get("Model Name","")))
+    if any(k in ql for k in ("reach","order picker","vna","turret")):
+        if any(w in name_text for w in ("reach","rq","vna","order","turret")):
+            score += 2.0
+
+    return score
+
+def select_models_for_question(user_q: str, k: int = 5) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Returns (hits, allowed_block_markdown).
+    """
+    models = filter_models(_load_models_cache())
+    if not models:
+        return [], "_No candidate models found._"
+    scored: List[Tuple[float, Dict[str,Any]]] = []
+    for m in models:
+        s = _model_score(user_q, m)
+        scored.append((s, m))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    hits = [m for _, m in scored[: max(1, k)]]
+    return hits, allowed_models_block(hits)
+
+def top_pick_meta(model: Dict[str, Any]) -> Dict[str, Any]:
+    meta = model_meta_for(model)
+    return {
+        "name": meta["name"],
+        "capacity_lbs": meta["capacity_lbs"],
+        "lift_height_in": meta["lift_height_in"],
+        "aisle_in": meta["aisle_in"],
+        "power": meta["power"],
+        "tire": meta["tire"],
     }
-    return out
+
+def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Small prompt/context helper used by heli_backup_ai.py.
+    You can enrich this with account/industry later.
+    """
+    acct_line = ""
+    if acct and isinstance(acct, dict):
+        name = str(acct.get("name") or acct.get("Sold to Name") or "").strip()
+        if name:
+            acct_line = f"\nAccount: {name}"
+    return f"User question: {user_q.strip()}{acct_line}\nProvide a concise, practical forklift recommendation with reasons."
+
+# Debug convenience for testing in REPL
+def debug_parse_and_rank(q: str) -> str:
+    picks = recommend_options_from_sheet(q, limit=6)
+    return render_sections_markdown(picks)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Exports
+# Legacy-friendly exports (some code imports these symbols explicitly)
+# ─────────────────────────────────────────────────────────────────────────────
+def _is_attachment(name: str) -> bool:
+    nl = _lower(name)
+    return any(k in nl for k in (
+        "clamp","sideshift","positioner","rotator","boom","pole","ram",
+        "fork extension","extensions","push/ pull","push/pull",
+        "slip-sheet","slipsheet","bale","carton","drum","bag push","load stabilizer"
+    ))
+
+def _num_from_keys_legacy(row: Dict[str,Any], keys: List[str]) -> Optional[float]:
+    return _num_from_keys(row, keys)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# __all__ for explicit imports elsewhere
 # ─────────────────────────────────────────────────────────────────────────────
 __all__ = [
     # Catalog IO / caches
     "load_catalogs", "load_catalog_rows", "refresh_catalog_caches",
+    "load_options", "load_attachments", "load_tires_as_options", "load_tires",
     "options_lookup_by_name", "option_benefit",
 
     # Scenario picks & catalog renderers
     "recommend_options_from_sheet", "render_sections_markdown",
-    "render_catalog_sections", "debug_parse_and_rank",
+    "render_catalog_sections", "parse_catalog_intent",
+    "generate_catalog_mode_response", "list_all_from_excel",
 
-    # Model filtering & context
+    # Model filtering & context (forklift recommendation)
     "filter_models", "generate_forklift_context", "select_models_for_question",
     "allowed_models_block", "model_meta_for", "top_pick_meta",
+
+    # Debug
+    "debug_parse_and_rank",
+
+    # Intentional small helpers sometimes imported
+    "_num_from_keys",
+    "_is_attachment",
 ]

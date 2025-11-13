@@ -1,5 +1,5 @@
 # options_attachments_router.py
-# Excel-grounded, *reactive* router that delegates catalog logic to ai_logic.
+# Excel-grounded, reactive router that delegates catalog logic to ai_logic.
 # Endpoints:
 #   GET/POST /api/options                    { "q": "<user question>" }
 #   GET/POST /api/options_attachments_chat   { "q": "<user question>" }  (legacy alias)
@@ -18,25 +18,30 @@ try:
 except Exception:
     options_bp = None  # type: ignore
 
-# Single source of truth lives in ai_logic.py
-# - render_catalog_sections: smart “reactive” output or list-all when requested
-# - recommend_options_from_sheet: (available if you want to extend the router later)
-# - refresh_catalog_caches: clears pandas/Excel caches after you update the sheet
+# Import helpers from ai_logic (aligned with the new file)
+# - generate_catalog_mode_response: takes the user question and returns markdown text
+# - load_catalogs: used to create a hot-reload shim via cache_clear()
 from ai_logic import (
-    render_catalog_sections,
-    recommend_options_from_sheet,  # noqa: F401 (imported for future extensibility)
-    refresh_catalog_caches,
+    generate_catalog_mode_response,
+    load_catalogs,
 )
+
+# Local shim to "refresh" Excel caches by clearing lru_cache in ai_logic
+def refresh_catalog_caches() -> None:
+    try:
+        load_catalogs.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass  # be defensive; endpoint should never crash
 
 def _answer_catalog_reactive(user_text: str) -> str:
     """
-    Returns a context-aware, *filtered* catalog answer grounded to the Excel sheet.
-    - If the user asks to "list/show all" (attachments/options/tires), it lists from Excel.
-    - Otherwise, it returns a scenario-aware pick set (Tires + Attachments + Options).
+    Returns a context-aware, filtered catalog answer grounded to the Excel sheet.
+    - If the user asks explicitly (tires / attachments / options / telemetry), we show only that.
+    - Otherwise, we return a scenario-aware default mix.
     """
     try:
-        # max_per_section keeps answers compact unless user explicitly asks to list all
-        return render_catalog_sections(user_text, max_per_section=6)
+        # New ai_logic already handles ranking/section picking internally
+        return generate_catalog_mode_response(user_text)
     except Exception as e:
         # Defensive fallback — never crash your API
         return f"Options/Attachments (fallback): {str(e)}"
@@ -82,18 +87,12 @@ if options_bp is not None:
     def api_options():
         # Optional hot-reload via ?refresh=1 or body {"refresh": true}
         if request.args.get("refresh") == "1":
-            try:
-                refresh_catalog_caches()
-            except Exception:
-                pass
+            refresh_catalog_caches()
 
         if request.method == "POST":
             data = request.get_json(silent=True) or {}
             if data.get("refresh") is True:
-                try:
-                    refresh_catalog_caches()
-                except Exception:
-                    pass
+                refresh_catalog_caches()
             q = (data.get("q") or data.get("query") or "").strip()
         else:
             q = (request.args.get("q") or request.args.get("query") or "").strip()
@@ -107,20 +106,13 @@ if options_bp is not None:
     # ---- Legacy alias (keeps existing front-ends working) ----------------
     @options_bp.route("/api/options_attachments_chat", methods=["GET", "POST"])
     def api_options_attachments_chat():
-        # Same optional refresh flag on legacy path
         if request.args.get("refresh") == "1":
-            try:
-                refresh_catalog_caches()
-            except Exception:
-                pass
+            refresh_catalog_caches()
 
         if request.method == "POST":
             data = request.get_json(silent=True) or {}
             if data.get("refresh") is True:
-                try:
-                    refresh_catalog_caches()
-                except Exception:
-                    pass
+                refresh_catalog_caches()
             q = (data.get("q") or data.get("query") or "").strip()
         else:
             q = (request.args.get("q") or request.args.get("query") or "").strip()
