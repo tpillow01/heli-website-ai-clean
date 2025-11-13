@@ -23,6 +23,40 @@ try:
 except Exception:
     _pd = None
 
+# === INTENT & ENV HELPERS (must be defined before any HOTFIX uses them) ===
+_TIRES_PAT   = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
+_ATTACH_PAT  = re.compile(r"\b(attach(ment)?s?)\b", re.I)
+_OPTIONS_PAT = re.compile(r"\b(option|options)\b", re.I)
+_TELEM_PAT   = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
+
+def _wants_sections(q: str) -> dict[str, bool]:
+    t = q or ""
+    return {
+        "tires": bool(_TIRES_PAT.search(t)),
+        "attachments": bool(_ATTACH_PAT.search(t)),
+        "options": bool(_OPTIONS_PAT.search(t)),
+        "telemetry": bool(_TELEM_PAT.search(t)),
+        "any": any([
+            _TIRES_PAT.search(t),
+            _ATTACH_PAT.search(t),
+            _OPTIONS_PAT.search(t),
+            _TELEM_PAT.search(t),
+        ]),
+    }
+
+def _env_flags(q: str) -> dict[str, bool]:
+    ql = (q or "").lower()
+    return {
+        "cold": any(k in ql for k in ("cold", "freezer", "subzero", "winter")),
+        "indoor": any(k in ql for k in ("indoor", "warehouse", "inside", "epoxy", "polished", "concrete")),
+        "outdoor": any(k in ql for k in ("outdoor", "yard", "rain", "snow", "dust", "gravel", "dirt")),
+        "dark": any(k in ql for k in ("dark", "dim", "night", "poor lighting", "low light")),
+        "mentions_clamp": bool(re.search(r"\b(clamp|paper\s*roll|bale|drum|carton|block)\b", ql)),
+        "mentions_align": bool(re.search(r"\b(align|tight\s*aisle|narrow|staging)\b", ql)),
+        "mentions_widths": bool(re.search(r"\b(var(y|ied)\s*width|mixed\s*pallet|different\s*width)\b", ql)),
+        "asks_non_mark": bool(re.search(r"non[-\s]?mark", ql)),
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths / constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -960,9 +994,17 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Catalog intent + cold-aware option/attachment selector (no tires unless asked)
+# REPLACE FROM HERE TO END OF FILE
 # ─────────────────────────────────────────────────────────────────────────────
-_TELEM_PAT = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
-_ATTACH_HINT = re.compile(r"\b(attach(ment)?|clamp|sideshift|positioner|fork|boom|pole|ram|push\s*/?\s*pull|slip[-\s]?sheet|paper\s*roll)\b", re.I)
+from typing import List, Dict, Any, Tuple, Optional
+import re, hashlib
+
+# Intent helpers
+_TIRES_PAT    = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
+_ATTACH_PAT   = re.compile(r"\b(attach(ment)?s?)\b", re.I)
+_OPTIONS_PAT  = re.compile(r"\b(option|options)\b", re.I)
+_TELEM_PAT    = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
+_ATTACH_HINT  = re.compile(r"\b(attach(ment)?|clamp|sideshift|positioner|fork|boom|pole|ram|push\s*/?\s*pull|slip[-\s]?sheet|paper\s*roll)\b", re.I)
 
 def parse_catalog_intent(user_q: str) -> dict:
     t = (user_q or "").strip().lower()
@@ -973,7 +1015,7 @@ def parse_catalog_intent(user_q: str) -> dict:
         which = "attachments"
     elif "options" in t or "option" in t:
         which = "options"
-    elif re.search(r"\b(tires?|tyres?)\b", t):
+    elif _TIRES_PAT.search(t):
         which = "tires"
     elif _TELEM_PAT.search(t):
         which = "telemetry"
@@ -1020,7 +1062,7 @@ def _kw_score(q: str, name: str, benefit: str) -> float:
 
     return score
 
-def _rank_bucket(q: str, bucket: dict[str, str], limit: int = 6) -> list[dict]:
+def _rank_bucket(q: str, bucket: Dict[str, str], limit: int = 6) -> List[Dict[str, str]]:
     if not bucket:
         return []
     scored = []
@@ -1043,13 +1085,12 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
     which = intent["which"]
     ql = _lower(user_q)
 
-    # Load buckets
+    # Load buckets (from your Excel)
     options, attachments, tires = load_catalogs()
 
-    # Telemetry is a named subset of options
+    # Telemetry subset of options
     telemetry = {n: b for n, b in options.items() if _TELEM_PAT.search(_lower(n + " " + b))}
 
-    # Helper: in cold-only asks, hide generic attachments unless user names one
     cold_only = any(k in ql for k in ("cold","freezer","subzero","winter"))
     mentions_attach = bool(_ATTACH_HINT.search(ql))
 
@@ -1066,26 +1107,25 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
 
     if which == "attachments":
         if cold_only and not mentions_attach:
-            # Nothing explicitly attachment-y was asked; avoid random clamps
+            # Don’t flood with generic clamps when user didn’t name an attachment
             result["attachments"] = []
         else:
             result["attachments"] = _rank_bucket(user_q, attachments, limit)
         return result
 
     if which == "options":
-        # If “options” and they actually meant telemetry, prefer that
+        # If they typed telemetry words, prefer telemetry
         if _TELEM_PAT.search(ql):
             result["telemetry"] = _rank_bucket(user_q, telemetry, limit)
         else:
-            # Rank options with cold-aware scoring; filter out AC in cold-only
-            ranked = _rank_bucket(user_q, options, limit=0)  # get all, then post-filter
+            ranked = _rank_bucket(user_q, options, limit=0)  # then post-filter
             if cold_only:
                 ranked = [o for o in ranked if "air conditioner" not in _lower(o["name"])]
             result["options"] = ranked[:limit] if limit and limit > 0 else ranked
         return result
 
     if which == "both":
-        # Attachments + Options only (no tires)
+        # Attachments + Options (no tires)
         if cold_only and not mentions_attach:
             result["attachments"] = []
         else:
@@ -1096,13 +1136,13 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
         result["options"] = ranked_opts[:limit] if limit and limit > 0 else ranked_opts
         return result
 
-    # Fallback (broad question): still prefer to avoid noise
+    # Fallback (broad question): prefer options; be conservative on attachments
     result["options"] = _rank_bucket(user_q, options, limit)
     result["attachments"] = _rank_bucket(user_q, attachments, limit=4)
-    # Do NOT include tires unless user hinted at tires
-    if re.search(r"\b(tires?|tyres?|tire\s*types?)\b", ql):
+    # Only include tires if asked/hinted
+    if _TIRES_PAT.search(ql):
         result["tires"] = _rank_bucket(user_q, tires, limit=4)
-    # Include telemetry only if hinted
+    # Only include telemetry if hinted
     if _TELEM_PAT.search(ql):
         result["telemetry"] = _rank_bucket(user_q, telemetry, limit=3)
     return result
@@ -1115,7 +1155,7 @@ def render_sections_markdown(result: dict) -> str:
     order = ["tires", "attachments", "options", "telemetry"]
     labels = {"tires": "Tires", "attachments": "Attachments", "options": "Options", "telemetry": "Telemetry"}
 
-    lines: list[str] = []
+    lines: List[str] = []
     for key in order:
         arr = result.get(key) or []
         if not arr:
@@ -1138,40 +1178,7 @@ def render_sections_markdown(result: dict) -> str:
 
     return "\n".join(lines) if lines else "(no matching items)"
 
-# --- intent helpers ----------------------------------------------------------
-_TIRES_PAT    = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
-_ATTACH_PAT   = re.compile(r"\b(attach(ment)?s?)\b", re.I)
-_OPTIONS_PAT  = re.compile(r"\b(option|options)\b", re.I)
-_TELEM_PAT    = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
-
-def _wants_sections(q: str) -> dict[str, bool]:
-    t = (q or "")
-    return {
-        "tires": bool(_TIRES_PAT.search(t)),
-        "attachments": bool(_ATTACH_PAT.search(t)),
-        "options": bool(_OPTIONS_PAT.search(t)),
-        "telemetry": bool(_TELEM_PAT.search(t)),
-        "any": any([
-            _TIRES_PAT.search(t), _ATTACH_PAT.search(t), _OPTIONS_PAT.search(t), _TELEM_PAT.search(t)
-        ])
-    }
-
-def _env_flags(q: str) -> dict[str, bool]:
-    ql = (q or "").lower()
-    return {
-        "cold": any(k in ql for k in ("cold","freezer","subzero","winter")),
-        "indoor": any(k in ql for k in ("indoor","warehouse","inside","epoxy","polished","concrete")),
-        "outdoor": any(k in ql for k in ("outdoor","yard","rain","snow","dust","gravel","dirt")),
-        "dark": any(k in ql for k in ("dark","dim","night","poor lighting","low light")),
-        "mentions_clamp": bool(re.search(r"\bclamp|paper\s*roll|bale|drum|carton|block\b", ql)),
-        "mentions_align": bool(re.search(r"\balign|tight\s*aisle|narrow|staging\b", ql)),
-        "mentions_widths": bool(re.search(r"\bvar(y|ied)\s*width|mixed\s*pallet|different\s*width\b", ql)),
-        "asks_non_mark": bool(re.search(r"non[-\s]?mark", ql)),
-    }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# “Defined but not accessed” silencer (legacy)
-# ─────────────────────────────────────────────────────────────────────────────
+# --- legacy helper kept for imports elsewhere --------------------------------
 def _is_attachment(name: str) -> bool:
     nl = _lower(name)
     return any(k in nl for k in (
@@ -1179,6 +1186,73 @@ def _is_attachment(name: str) -> bool:
         "fork extension","extensions","push/ pull","push/pull",
         "slip-sheet","slipsheet","bale","carton","drum","bag push","load stabilizer"
     ))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RECO MODE SAFETY: always return (hits, allowed) to fix unpack error
+# This definition overrides any earlier one in the file.
+# ─────────────────────────────────────────────────────────────────────────────
+def select_models_for_question(user_q: str, k: int = 5):
+    try:
+        hits = filter_models(user_q, limit=k) or []
+    except Exception:
+        hits = []
+    allowed = []
+    for m in hits:
+        try:
+            nm = model_meta_for(m)[0]  # (code, class, power) — fall back below if not present
+        except Exception:
+            nm = (m.get("Model") or m.get("Model Name") or m.get("code") or m.get("name") or "N/A")
+        if nm and nm != "N/A":
+            allowed.append(str(nm))
+    return hits, allowed
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SHIMS: If some helpers aren’t defined above in your file, provide no-op fallbacks
+# (prevents ImportErrors in blueprints that import these names)
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    render_catalog_sections  # noqa
+except NameError:
+    def render_catalog_sections(user_text: str, max_per_section: int = 6) -> str:
+        res = recommend_options_from_sheet(user_text, limit=max_per_section)
+        return render_sections_markdown(res)
+
+try:
+    generate_catalog_mode_response  # noqa
+except NameError:
+    def generate_catalog_mode_response(user_q: str, max_per_section: int = 6) -> str:
+        res = recommend_options_from_sheet(user_q, limit=max_per_section)
+        return render_sections_markdown(res)
+
+try:
+    list_all_from_excel  # noqa
+except NameError:
+    def list_all_from_excel(user_text: str, max_per_section: int = 9999) -> str:
+        opts, atts, tires = load_catalogs()
+        blocks = []
+        if tires:
+            blocks.append("**Tires:**\n" + "\n".join(f"- {n}" + (f" — {b}" if b else "") for n, b in tires.items()))
+        if atts:
+            blocks.append("**Attachments:**\n" + "\n".join(f"- {n}" + (f" — {b}" if b else "") for n, b in atts.items()))
+        if opts:
+            blocks.append("**Options:**\n" + "\n".join(f"- {n}" + (f" — {b}" if b else "") for n, b in opts.items()))
+        return "\n\n".join(blocks) if blocks else "Catalog is empty."
+
+try:
+    model_meta_for  # noqa
+except NameError:
+    def model_meta_for(row: Dict[str, Any]) -> Tuple[str, str, str]:
+        code = (row.get("Model") or row.get("Model Name") or row.get("code") or row.get("name") or "N/A")
+        return (str(code), "", _lower(row.get("Power") or ""))
+
+try:
+    top_pick_meta  # noqa
+except NameError:
+    def top_pick_meta(user_q: str) -> Optional[Tuple[str, str, str]]:
+        hits = filter_models(user_q, limit=1)
+        if not hits:
+            return None
+        return model_meta_for(hits[0])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Exports
@@ -1202,7 +1276,7 @@ __all__ = [
     "debug_parse_and_rank",
 
     # Intentional small helpers sometimes imported
-    "_num_from_keys",
+    "_num_from_keys", "_is_attachment",
 ]
 
 # Keep Pylance happy for legacy imports
