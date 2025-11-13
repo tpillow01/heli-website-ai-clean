@@ -933,13 +933,19 @@ def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return models
 
 
-def select_models_for_question(user_q: str, k: int = 5) -> List[Dict[str, Any]]:
+def select_models_for_question(
+    user_q: str, k: int = 5
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    RETURN LIST ONLY (compat with heli_backup_ai.py which calls allowed_models_block separately).
-    """
-    ranked = _rank_models(user_q, k=k)
-    return ranked
+    Returns (hits, allowed) for compatibility with heli_backup_ai.py.
 
+    - hits:   raw ranked list from _rank_models
+    - allowed: post-filter list (currently the same as hits, but passed
+               through filter_models() so you can add hard rules later).
+    """
+    hits = _rank_models(user_q, k=k)
+    allowed = filter_models(hits)
+    return hits, allowed
 
 def _truck_class_of(m: Any) -> Optional[str]:
     if isinstance(m, dict):
@@ -951,10 +957,12 @@ def _truck_class_of(m: Any) -> Optional[str]:
 def top_pick_meta(user_q: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Returns exactly (top_code, top_class, top_power) as heli_backup_ai.py expects.
+    Uses the 'allowed' list from select_models_for_question.
     """
-    allowed = select_models_for_question(user_q, k=5)
+    hits, allowed = select_models_for_question(user_q, k=5)
     if not allowed:
         return (None, None, None)
+
     top = allowed[0]
     meta = model_meta_for(top)
     code = meta.get("code") or meta.get("name")
@@ -963,7 +971,6 @@ def top_pick_meta(user_q: str) -> Tuple[Optional[str], Optional[str], Optional[s
     if isinstance(power, str) and power:
         power = power.upper()
     return (code, klass, power)
-
 
 def generate_forklift_context(
     user_q: str, acct: Optional[Dict[str, Any]] = None
