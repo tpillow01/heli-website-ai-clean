@@ -181,6 +181,275 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
     return "N/A"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Catalog loader + intent + recommendation (robust, non-echoing)
+# ─────────────────────────────────────────────────────────────────────────────
+_TIRES_PAT   = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
+_ATTACH_PAT  = re.compile(r"\b(attach(ment)?s?)\b", re.I)
+_OPTIONS_PAT = re.compile(r"\b(option|options)\b", re.I)
+_TELEM_PAT   = re.compile(r"\b(fics|fleet\s*management|telemetry|portal)\b", re.I)
+
+def _wants_sections(q: str) -> Dict[str, bool]:
+    t = q or ""
+    return {
+        "tires": bool(_TIRES_PAT.search(t)),
+        "attachments": bool(_ATTACH_PAT.search(t)),
+        "options": bool(_OPTIONS_PAT.search(t)) and not _TELEM_PAT.search(t),
+        "telemetry": bool(_TELEM_PAT.search(t)),
+        "any": any([
+            _TIRES_PAT.search(t),
+            _ATTACH_PAT.search(t),
+            _OPTIONS_PAT.search(t),
+            _TELEM_PAT.search(t),
+        ])
+    }
+
+def _env_flags(q: str) -> Dict[str, bool]:
+    ql = (q or "").lower()
+    return {
+        "cold": any(k in ql for k in ("cold","freezer","subzero","winter")),
+        "indoor": any(k in ql for k in ("indoor","warehouse","inside","epoxy","polished","concrete")),
+        "outdoor": any(k in ql for k in ("outdoor","yard","rough","rain","snow","dust","gravel","dirt")),
+        "dark": any(k in ql for k in ("dark","dim","night","poor lighting","low light")),
+        "mentions_clamp": bool(re.search(r"\bclamp|paper\s*roll|bale|drum|carton|block\b", ql)),
+        "asks_non_mark": bool(re.search(r"non[-\s]?mark", ql)),
+    }
+
+def _clean_row_val(v: Any) -> str:
+    return _norm_spaces(str(v)) if v is not None else ""
+
+def load_catalog_rows() -> List[Dict[str, Any]]:
+    """
+    Load rows from forklift_options_benefits.xlsx safely.
+    Required columns: Option, Benefit, Type, Subcategory
+    """
+    path = _OPTIONS_XLSX
+    if _pd is None:
+        log.warning("pandas not available; catalog rows empty")
+        return []
+    if not os.path.exists(path):
+        log.warning("catalog file missing: %s", path)
+        return []
+    try:
+        df = _pd.read_excel(path)
+    except Exception as e:
+        log.error("failed reading catalog xlsx: %s", e)
+        return []
+    needed = ["Option", "Benefit", "Type", "Subcategory"]
+    for col in needed:
+        if col not in df.columns:
+            log.error("catalog missing column: %s", col)
+            return []
+
+    rows: List[Dict[str, Any]] = []
+    for _, r in df.iterrows():
+        rows.append({
+            "Option": _clean_row_val(r.get("Option")),
+            "Benefit": _clean_row_val(r.get("Benefit")),
+            "Type": _clean_row_val(r.get("Type")),
+            "Subcategory": _clean_row_val(r.get("Subcategory")),
+        })
+    log.info("[ai_logic] Loaded buckets: rows=%d", len(rows))
+    return rows
+
+def load_catalogs() -> Tuple[Dict[str,str], Dict[str,str], Dict[str,str]]:
+    """
+    Returns (options, attachments, tires) as dicts: name -> benefit
+    """
+    rows = load_catalog_rows()
+    options: Dict[str, str] = {}
+    attachments: Dict[str, str] = {}
+    tires: Dict[str, str] = {}
+    for r in rows:
+        name = r["Option"]
+        if not name:
+            continue
+        benefit = r["Benefit"]
+        rtype = r["Type"].lower()
+        if rtype == "options":
+            options[name] = benefit
+        elif rtype == "attachments":
+            attachments[name] = benefit
+        elif rtype == "tires":
+            tires[name] = benefit
+    log.info("[ai_logic] Buckets -> options=%d attachments=%d tires=%d", len(options), len(attachments), len(tires))
+    return options, attachments, tires
+
+def parse_catalog_intent(user_q: str) -> Dict[str, Any]:
+    t = (user_q or "").strip().lower()
+    which = None
+    if ("attachments" in t and "options" in t) or "both" in t:
+        which = "both"
+    elif "attachments" in t or "attachment" in t:
+        which = "attachments"
+    elif "options" in t or "option" in t:
+        # Treat telemetry phrases under options as telemetry
+        which = "telemetry" if _TELEM_PAT.search(t) else "options"
+    elif _TIRES_PAT.search(t):
+        which = "tires"
+    elif _TELEM_PAT.search(t):
+        which = "telemetry"
+    list_all = bool(re.search(r'\b(list|show|give|display)\b.*\b(all|full|everything|every)\b', t))
+    return {"which": which, "list_all": list_all}
+
+def _score(q_lower: str, name: str, benefit: str) -> float:
+    text = (name + " " + (benefit or "")).lower()
+    s = 0.01
+    # Generic keyword overlaps
+    for w in ("indoor","warehouse","outdoor","yard","dust","debris","visibility",
+              "lighting","safety","cold","freezer","rain","snow","cab","comfort",
+              "vibration","filtration","radiator","screen","pre air cleaner",
+              "dual air filter","heater","wiper","windshield","work light","led",
+              "non-mark","cushion","pneumatic"):
+        if w in q_lower and w in text:
+            s += 0.7
+    # Dark → lighting boost
+    if any(k in q_lower for k in ("dark","dim","night","poor lighting","low light")) \
+       and any(k in text for k in ("light","led","beacon","blue light","work light")):
+        s += 1.6
+    # Cold → cab/heater/wiper boost; penalize A/C
+    if any(k in q_lower for k in ("cold","freezer","subzero","winter")):
+        if any(k in text for k in ("cab","heater","defrost","wiper","rain-proof","glass","windshield","work light","led")):
+            s += 2.0
+        if "air conditioner" in text or "a/c" in text:
+            s -= 1.8
+    # Telemetry keywords
+    if _TELEM_PAT.search(q_lower) and _TELEM_PAT.search(text):
+        s += 2.2
+    return s
+
+def _rank(bucket: Dict[str,str], user_q: str, limit: Optional[int]) -> List[Dict[str,str]]:
+    if not bucket:
+        return []
+    ql = (user_q or "").lower()
+    scored: List[Tuple[float, Dict[str,str]]] = []
+    for name, ben in bucket.items():
+        name_s = _norm_spaces(name)
+        if not name_s:
+            continue
+        s = _score(ql, name_s, ben or "")
+        scored.append((s, {"name": name_s, "benefit": _norm_spaces(ben or "")}))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    out = [row for _, row in scored]
+    if isinstance(limit, int) and limit > 0:
+        return out[:limit]
+    return out
+
+def _postfilter(user_q: str, items: List[Dict[str,str]]) -> List[Dict[str,str]]:
+    """Contextual post-filters that never echo the user question."""
+    ql = (user_q or "").lower()
+    # Drop anything that exactly matches the question text (defensive)
+    q_norm = _norm_spaces(user_q or "").lower()
+    items = [x for x in items if _norm_spaces(x.get("name","")).lower() != q_norm]
+
+    # Cold → drop A/C
+    if any(k in ql for k in ("cold","freezer","subzero","winter")):
+        items = [x for x in items if "air conditioner" not in (x.get("name","") + " " + x.get("benefit","")).lower()]
+
+    # Dark → prioritize lighting
+    if any(k in ql for k in ("dark","dim","night","poor lighting","low light")):
+        def _is_light(x: Dict[str,str]) -> bool:
+            t = (x.get("name","") + " " + x.get("benefit","")).lower()
+            return any(w in t for w in ("light","led","beacon","work light","blue light","rear working light"))
+        lights = [x for x in items if _is_light(x)]
+        non    = [x for x in items if not _is_light(x)]
+        items  = lights + non
+
+    return items
+
+def recommend_options_from_sheet(user_q: str, limit: int = 6) -> Dict[str, List[Dict[str,str]]]:
+    """
+    Returns ONLY what the user asked for (attachments, options, telemetry, tires),
+    with smart boosts and strict no-echo behavior.
+    """
+    wants = _wants_sections(user_q)
+    env   = _env_flags(user_q)
+    options, attachments, tires = load_catalogs()
+
+    # carve telemetry from options (by name/benefit)
+    telemetry: Dict[str,str] = {}
+    for n, b in options.items():
+        t = (n + " " + (b or "")).lower()
+        if _TELEM_PAT.search(t):
+            telemetry[n] = b
+
+    result: Dict[str, List[Dict[str,str]]] = {}
+
+    def _do_tires():
+        ranked = _rank(tires, user_q, None)
+        if env["asks_non_mark"]:
+            sub = [x for x in ranked if "non-mark" in (x["name"] + " " + x["benefit"]).lower()]
+            if sub: ranked = sub
+        result["tires"] = _postfilter(user_q, ranked[:limit] if limit else ranked)
+
+    def _do_attachments():
+        ranked = _rank(attachments, user_q, None)
+        if env["indoor"] and not env["mentions_clamp"]:
+            ranked = [a for a in ranked if not re.search(r"\bclamp\b", a["name"].lower())]
+            # lightly bias alignment tools if present
+            ranked.sort(key=lambda a: int("sideshifter" in a["name"].lower() or "fork positioner" in a["name"].lower()), reverse=True)
+        result["attachments"] = _postfilter(user_q, ranked[:limit] if limit else ranked)
+
+    def _do_options():
+        ranked = _rank(options, user_q, None)
+        ranked = _postfilter(user_q, ranked)
+        result["options"] = ranked[:limit] if limit else ranked
+
+    def _do_telemetry():
+        ranked = _rank(telemetry, user_q, None)
+        result["telemetry"] = _postfilter(user_q, ranked[:limit] if limit else ranked)
+
+    # If user explicitly asked for certain sections, return only those.
+    if wants["any"]:
+        if wants["tires"]: _do_tires()
+        if wants["attachments"]: _do_attachments()
+        if wants["options"]: _do_options()
+        if wants["telemetry"]: _do_telemetry()
+        return result
+
+    # Broad ask (no keywords): default to options + a few attachments; add tires/telemetry only if hinted.
+    _do_options()
+    ranked_atts = _rank(attachments, user_q, 4)
+    if env["indoor"] and not env["mentions_clamp"]:
+        ranked_atts = [a for a in ranked_atts if not re.search(r"\bclamp\b", a["name"].lower())]
+        ranked_atts.sort(key=lambda a: int("sideshifter" in a["name"].lower() or "fork positioner" in a["name"].lower()), reverse=True)
+    result["attachments"] = _postfilter(user_q, ranked_atts)
+
+    if _TIRES_PAT.search(user_q or ""):
+        _do_tires()
+    if _TELEM_PAT.search(user_q or ""):
+        _do_telemetry()
+
+    return result
+
+def render_sections_markdown(result: Dict[str, List[Dict[str,str]]]) -> str:
+    """
+    Render only non-empty sections. Never echoes the question (handled upstream).
+    """
+    order = ["tires", "attachments", "options", "telemetry"]
+    labels = {"tires": "Tires", "attachments": "Attachments", "options": "Options", "telemetry": "Telemetry"}
+    lines: List[str] = []
+    for key in order:
+        arr = result.get(key) or []
+        if not arr:
+            continue
+        # keep unique names
+        seen = set()
+        sect: List[str] = []
+        for item in arr:
+            if not isinstance(item, dict):
+                continue  # defensive: ignore any stray types
+            name = _norm_spaces(item.get("name",""))
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            ben = _norm_spaces(item.get("benefit",""))
+            sect.append(f"- {name}" + (f" — {ben}" if ben else ""))
+        if sect:
+            lines.append(f"**{labels[key]}:**")
+            lines.extend(sect)
+    return "\n".join(lines) if lines else "(no matching items)"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Forklift context (2-arg compatible) — used by /api/chat recommendation flow
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_forklift_context(user_q: str, account: Optional[Dict[str, Any]] = None) -> str:
