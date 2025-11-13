@@ -935,35 +935,52 @@ def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def select_models_for_question(
     user_q: str, k: int = 5
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
-    Returns (hits, allowed) for compatibility with heli_backup_ai.py.
+    Returns (hits, allowed_codes) for compatibility with heli_backup_ai.py.
 
-    - hits:   raw ranked list from _rank_models
-    - allowed: post-filter list (currently the same as hits, but passed
-               through filter_models() so you can add hard rules later).
+    - hits:   ranked list of model dicts
+    - allowed_codes: list of model codes (strings) that are permitted for this answer.
+                     heli_backup_ai.py will pass `set(allowed_codes)` into
+                     _enforce_allowed_models.
     """
+    # Ranked model dicts
     hits = _rank_models(user_q, k=k)
-    allowed = filter_models(hits)
-    return hits, allowed
+
+    # Apply any hard filters (currently passthrough, but keep the hook)
+    filtered = filter_models(hits)
+
+    # Build a list of hashable model codes for enforcement
+    allowed_codes: List[str] = []
+    for m in filtered:
+        meta = model_meta_for(m)
+        code = meta.get("code") or meta.get("name")
+        if code:
+            allowed_codes.append(code)
+
+    return filtered, allowed_codes
 
 def _truck_class_of(m: Any) -> Optional[str]:
+    """
+    Extract a truck class/segment string from a model dict.
+    Uses the tolerant TYPE_KEYS list so it works with different column labels
+    like 'Type', 'Segment', 'Class', 'Truck Type', etc.
+    """
     if isinstance(m, dict):
         txt = _text_from_keys(m, TYPE_KEYS)
         return txt.strip() or None
     return None
 
-
 def top_pick_meta(user_q: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Returns exactly (top_code, top_class, top_power) as heli_backup_ai.py expects.
-    Uses the 'allowed' list from select_models_for_question.
+    Uses the ranked 'hits' list from select_models_for_question.
     """
-    hits, allowed = select_models_for_question(user_q, k=5)
-    if not allowed:
+    hits, allowed_codes = select_models_for_question(user_q, k=5)
+    if not hits:
         return (None, None, None)
 
-    top = allowed[0]
+    top = hits[0]
     meta = model_meta_for(top)
     code = meta.get("code") or meta.get("name")
     klass = _truck_class_of(top) or None
