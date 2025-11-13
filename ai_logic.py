@@ -515,29 +515,73 @@ def _load_models_cache() -> List[Dict[str, Any]]:
     log.warning("models.json not found; returning empty list")
     return []
 
-def model_meta_for(m: Dict[str, Any]) -> Dict[str, Any]:
+def model_meta_for(m: Any) -> Dict[str, Any]:
+    """
+    Returns a minimal, consistent metadata dict for a model.
+    Accepts either a full row dict or a string code/name.
+    """
+    # If we already have a dict-like row, use it directly.
+    if isinstance(m, dict):
+        return {
+            "name": _safe_model_name(m),
+            "code": str(m.get("Code") or m.get("Model") or m.get("Model Name") or m.get("code") or "").strip() or None,
+            "power": _power_of(m) or None,
+            "capacity_lbs": _capacity_of(m),
+            "lift_height_in": _height_of(m),
+            "aisle_in": _aisle_of(m),
+            "tire_type": _tire_of(m) or None,
+        }
+
+    # If it's a string (common when select_models_for_question returns codes)
+    if isinstance(m, (str, int, float)):
+        s = str(m).strip()
+        return {
+            "name": s,
+            "code": s,
+            "power": None,
+            "capacity_lbs": None,
+            "lift_height_in": None,
+            "aisle_in": None,
+            "tire_type": None,
+        }
+
+    # Fallback (unexpected types)
     return {
-        "name": _safe_model_name(m),
-        "capacity_lbs": _capacity_of(m),
-        "lift_height_in": _height_of(m),
-        "aisle_in": _aisle_of(m),
-        "power": _power_of(m),
-        "tire": _tire_of(m),
-        "raw": m,
+        "name": "Unknown",
+        "code": None,
+        "power": None,
+        "capacity_lbs": None,
+        "lift_height_in": None,
+        "aisle_in": None,
+        "tire_type": None,
     }
 
-def allowed_models_block(models: List[Dict[str, Any]]) -> str:
-    if not models:
-        return "_No candidate models found._"
-    lines: List[str] = []
-    for m in models:
+def allowed_models_block(allowed: List[Any]) -> str:
+    """
+    Renders a compact markdown block for 'allowed' models.
+    Handles either dict rows or string codes/names safely.
+    """
+    if not allowed:
+        return "_No matching models found._"
+
+    lines = ["**Allowed Models:**"]
+    for m in allowed:
         meta = model_meta_for(m)
-        cap   = f'{int(meta["capacity_lbs"]):,} lb' if meta.get("capacity_lbs") else "—"
-        ht    = f'{int(meta["lift_height_in"])} in' if meta.get("lift_height_in") else "—"
-        aisle = f'{int(meta["aisle_in"])} in'      if meta.get("aisle_in") else "—"
-        pwr   = (meta.get("power") or "—").title()
-        tire  = (meta.get("tire") or "—").title()
-        lines.append(f'- **{meta["name"]}** — {cap}, Lift {ht}, Aisle {aisle}, Power {pwr}, Tires {tire}')
+        name = meta.get("name") or "N/A"
+        cap  = meta.get("capacity_lbs")
+        pwr  = meta.get("power")
+        tire = meta.get("tire_type")
+
+        bits = [name]
+        # Add small, useful tags when present
+        tags = []
+        if cap:   tags.append(f"{int(cap):,} lb")
+        if pwr:   tags.append(pwr.upper())
+        if tire:  tags.append(tire)
+        if tags:
+            bits.append(f"({', '.join(tags)})")
+
+        lines.append(f"- {' '.join(bits)}")
     return "\n".join(lines)
 
 def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
