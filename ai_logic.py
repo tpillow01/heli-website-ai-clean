@@ -10,9 +10,9 @@ from __future__ import annotations
 # ─────────────────────────────────────────────────────────────────────────────
 # Imports / logging / typing
 # ─────────────────────────────────────────────────────────────────────────────
-import os, json, re, logging, hashlib
+import os, json, re, logging
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Iterable
 
 log = logging.getLogger("ai_logic")
 if not log.handlers:
@@ -53,7 +53,7 @@ AISLE_KEYS = [
 POWER_KEYS = ["Power","power","Fuel","fuel","Drive","Drive Type","Power Type","PowerType"]
 TYPE_KEYS  = ["Type","Category","Segment","Class","Class/Type","Truck Type"]
 
-# Intent patterns
+# Intent patterns for catalog mode
 _TIRES_PAT   = re.compile(r"\b(tires?|tyres?|tire\s*types?)\b", re.I)
 _ATTACH_PAT  = re.compile(r"\b(attach(ment)?s?)\b", re.I)
 _OPTIONS_PAT = re.compile(r"\b(option|options)\b", re.I)
@@ -131,6 +131,12 @@ def _normalize_aisle_in(row: Dict[str,Any]) -> Optional[float]:
             v = _num(s); return v
     return None
 
+def _is_reach_or_vna(row: Dict[str,Any]) -> bool:
+    t = (_text_from_keys(row, TYPE_KEYS) + " " + str(row.get("Model","")) + " " + str(row.get("Model Name",""))).lower()
+    if any(word in t for word in ["reach","vna","order picker","turret"]):
+        return True
+    return bool(re.search(r"\b(cqd|rq|vna)\b", t))
+
 def _is_three_wheel(row: Dict[str,Any]) -> bool:
     drive = (_lower(row.get("Drive Type")) + " " + _lower(row.get("Drive")))
     model = (_lower(row.get("Model")) + " " + _lower(row.get("Model Name")))
@@ -160,48 +166,6 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
         if m.get(k):
             return str(m[k]).strip()
     return "N/A"
-
-def model_meta_for(m: Any) -> Dict[str, Any]:
-    """
-    Returns a consistent metadata dict for a model row or a string code.
-    Provides both 'tire_type' and 'tire' (alias) keys to satisfy older callers.
-    """
-    if isinstance(m, dict):
-        tire_val = _tire_of(m) or None
-        return {
-            "name": _safe_model_name(m),
-            "code": str(m.get("Code") or m.get("Model") or m.get("Model Name") or m.get("code") or "").strip() or None,
-            "power": _power_of(m) or None,
-            "capacity_lbs": _capacity_of(m),
-            "lift_height_in": _height_of(m),
-            "aisle_in": _aisle_of(m),
-            "tire_type": tire_val,
-            "tire": tire_val,  # <- alias to avoid KeyError in legacy code
-        }
-
-    if isinstance(m, (str, int, float)):
-        s = str(m).strip()
-        return {
-            "name": s,
-            "code": s,
-            "power": None,
-            "capacity_lbs": None,
-            "lift_height_in": None,
-            "aisle_in": None,
-            "tire_type": None,
-            "tire": None,
-        }
-
-    return {
-        "name": "Unknown",
-        "code": None,
-        "power": None,
-        "capacity_lbs": None,
-        "lift_height_in": None,
-        "aisle_in": None,
-        "tire_type": None,
-        "tire": None,
-    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Catalog loader (Excel) — robust to column name variations
@@ -243,7 +207,6 @@ def _rows_from_df() -> List[Dict[str, Any]]:
     df = _load_catalog_df()
     if df is None:
         return []
-    # Normalize column names
     cols_map = _normalize_cols(list(df.columns))
     def col(name_variants: List[str]) -> Optional[str]:
         for v in name_variants:
@@ -467,7 +430,6 @@ def render_sections_markdown(result: Dict[str, List[Dict[str,str]]]) -> str:
         section_lines: List[str] = []
         for item in arr:
             if not isinstance(item, dict):
-                # defensive guard against accidental string entries
                 continue
             name = (item.get("name") or "").strip()
             if not name or name.lower() in seen:
@@ -521,7 +483,6 @@ def render_catalog_sections(user_text: str, max_per_section: int = 6) -> str:
     intent = parse_catalog_intent(q)
     which = intent["which"]
     if intent["list_all"] and which in ("tires","attachments","options","telemetry"):
-        # Telemetry is a subset of options
         if which == "telemetry":
             options = load_options()
             telem = {n:b for n,b in options.items() if _TELEM_PAT.search((n + " " + b).lower())}
@@ -531,7 +492,6 @@ def render_catalog_sections(user_text: str, max_per_section: int = 6) -> str:
         return render_sections_markdown({which: rows})
 
     picks = recommend_options_from_sheet(q, limit=max_per_section)
-    # Only include sections that have items (function already does so)
     return render_sections_markdown(picks)
 
 def generate_catalog_mode_response(user_text: str) -> str:
@@ -559,11 +519,11 @@ def _load_models_cache() -> List[Dict[str, Any]]:
 
 def model_meta_for(m: Any) -> Dict[str, Any]:
     """
-    Returns a minimal, consistent metadata dict for a model.
-    Accepts either a full row dict or a string code/name.
+    Returns a consistent metadata dict for a model row or a string code.
+    Provides both 'tire_type' and 'tire' (alias) keys to satisfy older callers.
     """
-    # If we already have a dict-like row, use it directly.
     if isinstance(m, dict):
+        tire_val = _tire_of(m) or None
         return {
             "name": _safe_model_name(m),
             "code": str(m.get("Code") or m.get("Model") or m.get("Model Name") or m.get("code") or "").strip() or None,
@@ -571,10 +531,9 @@ def model_meta_for(m: Any) -> Dict[str, Any]:
             "capacity_lbs": _capacity_of(m),
             "lift_height_in": _height_of(m),
             "aisle_in": _aisle_of(m),
-            "tire_type": _tire_of(m) or None,
+            "tire_type": tire_val,
+            "tire": tire_val,
         }
-
-    # If it's a string (common when select_models_for_question returns codes)
     if isinstance(m, (str, int, float)):
         s = str(m).strip()
         return {
@@ -585,9 +544,8 @@ def model_meta_for(m: Any) -> Dict[str, Any]:
             "lift_height_in": None,
             "aisle_in": None,
             "tire_type": None,
+            "tire": None,
         }
-
-    # Fallback (unexpected types)
     return {
         "name": "Unknown",
         "code": None,
@@ -596,44 +554,59 @@ def model_meta_for(m: Any) -> Dict[str, Any]:
         "lift_height_in": None,
         "aisle_in": None,
         "tire_type": None,
+        "tire": None,
     }
 
-def allowed_models_block(allowed: List[Any]) -> str:
+def allowed_models_block(allowed: Iterable) -> str:
     """
-    Renders a compact markdown block for 'allowed' models.
-    Handles either dict rows or string codes/names safely.
+    Human-readable list your UI shows. Accepts dicts or strings.
     """
+    allowed = list(allowed or [])
     if not allowed:
         return "_No matching models found._"
-
     lines = ["**Allowed Models:**"]
-    for m in allowed:
+    for m in allowed[:15]:
         meta = model_meta_for(m)
-        name = meta.get("name") or "N/A"
-        cap  = meta.get("capacity_lbs")
-        pwr  = meta.get("power")
-        tire = meta.get("tire_type")
-
-        bits = [name]
-        # Add small, useful tags when present
-        tags = []
-        if cap:   tags.append(f"{int(cap):,} lb")
-        if pwr:   tags.append(pwr.upper())
-        if tire:  tags.append(tire)
-        if tags:
-            bits.append(f"({', '.join(tags)})")
-
-        lines.append(f"- {' '.join(bits)}")
+        code  = meta.get("code") or meta.get("name") or "N/A"
+        cap   = meta.get("capacity_lbs")
+        cap_txt = f"{int(cap):,} lb" if isinstance(cap, (int, float)) and cap else "n/a"
+        power = (meta.get("power") or "n/a")
+        lines.append(f"- {code} ({cap_txt}, {power.upper() if isinstance(power, str) else power})")
     return "\n".join(lines)
 
-def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Hook for downstream hard filters; currently passthrough."""
-    return models
+# --- Query parsing for recommendation ---------------------------------------
+_CAP_RE = re.compile(r"\b(\d[\d,\.]*)\s*(k|lb|lbs|pound|pounds)?\b", re.I)
 
-def _soft_contains(hay: str, needles: List[str]) -> bool:
-    h = (hay or "").lower()
-    return any((n or "").lower() in h for n in needles if n)
+def _parse_capacity_lbs(user_q: str) -> Optional[float]:
+    q = (user_q or "")
+    m = _CAP_RE.search(q)
+    if not m:
+        m2 = re.search(r"\b(\d+(?:\.\d+)?)k\b", q, re.I)
+        if m2:
+            try:
+                return float(m2.group(1)) * 1000.0
+            except Exception:
+                return None
+        return None
+    num, unit = m.group(1), (m.group(2) or "")
+    try:
+        val = float(num.replace(",", ""))
+    except Exception:
+        return None
+    if unit.lower() == "k":
+        val *= 1000.0
+    return val
 
+def _wants_electric(user_q: str) -> bool:
+    return bool(re.search(r"\b(ev|electric|lithium|li-ion|battery)\b", user_q or "", re.I))
+
+def _wants_all_terrain(user_q: str) -> bool:
+    return bool(re.search(r"\b(all[-\s]?terrain|rough\s*terrain|yard|outdoor)\b", user_q or "", re.I))
+
+def _wants_indoor_epoxy(user_q: str) -> bool:
+    return bool(re.search(r"\b(indoor|warehouse|epoxy|polished)\b", user_q or "", re.I))
+
+# --- scoring & selection -----------------------------------------------------
 def _model_score(user_q: str, row: Dict[str, Any]) -> float:
     ql = (user_q or "").lower()
     score = 0.0
@@ -643,146 +616,86 @@ def _model_score(user_q: str, row: Dict[str, Any]) -> float:
     pwr   = _power_of(row) or ""
     tire  = _tire_of(row) or ""
 
-    # Capacity hints
-    if any(k in ql for k in ("lb","lbs","pound","ton","capacity","lift")):
-        score += min(cap / 10000.0, 2.0)
+    want_cap = _parse_capacity_lbs(user_q)
+    if want_cap:
+        if cap >= want_cap:
+            score += 3.0
+            score += max(0.0, 1.5 - abs(cap - want_cap) / max(1.0, want_cap))
+        else:
+            score -= 2.0 * (1.0 + (want_cap - cap) / max(1.0, want_cap))
 
-    # Aisle / tight
-    if any(k in ql for k in ("aisle","tight","narrow","vna","right-angle")):
-        score += (1.0 if aisle and aisle < 100 else 0.0)
-
-    # Height
-    if any(k in ql for k in ("height","stack","racking","high")):
-        score += min(h_in / 300.0, 1.5)
-
-    # Power/fuel matches
-    if _soft_contains(pwr, ["electric","lithium","diesel","lpg","gas"]):
-        if _soft_contains(ql, ["electric","lithium"]) and "electric" in pwr:
-            score += 1.0
-        if _soft_contains(ql, ["diesel"]) and "diesel" in pwr:
-            score += 1.0
-        if _soft_contains(ql, ["lpg","gas","propane"]) and ("lpg" in pwr or "gas" in pwr or "propane" in pwr):
-            score += 1.0
-
-    # Tires (indoor/outdoor)
-    if any(k in ql for k in ("indoor","warehouse","epoxy","polished")):
-        if "cushion" in tire:
-            score += 0.8
-    if any(k in ql for k in ("outdoor","yard","gravel","rough","debris")):
-        if "pneumatic" in tire or "super elastic" in tire:
-            score += 1.0
-
-    # Reach/VNA preference in tight aisles
-    name_text = (_lower(row.get("Model","")) + " " + _lower(row.get("Model Name","")))
-    if any(k in ql for k in ("reach","order picker","vna","turret")):
-        if any(w in name_text for w in ("reach","rq","vna","order","turret")):
+    if _wants_electric(user_q):
+        if "electric" in pwr or "lithium" in pwr:
             score += 2.0
+        else:
+            score -= 1.5
+
+    if _wants_indoor_epoxy(user_q):
+        if "cushion" in tire: score += 1.2
+        if "non" in tire and "mark" in tire: score += 1.0
+        if "pneumatic" in tire: score -= 0.8
+
+    if _wants_all_terrain(user_q):
+        if "pneumatic" in tire or "super elastic" in tire: score += 1.6
+        if "cushion" in tire: score -= 1.0
+
+    if re.search(r"\baisle\b", ql) and aisle: score += 0.6
+    if re.search(r"\bheight|lift\b", ql) and h_in: score += 0.6
+
+    if re.search(r"(narrow|very\s*tight|vna|reach)", ql) and _is_reach_or_vna(row):
+        score += 1.0
 
     return score
 
-def select_models_for_question(user_q: str, k: int = 5) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    Returns (hits, allowed_block_markdown).
-    """
-    models = filter_models(_load_models_cache())
-    if not models:
-        return [], "_No candidate models found._"
-    scored: List[Tuple[float, Dict[str,Any]]] = []
+def _rank_models(user_q: str, k: int = 5) -> List[Dict[str, Any]]:
+    models = _load_models_cache()
+    if not isinstance(models, list):
+        return []
+    scored: List[Tuple[float, Dict[str, Any]]] = []
     for m in models:
+        if not isinstance(m, dict):
+            continue
         s = _model_score(user_q, m)
         scored.append((s, m))
     scored.sort(key=lambda t: t[0], reverse=True)
-    hits = [m for _, m in scored[: max(1, k)]]
-    return hits, allowed_models_block(hits)
+    return [m for s, m in scored[: max(1, k)]]
+
+def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Hook for downstream hard filters; currently passthrough."""
+    return models
+
+def select_models_for_question(user_q: str, k: int = 5) -> List[Dict[str, Any]]:
+    """
+    RETURN LIST ONLY (compat with heli_backup_ai.py which calls allowed_models_block separately).
+    """
+    ranked = _rank_models(user_q, k=k)
+    return ranked
 
 def _truck_class_of(m: Any) -> Optional[str]:
-    """
-    Best-effort truck class/category text from a model row.
-    Uses your existing TYPE_KEYS + _text_from_keys helper.
-    """
     if isinstance(m, dict):
         txt = _text_from_keys(m, TYPE_KEYS)
         return txt.strip() or None
     return None
 
-
 def top_pick_meta(user_q: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    COMPATIBILITY VERSION — returns exactly a 3-tuple expected by heli_backup_ai.py:
-      (top_code, top_class, top_power)
-
-    - Tolerates select_models_for_question returning either (hits, allowed) or just a list.
-    - Never KeyErrors; uses safe fallbacks.
+    Returns exactly (top_code, top_class, top_power) as heli_backup_ai.py expects.
     """
-    sel = select_models_for_question(user_q, k=5)
-
-    # Accept either (hits, allowed) or just allowed list
-    try:
-        _, allowed = sel  # typical shape
-    except Exception:
-        allowed = sel if isinstance(sel, list) else []
-
+    allowed = select_models_for_question(user_q, k=5)
     if not allowed:
         return (None, None, None)
-
-    # Use the first allowed as “top”
-    m = allowed[0]
-    meta = model_meta_for(m)
-
-    code = meta.get("code") or meta.get("name") or None
-    truck_class = _truck_class_of(m) or meta.get("class") or None
+    top = allowed[0]
+    meta = model_meta_for(top)
+    code = meta.get("code") or meta.get("name")
+    klass = _truck_class_of(top) or None
     power = meta.get("power")
     if isinstance(power, str) and power:
         power = power.upper()
-
-    return (code, truck_class, power)
-
-
-def top_pick_meta_dict(user_q: str) -> Dict[str, Any]:
-    """
-    Optional richer version, if you want it elsewhere:
-    returns a dictionary with safe keys.
-    """
-    sel = select_models_for_question(user_q, k=5)
-    try:
-        _, allowed = sel
-    except Exception:
-        allowed = sel if isinstance(sel, list) else []
-
-    if not allowed:
-        return {
-            "name": "No clear top pick",
-            "code": None,
-            "power": None,
-            "capacity_lbs": None,
-            "lift_height_in": None,
-            "aisle_in": None,
-            "tire": None,
-            "tire_type": None,
-            "class": None,
-            "reason": "No models matched the request.",
-        }
-
-    m = allowed[0]
-    meta = model_meta_for(m)
-
-    return {
-        "name": meta.get("name") or "N/A",
-        "code": meta.get("code"),
-        "power": meta.get("power"),
-        "capacity_lbs": meta.get("capacity_lbs"),
-        "lift_height_in": meta.get("lift_height_in"),
-        "aisle_in": meta.get("aisle_in"),
-        "tire": meta.get("tire") or meta.get("tire_type"),
-        "tire_type": meta.get("tire_type") or meta.get("tire"),
-        "class": _truck_class_of(m) or meta.get("class"),
-        "reason": f"Top match for: {user_q[:120]}...",
-    }
+    return (code, klass, power)
 
 def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]] = None) -> str:
     """
     Small prompt/context helper used by heli_backup_ai.py.
-    You can enrich this with account/industry later.
     """
     acct_line = ""
     if acct and isinstance(acct, dict):
@@ -791,13 +704,13 @@ def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]] = None
             acct_line = f"\nAccount: {name}"
     return f"User question: {user_q.strip()}{acct_line}\nProvide a concise, practical forklift recommendation with reasons."
 
-# Debug convenience for testing in REPL
+# Debug convenience
 def debug_parse_and_rank(q: str) -> str:
     picks = recommend_options_from_sheet(q, limit=6)
     return render_sections_markdown(picks)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Legacy-friendly exports (some code imports these symbols explicitly)
+# Legacy-friendly helpers
 # ─────────────────────────────────────────────────────────────────────────────
 def _is_attachment(name: str) -> bool:
     nl = _lower(name)
@@ -806,9 +719,6 @@ def _is_attachment(name: str) -> bool:
         "fork extension","extensions","push/ pull","push/pull",
         "slip-sheet","slipsheet","bale","carton","drum","bag push","load stabilizer"
     ))
-
-def _num_from_keys_legacy(row: Dict[str,Any], keys: List[str]) -> Optional[float]:
-    return _num_from_keys(row, keys)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # __all__ for explicit imports elsewhere
