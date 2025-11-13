@@ -787,6 +787,71 @@ def _build_peer_comparison_lines(top_model_code: str, K: int = 4) -> list[str]:
     lines.append("We can demo against these peers on your dock to validate turning, lift, and cycle times.")
     return lines
 
+def _extract_capacity_lbs(text: str) -> int | None:
+    """
+    Pull a desired capacity like '5,000 lb' or '5000 lbs' out of the user text.
+    Returns an integer (e.g. 5000) or None if not found.
+    """
+    if not text:
+        return None
+    t = text.lower().replace(",", "")
+    m = re.search(r"(\d{3,5})\s*(?:lb|lbs|pound|pounds)", t)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+def _heuristic_tire_and_accessories(text: str):
+    """
+    Fallback picks if the Excel-based recommend_options_from_sheet(...) comes back empty.
+    Uses simple keyword heuristics based on the environment in the question/context.
+    Returns: (tire_line: str|None, attachments: [str], options: [str])
+    """
+    t = (text or "").lower()
+    tire = None
+    attachments = []
+    options = []
+
+    # Indoor / epoxy / finished floors -> NM Cushion
+    if any(w in t for w in ["epoxy", "polished", "indoor", "warehouse", "finished floor", "smooth floor"]):
+        tire = "NM Cushion — Non-marking cushion tires to protect indoor epoxy/finished floors."
+        options += [
+            "LED Blue Pedestrian Light — Projects a blue spot ahead of the truck to warn pedestrians.",
+            "Red Zone Light — Creates a visible safety halo around the forklift.",
+            "Full OPS — Operator Presence System that disables travel/lift when the operator leaves the seat.",
+        ]
+
+    # Heavy pedestrian traffic
+    if any(w in t for w in ["pedestrian", "foot traffic", "people", "busy aisles"]):
+        options.append("Backup Handle with Horn Button — Safer reversing posture with easy horn access.")
+
+    # Cold storage / freezer
+    if any(w in t for w in ["freezer", "cold storage", "refrigerated", "sub-zero", "below 0"]):
+        options.append("Cold Storage Package — Heaters and seals rated for freezer applications.")
+
+    # Outdoor / yard / rough
+    if any(w in t for w in ["outdoor", "yard", "gravel", "lot", "dock ramp", "rough"]):
+        if not tire:
+            tire = "Pneumatic — Full-size pneumatic tires for mixed indoor/outdoor and dock work."
+
+    # Attachments: clamp-type work
+    if any(w in t for w in ["paper roll", "paper", "bale", "clamp", "roll clamp"]):
+        attachments.append("Paper/Bale Clamp — For handling rolls or baled materials.")
+
+    # Attachments: generic warehouse upgrades
+    if any(w in t for w in ["pallet", "skid", "racking", "rack"]):
+        attachments.append("Sideshift Fork Positioner — Move and space forks from the seat for faster pallet handling.")
+
+    # Make lists unique while preserving order
+    seen = set()
+    attachments = [a for a in attachments if not (a in seen or seen.add(a))]
+    seen = set()
+    options = [o for o in options if not (o in seen or seen.add(o))]
+
+    return tire, attachments, options
+
 # ─────────────────────────────────────────────────────────────────────────
 # Recommendation flow helper
 # ─────────────────────────────────────────────────────────────────────────
@@ -794,16 +859,45 @@ def run_recommendation_flow(user_q: str) -> str:
     if not client:
         return ("AI is not configured on this server. "
                 "Set OPENAI_API_KEY to enable recommendations.")
+
+    # 1) Build context from accounts/models (same as before)
     acct = find_account_by_name(user_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
 
-    # Removed stray ellipsis; proceed directly to model selection
+    # 2) Ask ai_logic which HELI models are allowed for this use case
     hits, allowed = select_models_for_question(user_q, k=5)
     allowed_block = allowed_models_block(allowed)
-    print(f"[recommendation] allowed models: {allowed}")
 
-    top_pick_code = allowed[0] if allowed else None
+    # ---- Normalize allowed list to plain model codes (handles dicts or strings) ----
+    def _code_from_entry(e):
+        if isinstance(e, dict):
+            return (e.get("model") or e.get("Model") or e.get("Model Name") or "").strip()
+        return str(e or "").strip()
 
+    allowed_codes = [c for c in (_code_from_entry(a) for a in (allowed or [])) if c]
+
+    # Capacity-aware re-ordering so 5,000 lb comes before 6,000 lb if requested
+    desired_cap = _extract_capacity_lbs(user_q)
+    if desired_cap and allowed_codes:
+        scored = []
+        for code in allowed_codes:
+            mrec = _find_heli_model_by_code(code)
+            cap = mrec.get("_capacity_lb") if mrec else None
+            if cap is None and mrec is not None:
+                cap = _num_from_text(mrec.get("capacity"))
+            if cap is None:
+                score = float("inf")  # no capacity -> push to the bottom
+            else:
+                score = abs(cap - desired_cap)
+            scored.append((score, code))
+        scored.sort(key=lambda x: x[0])
+        allowed_codes = [c for _, c in scored]
+
+    print(f"[recommendation] allowed models: {allowed_codes}")
+
+    top_pick_code = allowed_codes[0] if allowed_codes else None
+
+    # 3) System prompt for the LLM (same structure you had before)
     system_prompt = {
         "role": "system",
         "content": (
@@ -815,7 +909,7 @@ def run_recommendation_flow(user_q: str) -> str:
             "Capacity:\n"
             "Tire Type:\n"
             "Attachments:\n"
-            "Options:\n"                    # <-- NEW: Options placed right after Attachments
+            "Options:\n"
             "Comparison:\n"
             "Sales Pitch Techniques:\n"
             "Common Objections:\n"
@@ -835,9 +929,10 @@ def run_recommendation_flow(user_q: str) -> str:
     messages = [
         system_prompt,
         {"role": "system", "content": allowed_block},
-        {"role": "user",   "content": prompt_ctx}
+        {"role": "user",   "content": prompt_ctx},
     ]
 
+    # 4) Call OpenAI to draft the answer
     try:
         t0 = time.perf_counter()
 
@@ -856,41 +951,50 @@ def run_recommendation_flow(user_q: str) -> str:
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             messages=messages,
             max_tokens=max_tokens_val,
-            temperature=temperature_val
+            temperature=temperature_val,
         )
         duration_ms = int((time.perf_counter() - t0) * 1000)
         log_model_usage(
             resp, endpoint="/chat", action="chat_reply",
-            duration_ms=duration_ms, extra={"who": session.get("username")}
+            duration_ms=duration_ms, extra={"who": session.get("username")},
         )
-        ai_reply = resp.choices[0].message.content.strip()
+        ai_reply = (resp.choices[0].message.content or "").strip()
     except Exception as e:
         ai_reply = f"❌ Internal error: {e}"
 
-    # Post-processing & formatting
-    ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
-    ai_reply = _unify_model_mentions(ai_reply, allowed) if '_unify_model_mentions' in globals() else ai_reply
+    # 5) Post-processing & formatting (keep your existing behavior)
+    ai_reply = _enforce_allowed_models(ai_reply, set(allowed_codes))
+    ai_reply = _unify_model_mentions(ai_reply, allowed_codes) if '_unify_model_mentions' in globals() else ai_reply
     ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
     ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
     ai_reply = _tidy_formatting(ai_reply) if '_tidy_formatting' in globals() else ai_reply
 
-    # === Enforce Tire / Attachments / Options from Excel (keeps Sales Pitch unchanged) ===
+    # 6) Enforce Tire / Attachments / Options from Excel,
+    #    with an environment-based fallback if Excel has no recs.
     try:
         opt_rec = recommend_options_from_sheet(user_q) or {}
     except Exception:
         opt_rec = {}
 
-    # Tire Type
+    env_text = f"{user_q}\n{prompt_ctx}"
+    heur_tire, heur_atts, heur_opts = _heuristic_tire_and_accessories(env_text)
+
+    # ---- Tire Type ----
     tire_bullets = []
     tire = opt_rec.get("tire")
     if tire and tire.get("name"):
         benefit = (tire.get("benefit") or "").strip()
         tire_bullets.append(f"{tire['name']} — {benefit}" if benefit else tire["name"])
-    else:
-        tire_bullets.append("Not specified")
+
+    if not tire_bullets:
+        if heur_tire:
+            tire_bullets = [heur_tire]
+        else:
+            tire_bullets = ["Not specified"]
+
     ai_reply = _inject_section(ai_reply, "Tire Type", tire_bullets)
 
-    # Attachments (up to 5) — from sheet's attachment recommendations
+    # ---- Attachments (up to 5) ----
     attach_rows = opt_rec.get("attachments") or opt_rec.get("others") or []
     attach_bullets = []
     for row in attach_rows[:5]:
@@ -899,11 +1003,16 @@ def run_recommendation_flow(user_q: str) -> str:
             continue
         ben = (row.get("benefit") or "").strip()
         attach_bullets.append(f"{nm} — {ben}" if ben else nm)
+
+    if not attach_bullets and heur_atts:
+        attach_bullets = heur_atts[:5]
+
     if not attach_bullets:
         attach_bullets = ["Not specified"]
+
     ai_reply = _inject_section(ai_reply, "Attachments", attach_bullets)
 
-    # Options (non-attachment options, up to 5) — INSERTED RIGHT AFTER ATTACHMENTS
+    # ---- Options (up to 5) ----
     option_rows = opt_rec.get("options") or []
     option_bullets = []
     for row in option_rows[:5]:
@@ -912,11 +1021,16 @@ def run_recommendation_flow(user_q: str) -> str:
             continue
         ben = (row.get("benefit") or "").strip()
         option_bullets.append(f"{nm} — {ben}" if ben else nm)
+
+    if not option_bullets and heur_opts:
+        option_bullets = heur_opts[:5]
+
     if not option_bullets:
         option_bullets = ["Not specified"]
+
     ai_reply = _inject_section(ai_reply, "Options", option_bullets)
 
-    # Comparison injection (unchanged)
+    # 7) Comparison injection (unchanged)
     if top_pick_code:
         peer_lines = _build_peer_comparison_lines(top_pick_code, K=4)
         ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)

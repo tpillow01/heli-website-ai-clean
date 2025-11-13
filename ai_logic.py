@@ -932,25 +932,41 @@ def filter_models(models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Hook for downstream hard filters; currently passthrough."""
     return models
 
-
 def select_models_for_question(
     user_q: str, k: int = 5
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Returns (hits, allowed_codes) for compatibility with heli_backup_ai.py.
 
-    - hits:   ranked list of model dicts
-    - allowed_codes: list of model codes (strings) that are permitted for this answer.
-                     heli_backup_ai.py will pass `set(allowed_codes)` into
-                     _enforce_allowed_models.
+    - hits: ranked list of model dicts AFTER capacity filtering
+    - allowed_codes: list of model codes (strings) that heli_backup_ai.py
+      will pass into _enforce_allowed_models (it does set(allowed_codes)).
     """
-    # Ranked model dicts
+    # 1) Start with ranked models
     hits = _rank_models(user_q, k=k)
 
-    # Apply any hard filters (currently passthrough, but keep the hook)
+    # 2) If the user asked for a specific capacity, enforce a band around it
+    want_cap = _parse_capacity_lbs(user_q)
+    if want_cap:
+        # Keep only models within ±10% of requested capacity
+        lo = want_cap * 0.9
+        hi = want_cap * 1.1
+        filtered_by_cap: List[Dict[str, Any]] = []
+        for m in hits:
+            cap = _capacity_of(m) or 0.0
+            if cap <= 0:
+                continue
+            if lo <= cap <= hi:
+                filtered_by_cap.append(m)
+
+        # Only overwrite if we actually found matches in the band
+        if filtered_by_cap:
+            hits = filtered_by_cap
+
+    # 3) Apply any other hard filters (currently passthrough)
     filtered = filter_models(hits)
 
-    # Build a list of hashable model codes for enforcement
+    # 4) Build list of hashable model codes for enforcement
     allowed_codes: List[str] = []
     for m in filtered:
         meta = model_meta_for(m)
