@@ -695,15 +695,55 @@ def select_models_for_question(user_q: str, k: int = 5) -> Tuple[List[Dict[str, 
     hits = [m for _, m in scored[: max(1, k)]]
     return hits, allowed_models_block(hits)
 
-def top_pick_meta(user_q: str) -> Dict[str, Any]:
+def _truck_class_of(m: Any) -> Optional[str]:
     """
-    Returns a small dict describing the single best-matching model.
-    Tolerates different return shapes from select_models_for_question and
-    never assumes keys exist (uses .get with fallbacks).
+    Best-effort truck class/category text from a model row.
+    Uses your existing TYPE_KEYS + _text_from_keys helper.
+    """
+    if isinstance(m, dict):
+        txt = _text_from_keys(m, TYPE_KEYS)
+        return txt.strip() or None
+    return None
+
+
+def top_pick_meta(user_q: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    COMPATIBILITY VERSION — returns exactly a 3-tuple expected by heli_backup_ai.py:
+      (top_code, top_class, top_power)
+
+    - Tolerates select_models_for_question returning either (hits, allowed) or just a list.
+    - Never KeyErrors; uses safe fallbacks.
     """
     sel = select_models_for_question(user_q, k=5)
 
-    # Tolerate either (hits, allowed) or just a list of allowed
+    # Accept either (hits, allowed) or just allowed list
+    try:
+        _, allowed = sel  # typical shape
+    except Exception:
+        allowed = sel if isinstance(sel, list) else []
+
+    if not allowed:
+        return (None, None, None)
+
+    # Use the first allowed as “top”
+    m = allowed[0]
+    meta = model_meta_for(m)
+
+    code = meta.get("code") or meta.get("name") or None
+    truck_class = _truck_class_of(m) or meta.get("class") or None
+    power = meta.get("power")
+    if isinstance(power, str) and power:
+        power = power.upper()
+
+    return (code, truck_class, power)
+
+
+def top_pick_meta_dict(user_q: str) -> Dict[str, Any]:
+    """
+    Optional richer version, if you want it elsewhere:
+    returns a dictionary with safe keys.
+    """
+    sel = select_models_for_question(user_q, k=5)
     try:
         _, allowed = sel
     except Exception:
@@ -719,8 +759,8 @@ def top_pick_meta(user_q: str) -> Dict[str, Any]:
             "aisle_in": None,
             "tire": None,
             "tire_type": None,
+            "class": None,
             "reason": "No models matched the request.",
-            "notes": None,
         }
 
     m = allowed[0]
@@ -733,11 +773,10 @@ def top_pick_meta(user_q: str) -> Dict[str, Any]:
         "capacity_lbs": meta.get("capacity_lbs"),
         "lift_height_in": meta.get("lift_height_in"),
         "aisle_in": meta.get("aisle_in"),
-        # Use either key; both exist now, but stay defensive:
         "tire": meta.get("tire") or meta.get("tire_type"),
         "tire_type": meta.get("tire_type") or meta.get("tire"),
-        "reason": f"Top match based on your request: {user_q[:120]}...",
-        "notes": None,
+        "class": _truck_class_of(m) or meta.get("class"),
+        "reason": f"Top match for: {user_q[:120]}...",
     }
 
 def generate_forklift_context(user_q: str, acct: Optional[Dict[str, Any]] = None) -> str:
