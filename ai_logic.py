@@ -467,11 +467,48 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
 
     return result
 
+def _coerce_item(x: Any) -> Dict[str, str]:
+    """Turn plain strings into {'name','benefit'} dicts. Pass dicts through."""
+    if isinstance(x, dict):
+        # Ensure keys exist
+        return {"name": str(x.get("name","")).strip(),
+                "benefit": str(x.get("benefit","")).strip()}
+    # Plain string -> look up benefit if we can
+    name = str(x).strip()
+    ben = option_benefit(name) if name else ""
+    return {"name": name, "benefit": ben}
+
+def _coerce_list(items: Any) -> List[Dict[str, str]]:
+    """Ensure a list of dicts; tolerate None/singletons/strings."""
+    if items is None:
+        return []
+    if isinstance(items, (str, dict)):
+        return [_coerce_item(items)]
+    try:
+        return [_coerce_item(i) for i in items]
+    except Exception:
+        # Last-resort: stringify the entire object
+        return [_coerce_item(str(items))]
+
+def normalize_catalog_result(result: Any) -> Dict[str, List[Dict[str, str]]]:
+    """Make sure every section maps to a list of {'name','benefit'} dicts."""
+    out: Dict[str, List[Dict[str, str]]] = {}
+    if not isinstance(result, dict):
+        # If some caller passed a raw list, treat it as 'options'
+        out["options"] = _coerce_list(result)
+        return out
+    for key in ("tires","attachments","options","telemetry"):
+        out[key] = _coerce_list(result.get(key))
+    # Drop empty sections for cleanliness
+    return {k: v for k, v in out.items() if v}
+
 def render_sections_markdown(result: dict) -> str:
     """
     Render only sections that have items. Skips empty/absent sections.
     Sections: 'tires', 'attachments', 'options', 'telemetry'
     """
+    result = normalize_catalog_result(result)  # ← defensive: coerce strings -> dicts
+
     order = ["tires", "attachments", "options", "telemetry"]
     labels = {"tires": "Tires", "attachments": "Attachments", "options": "Options", "telemetry": "Telemetry"}
 
@@ -484,13 +521,8 @@ def render_sections_markdown(result: dict) -> str:
         seen = set()
         section_lines: List[str] = []
         for item in arr:
-            # Safe access even if a caller gives us raw strings by mistake
-            if isinstance(item, str):
-                name, ben = item, ""
-            else:
-                name = (item.get("name") or "").strip()
-                ben  = (item.get("benefit") or "").strip().replace("\n", " ")
-
+            name = (item.get("name") or "").strip()
+            ben  = (item.get("benefit") or "").strip().replace("\n", " ")
             if not name or name.lower() in seen:
                 continue
             seen.add(name.lower())
@@ -501,6 +533,13 @@ def render_sections_markdown(result: dict) -> str:
             lines.extend(section_lines)
 
     return "\n".join(lines) if lines else "(no matching items)"
+
+def render_catalog_sections(result: dict, **kwargs) -> str:
+    """
+    Backwards-compatible wrapper used by older routes.
+    Accepts and ignores unexpected kwargs (e.g., max_per_section) safely.
+    """
+    return render_sections_markdown(result)
 
 def render_catalog_sections(result: dict, **kwargs) -> str:
     """
@@ -530,6 +569,7 @@ def list_all_from_excel(section: str) -> List[Dict[str,str]]:
 
 def generate_catalog_mode_response(user_q: str, limit: int = 6) -> str:
     picks = recommend_options_from_sheet(user_q, limit=limit)
+    picks = normalize_catalog_result(picks)  # ← extra safety
     return render_sections_markdown(picks)
 
 # ─────────────────────────────────────────────────────────────────────────────
