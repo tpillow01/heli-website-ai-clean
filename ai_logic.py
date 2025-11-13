@@ -404,6 +404,8 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
             ranked = _drop_ac_when_cold(ranked, (user_q or "").lower())
             ranked = _prioritize_lighting(ranked, (user_q or "").lower())
         return ranked
+    
+    result = _normalize_catalog_result(result)
 
     result: Dict[str, List[Dict[str,Any]]] = {}
 
@@ -459,34 +461,67 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Renderer
 # ─────────────────────────────────────────────────────────────────────────────
+def _as_item(x: Any) -> Dict[str, str]:
+    """Coerce a list element into {'name','benefit'}."""
+    if isinstance(x, dict):
+        return {
+            "name": str(x.get("name", "")).strip(),
+            "benefit": str(x.get("benefit", "")).strip(),
+        }
+    if isinstance(x, str):
+        # split on em dash or hyphen if present, keep it forgiving
+        parts = [p.strip() for p in re.split(r"\s+—\s+|\s+-\s+", x, maxsplit=1)]
+        name = parts[0] if parts else ""
+        benefit = parts[1] if len(parts) > 1 else ""
+        return {"name": name, "benefit": benefit}
+    return {"name": "", "benefit": ""}
+
+def _coerce_section(arr: Any) -> List[Dict[str, str]]:
+    """Ensure a section is a list[{'name','benefit'}] and drop empties/dupes."""
+    seen = set()
+    out: List[Dict[str, str]] = []
+    for x in (arr or []):
+        item = _as_item(x)
+        name = item["name"]
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+def _normalize_catalog_result(result: Any) -> Dict[str, List[Dict[str, str]]]:
+    """Force a consistent structure for all sections."""
+    result = result or {}
+    keys = ("tires", "attachments", "options", "telemetry")
+    return {k: _coerce_section(result.get(k)) for k in keys}
+
 def render_sections_markdown(result: dict) -> str:
     """
-    Render only sections that have items. Skips empty/absent sections.
+    Render only sections that have items. Accepts items as dicts or strings.
     Sections: 'tires', 'attachments', 'options', 'telemetry'
     """
+    data = _normalize_catalog_result(result)
     order = ["tires", "attachments", "options", "telemetry"]
-    labels = {"tires": "Tires", "attachments": "Attachments", "options": "Options", "telemetry": "Telemetry"}
+    labels = {
+        "tires": "Tires",
+        "attachments": "Attachments",
+        "options": "Options",
+        "telemetry": "Telemetry",
+    }
 
     lines: List[str] = []
     for key in order:
-        arr = result.get(key) or []
+        arr = data.get(key, [])
         if not arr:
             continue
-
-        seen = set()
-        section_lines: List[str] = []
+        lines.append(f"**{labels[key]}:**")
         for item in arr:
-            name = (item.get("name") or "").strip()
-            if not name or name.lower() in seen:
-                continue
-            seen.add(name.lower())
-            ben = (item.get("benefit") or "").strip().replace("\n", " ")
-            section_lines.append(f"- {name}" + (f" — {ben}" if ben else ""))
-
-        if section_lines:
-            lines.append(f"**{labels[key]}:**")
-            lines.extend(section_lines)
-
+            name = item["name"]
+            ben = item["benefit"].replace("\n", " ").strip()
+            lines.append(f"- {name}" + (f" — {ben}" if ben else ""))
     return "\n".join(lines) if lines else "(no matching items)"
 
 # ─────────────────────────────────────────────────────────────────────────────
