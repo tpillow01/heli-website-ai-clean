@@ -324,68 +324,115 @@ def recommend_options_from_sheet(user_q: str, limit: int = 6) -> dict:
     """
     Scenario-aware selector. Shows ONLY the sections the user requested
     (unless nothing requested, then returns a sensible default mix).
+    Now includes hard fallbacks so 'tires' never returns empty when asked.
     """
     wants = _wants_sections(user_q)
     env   = _env_flags(user_q)
 
+    # Load primary buckets
     options, attachments, tires = load_catalogs()
-    telemetry = {n: b for n, b in options.items() if _TELEM_PAT.search(_lower(n + " " + b))}
+
+    # Defensive: if a requested bucket is empty, build it from the in-file fallback rows
+    if wants["tires"] and not tires:
+        tires = {r["Option"]: r["Benefit"] for r in _FALLBACK_ROWS if _lower(r.get("Type")) == "tires"}
+        log.warning("[ai_logic] Tires bucket was empty; using fallback seed (%d items).", len(tires))
+
+    if wants["attachments"] and not attachments:
+        attachments = {r["Option"]: r["Benefit"] for r in _FALLBACK_ROWS if _lower(r.get("Type")) == "attachments"}
+        log.warning("[ai_logic] Attachments bucket was empty; using fallback seed (%d items).", len(attachments))
+
+    if wants["options"] and not options:
+        options = {r["Option"]: r["Benefit"] for r in _FALLBACK_ROWS if _lower(r.get("Type")) == "options"}
+        log.warning("[ai_logic] Options bucket was empty; using fallback seed (%d items).", len(options))
+
+    # carve telemetry out of options by name/benefit text
+    telemetry = {
+        n: b for n, b in options.items()
+        if _TELEM_PAT.search(_lower(n + " " + (b or "")))
+    }
 
     def postfilter_opts(lst: List[Dict[str, str]]) -> List[Dict[str, str]]:
         out = lst[:]
         if env["cold"]:
             out = [o for o in out if "air conditioner" not in _lower(o.get("name"))]
         if env["dark"]:
-            # float lights to top
-            lights = [x for x in out if any(w in _lower(x["name"] + " " + x.get("benefit",""))
-                                            for w in ("light","led","beacon","work light","blue light","rear working light"))]
+            # float lighting to top
+            def _is_light(x: Dict[str, str]) -> bool:
+                t = _lower((x.get("name","") + " " + x.get("benefit","")))
+                return any(w in t for w in ("light","led","beacon","work light","blue light","rear working light"))
+            lights = [x for x in out if _is_light(x)]
             non    = [x for x in out if x not in lights]
             out = lights + non
         return out
+
+    def rank_all(bucket: Dict[str, str], k: int = 0) -> List[Dict[str, str]]:
+        """Rank a bucket; if ranking yields nothing, return the full bucket as list."""
+        ranked = _rank_bucket(user_q, bucket, limit=k)
+        if not ranked:
+            ranked = [{"name": n, "benefit": b} for n, b in bucket.items()]
+        return ranked
 
     result: dict[str, list] = {}
 
     # Explicit requests → return only those sections
     if wants["any"]:
         if wants["tires"]:
-            ranked_tires = _rank_bucket(user_q, tires, limit=0)
+            ranked_tires = rank_all(tires, k=0)
             if env["asks_non_mark"]:
-                ranked_tires = [t for t in ranked_tires if "non-mark" in _lower(t["name"] + " " + t.get("benefit",""))] or ranked_tires
+                rt2 = [t for t in ranked_tires if "non-mark" in _lower(t["name"] + " " + t.get("benefit",""))]
+                if rt2:
+                    ranked_tires = rt2
             result["tires"] = ranked_tires[:limit] if limit else ranked_tires
 
         if wants["attachments"]:
-            ranked_atts = _rank_bucket(user_q, attachments, limit=0)
+            ranked_atts = rank_all(attachments, k=0)
             if env["indoor"] and not env["mentions_clamp"]:
                 ranked_atts = [a for a in ranked_atts if not re.search(r"\bclamp\b", _lower(a["name"]))]
             if env["indoor"]:
-                ranked_atts.sort(key=lambda a: int(("sideshifter" in _lower(a["name"])) or ("fork positioner" in _lower(a["name"]))), reverse=True)
+                ranked_atts.sort(
+                    key=lambda a: int(("sideshifter" in _lower(a["name"])) or ("fork positioner" in _lower(a["name"]))),
+                    reverse=True
+                )
             result["attachments"] = ranked_atts[:limit] if limit else ranked_atts
 
         if wants["options"]:
-            ranked_opts = postfilter_opts(_rank_bucket(user_q, options, limit=0))
+            ranked_opts = postfilter_opts(rank_all(options, k=0))
             result["options"] = ranked_opts[:limit] if limit else ranked_opts
 
         if wants["telemetry"]:
-            result["telemetry"] = _rank_bucket(user_q, telemetry, limit) if limit else _rank_bucket(user_q, telemetry, 0)
+            tel = rank_all(telemetry, k=0)
+            result["telemetry"] = tel[:limit] if limit else tel
 
+        # Basic observability
+        log.info("[ai_logic] catalog explicit → sizes: tires=%s atts=%s opts=%s telem=%s",
+                 len(result.get("tires", [])), len(result.get("attachments", [])),
+                 len(result.get("options", [])), len(result.get("telemetry", [])))
         return result
 
     # Broad question (no explicit keywords): default to options + some attachments
-    ranked_opts = postfilter_opts(_rank_bucket(user_q, options, limit=0))
-    ranked_atts = _rank_bucket(user_q, attachments, limit=0)
+    ranked_opts = postfilter_opts(rank_all(options, k=0))
+    ranked_atts = rank_all(attachments, k=0)
 
     if env["indoor"] and not env["mentions_clamp"]:
         ranked_atts = [a for a in ranked_atts if not re.search(r"\bclamp\b", _lower(a["name"]))]
-        ranked_atts.sort(key=lambda a: int(("sideshifter" in _lower(a["name"])) or ("fork positioner" in _lower(a["name"]))), reverse=True)
+        ranked_atts.sort(
+            key=lambda a: int(("sideshifter" in _lower(a["name"])) or ("fork positioner" in _lower(a["name"]))),
+            reverse=True
+        )
 
     result["options"] = ranked_opts[: (limit or 6)]
     result["attachments"] = ranked_atts[:4]
 
     if _TIRES_PAT.search(user_q or ""):
-        result["tires"] = _rank_bucket(user_q, tires, limit=4)
+        rt = rank_all(tires, k=0)
+        result["tires"] = rt[:4]
     if _TELEM_PAT.search(user_q or ""):
-        result["telemetry"] = _rank_bucket(user_q, telemetry, limit=3)
+        tel = rank_all(telemetry, k=0)
+        result["telemetry"] = tel[:3]
 
+    log.info("[ai_logic] catalog broad → sizes: tires=%s atts=%s opts=%s telem=%s",
+             len(result.get("tires", [])), len(result.get("attachments", [])),
+             len(result.get("options", [])), len(result.get("telemetry", [])))
     return result
 
 # ─────────────────────────────────────────────────────────────────────────────
