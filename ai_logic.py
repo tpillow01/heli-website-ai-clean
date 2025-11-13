@@ -181,6 +181,118 @@ def _safe_model_name(m: Dict[str, Any]) -> str:
     return "N/A"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Forklift context (2-arg compatible) — used by /api/chat recommendation flow
+# ─────────────────────────────────────────────────────────────────────────────
+def generate_forklift_context(user_q: str, account: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Compatible with callers that pass (user_q, account).
+    If account is provided (dict), include light customer context.
+    """
+    q = (user_q or "").strip()
+    lines: List[str] = []
+    lines.append("## User Question")
+    lines.append(q if q else "(none)")
+
+    # Optional account context
+    acc = account or {}
+    if acc:
+        name = str(acc.get("Sold to Name") or acc.get("name") or "").strip()
+        industry = str(acc.get("Industry") or acc.get("industry") or acc.get("R12 Segment (Ship to ID)") or "").strip()
+        sic = str(acc.get("SIC Code") or acc.get("sic") or "").strip()
+        city = str(acc.get("City") or "").strip()
+        state = str(acc.get("County State") or acc.get("State") or "").strip()
+        fleet = str(acc.get("Fleet Size") or acc.get("fleet_size") or "").strip()
+
+        parts_r12 = acc.get("Parts Revenue R12")
+        svc_r12   = acc.get("Service Revenue R12 (Includes GM)")
+        rental_r12= acc.get("Rental Revenue R12")
+
+        lines.append("\n## Account Context")
+        if name:   lines.append(f"- Name: {name}")
+        if industry or sic:
+            lines.append(f"- Segment: {industry}" + (f" (SIC {sic})" if sic else ""))
+        if city or state:
+            lines.append(f"- Location: {city}, {state}".strip(", "))
+        if fleet:
+            lines.append(f"- Fleet size: {fleet}")
+        # Light revenue hints if available
+        rev_bits = []
+        if parts_r12:   rev_bits.append(f"Parts R12: {parts_r12}")
+        if svc_r12:     rev_bits.append(f"Service R12: {svc_r12}")
+        if rental_r12:  rev_bits.append(f"Rental R12: {rental_r12}")
+        if rev_bits:
+            lines.append("- " + " | ".join(rev_bits))
+
+    return "\n".join(lines)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model selector — always return (hits, allowed) to satisfy callers
+# ─────────────────────────────────────────────────────────────────────────────
+def select_models_for_question(user_q: str, k: int = 5) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Guaranteed to return (hits, allowed). If you already have a more
+    sophisticated internal scorer, this acts as a safe wrapper.
+    """
+    # Try to use an existing internal implementation if present
+    try:
+        _impl = globals().get("_select_models_for_question") or globals().get("select_models_for_question_impl")
+        if callable(_impl):
+            out = _impl(user_q, k)
+            # Normalize to (hits, allowed)
+            if isinstance(out, tuple) and len(out) == 2:
+                return out
+            if isinstance(out, list):
+                return out[:k], []
+    except Exception:
+        pass
+
+    # Fallback: naive filtering over loaded models (assumes you load them elsewhere)
+    hits: List[Dict[str, Any]] = []
+    allowed: List[str] = []
+    ql = (user_q or "").lower()
+
+    # Best-effort access to a loaded models list/dict in your module
+    models = []
+    for cand_name in ("MODELS", "models_cache", "ALL_MODELS", "MODELS_JSON"):
+        if cand_name in globals():
+            models = globals()[cand_name]  # type: ignore[assignment]
+            break
+
+    # If nothing cached, try a loader if you have it
+    if not models and "load_models_json" in globals() and callable(globals()["load_models_json"]):
+        try:
+            models = globals()["load_models_json"]()  # type: ignore[call-arg]
+        except Exception:
+            models = []
+
+    # Score by simple keyword presence over a few likely fields
+    def _text(m: Dict[str, Any]) -> str:
+        return " ".join(str(m.get(k, "")) for k in ("Model","Model Name","Type","Category","Segment","Power","Drive","Tires")).lower()
+
+    scored: List[Tuple[float, Dict[str, Any]]] = []
+    for m in (models or []):
+        t = _text(m)
+        s = 0.0
+        # Reward overlaps with capacity/terrain/tire/indoor/outdoor hints
+        if any(w in ql for w in ("indoor","warehouse","epoxy","non mark","non-mark","cushion")) and ("cushion" in t or "press" in t):
+            s += 2.0
+        if any(w in ql for w in ("outdoor","yard","rough","pneumatic","debris","gravel")) and ("pneumatic" in t or "super elastic" in t):
+            s += 2.0
+        if "reach" in ql and "reach" in t: s += 1.5
+        if "vna" in ql and "vna" in t:     s += 1.5
+        if "order picker" in ql and "order picker" in t: s += 1.2
+        if "3 wheel" in ql or "three wheel" in ql:
+            if any(w in t for w in ("3-wheel","three wheel","sq")): s += 1.2
+        # tiny baseline so we can still return something
+        s += 0.01
+        if s > 0.01:
+            scored.append((s, m))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    hits = [m for _, m in scored][: max(k, 1)]
+    return hits, allowed
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Catalog loader (Excel -> tires / attachments / options) and intent routing
 # ─────────────────────────────────────────────────────────────────────────────
 
