@@ -8,3 +8,4 @@ pgeocode
 tiktoken
 gunicorn>=21.2
 requests
+beautifulsoup4

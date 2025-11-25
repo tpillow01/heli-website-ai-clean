@@ -1417,16 +1417,24 @@ def chat():
         # Indiana Developments (web intel)
         if mode == "indiana_developments":
             try:
-                # 1) Pull recent Indiana developments based on what the user asked
-                items = search_indiana_developments(user_q, days=90)
+                # Import here so the site still runs even if that module has issues
+                from indiana_developments import (
+                    search_indiana_developments,
+                    render_developments_markdown,
+                )
+            except Exception as e:
+                app.logger.exception("Indiana developments import error: %s", e)
+                return _ok_payload(f"❌ Indiana developments import error: {e}")
+
+            try:
+                # Look back ~24 months for larger projects
+                items = search_indiana_developments(user_q, days=730)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
-            # 2) Turn those into markdown (projects, locations, links)
             intel_md = render_developments_markdown(items)
 
-            # 3) System prompt focused on sales opportunities
             system_prompt = {
                 "role": "system",
                 "content": (
@@ -1440,7 +1448,6 @@ def chat():
 
             messages = [
                 system_prompt,
-                # Raw intel in as context
                 {"role": "system", "content": intel_md or "No recent developments found."},
                 {"role": "user", "content": user_q},
             ]
@@ -1466,9 +1473,12 @@ def chat():
         meta = top_pick_meta(user_q)
         if meta:
             top_code, top_class, top_power = meta
-            if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I): top_power = "lpg"
-            elif re.search(r'\bdiesel\b', user_q, re.I):             top_power = "diesel"
-            elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I): top_power = "lithium"
+            if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I):
+                top_power = "lpg"
+            elif re.search(r'\bdiesel\b', user_q, re.I):
+                top_power = "diesel"
+            elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I):
+                top_power = "lithium"
 
             promo_list = promos_for_context(top_code, top_class, top_power or "")
             promo_lines = render_promo_lines(promo_list)
