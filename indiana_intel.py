@@ -36,7 +36,7 @@ NEWSAPI_ENDPOINT = os.environ.get(
     "NEWSAPI_ENDPOINT",
     "https://newsapi.org/v2/everything",
 )
-NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY")
+NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY") or os.environ.get("NEWS_API_KEY")
 
 # How far back to look if the caller doesn’t specify
 DEFAULT_DAYS = 60
