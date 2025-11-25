@@ -15,6 +15,9 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from indiana_intel import search_indiana_developments, render_developments_markdown
+
+
 # (Optional) OpenAI client — leave imported but do not instantiate here
 try:
     from openai import OpenAI  # noqa
@@ -1411,6 +1414,51 @@ def chat():
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
 
+        # Indiana Developments (web intel)
+        if mode == "indiana_developments":
+            try:
+                # 1) Pull recent Indiana developments based on what the user asked
+                items = search_indiana_developments(user_q, days=90)
+            except Exception as e:
+                app.logger.exception("Indiana developments search error: %s", e)
+                return _ok_payload(f"❌ Error searching Indiana developments: {e}")
+
+            # 2) Turn those into markdown (projects, locations, links)
+            intel_md = render_developments_markdown(items)
+
+            # 3) System prompt focused on sales opportunities
+            system_prompt = {
+                "role": "system",
+                "content": (
+                    "You are an assistant for Tynan Equipment Company, a forklift dealership in Indiana.\n"
+                    "You are given a list of recent Indiana industrial, warehouse, manufacturing, or logistics developments.\n"
+                    "Using that list and the user's question, identify which projects look like good forklift or "
+                    "material-handling opportunities and suggest practical next steps (who to approach, what to offer, and why).\n"
+                    "Emphasize counties and cities mentioned by the user. Be concise, sales-focused, and actionable."
+                )
+            }
+
+            messages = [
+                system_prompt,
+                # Raw intel in as context
+                {"role": "system", "content": intel_md or "No recent developments found."},
+                {"role": "user", "content": user_q},
+            ]
+
+            try:
+                resp = client.chat.completions.create(
+                    model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
+                    messages=messages,
+                    max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
+                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35"))
+                )
+                ai_reply = (resp.choices[0].message.content or "").strip()
+            except Exception as e:
+                app.logger.exception("Indiana developments AI error: %s", e)
+                ai_reply = f"❌ Internal error generating Indiana intel: {e}"
+
+            return _ok_payload(ai_reply or "_No response produced._")
+
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
 
@@ -1444,6 +1492,7 @@ def api_modes():
         {"id": "coach",          "label": "Sales Coach"},
         {"id": "catalog",        "label": "Attachments/Options Catalog"},
         {"id": "contact_finder", "label": "Contact Finder"},
+        {"id": "indiana_developments", "label": "Indiana Developments Intel"},
     ])
 
 # ─────────────────────────────────────────────────────────────────────────

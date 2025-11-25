@@ -7,3 +7,4 @@ folium
 pgeocode
 tiktoken
 gunicorn>=21.2
+requests
