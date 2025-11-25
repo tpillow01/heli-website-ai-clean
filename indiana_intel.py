@@ -5,11 +5,11 @@ Indiana developments lead-finder for Tynan / Heli AI site.
 
 Responsibilities:
 - Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
-- Hit a web/news search API (e.g. Bing News) for Indiana industrial / logistics / manufacturing projects
+- Hit NewsAPI.org for Indiana industrial / logistics / manufacturing projects
 - Normalize results into simple dicts
 - Provide markdown rendering for the chat UI and AI prompt
 
-Note: You must supply a BING_NEWS_API_KEY (or change the provider logic) for live calls.
+Note: You must supply NEWSAPI_KEY as an environment variable for live calls.
 """
 
 from __future__ import annotations
@@ -26,24 +26,25 @@ log = logging.getLogger("indiana_intel")
 if not log.handlers:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(levelname)s:%(name)s:%(message)s"
+        format="%(levelname)s:%(name)s:%(message)s",
     )
 
 # ---------------------------------------------------------------------------
 # Config: provider + defaults
 # ---------------------------------------------------------------------------
-BING_NEWS_ENDPOINT = os.environ.get(
-    "BING_NEWS_ENDPOINT",
-    "https://api.bing.microsoft.com/v7.0/news/search",
+NEWSAPI_ENDPOINT = os.environ.get(
+    "NEWSAPI_ENDPOINT",
+    "https://newsapi.org/v2/everything",
 )
-BING_NEWS_API_KEY = os.environ.get("BING_NEWS_API_KEY")
+NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY")
 
+# How far back to look if the caller doesn’t specify
 DEFAULT_DAYS = 60
 
-# Simple keywords to bias toward forklift-relevant projects
-BASE_KEYWORDS = (
-    "Indiana (warehouse OR distribution center OR logistics OR "
-    "manufacturing OR plant OR factory OR industrial OR fulfillment)"
+# Base Indiana-focused keywords to bias toward forklift-relevant projects
+BASE_TERMS = (
+    "\"warehouse\" OR \"distribution center\" OR logistics OR "
+    "manufacturing OR plant OR factory OR industrial OR fulfillment"
 )
 
 # ---------------------------------------------------------------------------
@@ -71,12 +72,11 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
         county = f"{m_county.group(1).strip()} County"
 
     # City: look for "in Greenwood", "around Greenwood, IN", etc.
-    # This is intentionally simple but works for most phrasing.
     m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text)
     city = None
     if m_city:
-        # clean trailing words like "Indiana" / "IN"
         raw = m_city.group(1).strip()
+        # strip trailing "Indiana"/"IN"
         raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
         if raw:
             city = raw
@@ -86,64 +86,74 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
 
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
-    Build a Bing-friendly query that always anchors on Indiana industrial keywords,
-    with optional city / county bias.
+    Build a NewsAPI-friendly query anchored on Indiana industrial keywords,
+    with optional city / county bias and the raw user text as a soft signal.
     """
-    parts = [BASE_KEYWORDS]
+    parts: List[str] = []
 
+    # Always anchor to Indiana and industrial-ish terms
+    base = f"Indiana AND ({BASE_TERMS})"
+    parts.append(base)
+
+    # Add county / city hints if present
     if county:
-        parts.append(f'"{county}"')
+        parts.append(f"AND \"{county}\"")
     if city:
-        parts.append(f'"{city}"')
+        parts.append(f"AND \"{city}\"")
 
-    # Add raw user text as a soft signal
+    # Add raw user text as a soft signal (wrapped to avoid breaking syntax)
     cleaned = user_q.strip()
     if cleaned:
-        parts.append(f"({cleaned})")
+        parts.append(f"AND ({cleaned})")
 
-    return " ".join(parts)
+    query = " ".join(parts)
+    log.info("NewsAPI query: %s", query)
+    return query
 
 
-def _bing_news_search(
-    query: str, days: int
-) -> List[Dict[str, Any]]:
+def _newsapi_search(query: str, days: int) -> List[Dict[str, Any]]:
     """
-    Thin wrapper around Bing News Search.
-    Returns a list of raw results.
+    Thin wrapper around NewsAPI 'everything' endpoint.
+    Returns a list of raw NewsAPI-style result dicts.
     """
-    if not BING_NEWS_API_KEY:
-        log.warning("BING_NEWS_API_KEY not set; returning empty result list.")
+    if not NEWSAPI_KEY:
+        log.warning("NEWSAPI_KEY not set; returning empty result list.")
         return []
+
+    from_date = (datetime.utcnow() - timedelta(days=max(1, days))).strftime("%Y-%m-%d")
 
     params = {
         "q": query,
-        "mkt": "en-US",
-        "count": 25,
-        "sortBy": "Date",
+        "from": from_date,
+        "language": "en",
+        "sortBy": "publishedAt",
+        "pageSize": 20,
     }
+    headers = {"X-Api-Key": NEWSAPI_KEY}
 
-    headers = {"Ocp-Apim-Subscription-Key": BING_NEWS_API_KEY}
     try:
-        resp = requests.get(BING_NEWS_ENDPOINT, params=params, headers=headers, timeout=10)
+        resp = requests.get(
+            NEWSAPI_ENDPOINT,
+            params=params,
+            headers=headers,
+            timeout=10,
+        )
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        log.warning("Bing News request failed: %s", e)
+        log.warning("NewsAPI request failed: %s", e)
         return []
 
-    articles = data.get("value", []) or []
-
-    # Filter by date window if possible
-    since = datetime.utcnow() - timedelta(days=max(1, days))
+    articles = data.get("articles", []) or []
     out: List[Dict[str, Any]] = []
+
     for a in articles:
-        name = a.get("name") or ""
+        title = a.get("title") or ""
         desc = a.get("description") or ""
         url = a.get("url") or ""
-        provider = ", ".join(
-            p.get("name", "") for p in a.get("provider", []) if isinstance(p, dict)
-        ).strip()
-        date_published = a.get("datePublished")
+        src = a.get("source") or {}
+        provider = src.get("name") or ""
+        date_published = a.get("publishedAt")
 
         dt: Optional[datetime] = None
         if date_published:
@@ -152,12 +162,9 @@ def _bing_news_search(
             except Exception:
                 dt = None
 
-        if dt and dt < since:
-            continue
-
         out.append(
             {
-                "title": name,
+                "title": title,
                 "snippet": desc,
                 "url": url,
                 "provider": provider,
@@ -206,7 +213,7 @@ def search_indiana_developments(
     Main entrypoint.
 
     - Extracts simple city/county hints from the user question.
-    - Builds a Bing News query anchored on Indiana industrial projects.
+    - Builds a NewsAPI query anchored on Indiana industrial projects.
     - Returns a list of normalized dicts:
       {
         "title": str,
@@ -221,15 +228,13 @@ def search_indiana_developments(
     city, county = _extract_geo_hint(user_q)
     query = _build_query(user_q, city, county)
 
-    raw_results = _bing_news_search(query, days=days)
+    raw_results = _newsapi_search(query, days=days)
     filtered: List[Dict[str, Any]] = []
 
     for r in raw_results:
         if not _looks_relevant(r):
             continue
 
-        # You could add harder city/county checks here if you want,
-        # but for now we keep everything Bing thinks is relevant.
         r["city_hint"] = city
         r["county_hint"] = county
         filtered.append(r)
@@ -253,7 +258,10 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     Compact markdown summary for chat UI or as context into GPT.
     """
     if not items:
-        return "_No recent Indiana developments found for that query. Try widening the date range or adjusting the city/county._"
+        return (
+            "_No recent Indiana developments found for that query. "
+            "Try widening the date range or adjusting the city/county._"
+        )
 
     lines: List[str] = ["**Recent Indiana Developments (lead candidates):**"]
     for i, item in enumerate(items[:15], start=1):
@@ -269,7 +277,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             except Exception:
                 pass
 
-        meta_bits = []
+        meta_bits: List[str] = []
         if provider:
             meta_bits.append(provider)
         if date:

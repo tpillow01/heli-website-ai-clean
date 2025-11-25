@@ -17,7 +17,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from indiana_intel import search_indiana_developments, render_developments_markdown
 
-
 # (Optional) OpenAI client — leave imported but do not instantiate here
 try:
     from openai import OpenAI  # noqa
@@ -1418,7 +1417,7 @@ def chat():
         if mode == "indiana_developments":
             try:
                 # Import here so the site still runs even if that module has issues
-                from indiana_developments import (
+                from indiana_intel import (
                     search_indiana_developments,
                     render_developments_markdown,
                 )
