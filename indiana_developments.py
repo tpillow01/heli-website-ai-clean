@@ -1,211 +1,144 @@
+# indiana_developments.py
 """
-indiana_developments.py
+Indiana developments helper using NewsAPI.org instead of Bing.
 
-Lightweight web scraper for Indiana industrial / warehouse / logistics developments,
-used by the `indiana_developments` chat mode in heli_backup_ai.py.
+- search_indiana_developments(user_q, days=90) -> list[dict]
+- render_developments_markdown(items) -> markdown string
+
+Expected by heli_backup_ai.py in the /api/chat 'indiana_developments' mode.
 """
 
 from __future__ import annotations
 
-import re
-import urllib.parse
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
-import requests
-from bs4 import BeautifulSoup
+import httpx  # make sure 'httpx' is in requirements.txt
 
-# Basic user-agent so news sites don't instantly reject us
-_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; TynanIndianaIntelBot/1.0; +https://tynanequipment.com)"
-}
+import logging
+
+log = logging.getLogger("indiana_intel")
+if not log.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # <-- set this in Render
 
 
-def _extract_counties_and_cities(text: str) -> List[str]:
+def _build_query(user_q: str) -> str:
     """
-    Very simple extractor:
-    - Looks for 'Boone County', 'Hendricks County', etc.
-    - Also picks up explicit city names if you include them in the question.
+    Take the user's question and build a NewsAPI search query that
+    is biased toward Indiana warehouse / industrial developments.
     """
-    text = text or ""
-    hits: List[str] = []
+    base_terms = '("warehouse" OR "distribution center" OR "logistics" OR "industrial")'
+    geo_terms = '(Indiana OR "IN" OR "Boone County" OR "Hendricks County")'
 
-    # County pattern: 'Something County'
-    for m in re.findall(r"\b([A-Z][a-z]+ County)\b", text):
-        hits.append(m.strip())
+    q = (user_q or "").strip()
+    if not q:
+        return f"{base_terms} AND {geo_terms}"
 
-    # A few common Indiana city names you might mention often.
-    # You can add more over time if you want.
-    CITY_CANDIDATES = [
-        "Indianapolis",
-        "Lebanon",
-        "Whitestown",
-        "Plainfield",
-        "Avon",
-        "Brownsburg",
-        "Zionsville",
-        "Greenwood",
-        "Columbus",
-        "Terre Haute",
-        "Fort Wayne",
-        "Evansville",
-    ]
-    lower = text.lower()
-    for city in CITY_CANDIDATES:
-        if city.lower() in lower:
-            hits.append(city)
+    # Ensure Indiana context is in there somewhere
+    q_lower = q.lower()
+    if "indiana" not in q_lower and "boone" not in q_lower and "hendricks" not in q_lower:
+        q = f"{q} Indiana"
 
-    # Deduplicate while preserving order
-    seen = set()
-    uniq: List[str] = []
-    for h in hits:
-        if h.lower() not in seen:
-            seen.add(h.lower())
-            uniq.append(h)
-    return uniq
+    # Combine with our base terms
+    return f"{q} AND {base_terms}"
 
 
-def _fetch_google_news(query: str) -> List[Dict[str, Any]]:
+def search_indiana_developments(user_q: str, days: int = 90) -> List[Dict[str, Any]]:
     """
-    Pull articles from Google News RSS for the given query.
-    Returns a list of dicts with title, link, published date, and source.
+    Call NewsAPI /v2/everything and return a simplified list of articles.
     """
-    encoded_q = urllib.parse.quote(query)
-    url = (
-        "https://news.google.com/rss/search?q="
-        f"{encoded_q}&hl=en-US&gl=US&ceid=US:en"
-    )
+    if not NEWS_API_KEY:
+        log.warning("NEWS_API_KEY not set; returning empty result list.")
+        return []
 
-    resp = requests.get(url, headers=_HEADERS, timeout=10)
-    resp.raise_for_status()
+    q = _build_query(user_q)
+    from_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    soup = BeautifulSoup(resp.text, "xml")  # works fine for RSS
+    url = "https://newsapi.org/v2/everything"
+    params = {
+        "q": q,
+        "from": from_date,
+        "language": "en",
+        "sortBy": "publishedAt",
+        "pageSize": 20,
+        "apiKey": NEWS_API_KEY,
+    }
+
+    log.info("NewsAPI query: %s", q)
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        log.warning("NewsAPI request failed: %s", e)
+        return []
+
+    articles = data.get("articles") or []
     items: List[Dict[str, Any]] = []
 
-    for item in soup.find_all("item"):
-        title_tag = item.find("title")
-        link_tag = item.find("link")
-        date_tag = item.find("pubDate")
-        source_tag = item.find("source")
+    for art in articles:
+        try:
+            title = (art.get("title") or "").strip()
+            if not title:
+                continue
+            desc = (art.get("description") or "").strip()
+            url = art.get("url") or ""
+            src = (art.get("source") or {}).get("name") or ""
+            published = art.get("publishedAt") or ""
+            # trim timestamp to date if present
+            if "T" in published:
+                published = published.split("T", 1)[0]
 
-        title = (title_tag.get_text(strip=True) if title_tag else "").replace(" - Google News", "")
-        link = link_tag.get_text(strip=True) if link_tag else ""
-        date_str = date_tag.get_text(strip=True) if date_tag else ""
-        source = source_tag.get_text(strip=True) if source_tag else ""
-
-        # Parse pubDate if we can
-        published: datetime | None = None
-        if date_str:
-            try:
-                # Example: Tue, 19 Nov 2024 10:30:00 GMT
-                published = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %Z")
-            except Exception:
-                published = None
-
-        items.append(
-            {
-                "title": title,
-                "link": link,
-                "published": published,
-                "date_str": date_str,
-                "source": source,
-            }
-        )
+            items.append(
+                {
+                    "title": title,
+                    "summary": desc,
+                    "url": url,
+                    "source": src,
+                    "published": published,
+                }
+            )
+        except Exception as e:
+            log.debug("Skipping article row due to error: %s", e)
+            continue
 
     return items
 
 
-def search_indiana_developments(user_q: str, days: int = 730) -> List[Dict[str, Any]]:
-    """
-    Main entry used by /api/chat.
-
-    - Builds one or more Google News queries based on the user's text.
-    - Pulls recent industrial / warehouse / logistics development news in Indiana.
-    - Filters by date window (last `days` days).
-    """
-    base_terms = "Indiana warehouse OR distribution center OR logistics park OR industrial park"
-    locs = _extract_counties_and_cities(user_q)
-
-    queries: List[str] = []
-    if locs:
-        for loc in locs:
-            # e.g. "Boone County Indiana warehouse OR distribution center ..."
-            queries.append(f"{loc} Indiana {base_terms}")
-    else:
-        # Fallback: statewide search
-        queries.append(base_terms)
-
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    all_items: List[Dict[str, Any]] = []
-    seen_links = set()
-
-    for q in queries:
-        try:
-            feed_items = _fetch_google_news(q)
-        except Exception:
-            # If one query fails, just skip it
-            continue
-
-        for it in feed_items:
-            link = it.get("link") or ""
-            if not link or link in seen_links:
-                continue
-
-            published = it.get("published")
-            # If we don't have a parsed date, keep it but it'll be treated as "unknown"
-            if isinstance(published, datetime) and published < cutoff:
-                continue
-
-            seen_links.add(link)
-            # Attach the query/loc info as a weak 'location' hint
-            it["location_hint"] = ", ".join(locs) if locs else "Indiana"
-            all_items.append(it)
-
-    # Sort newest first when we have dates, otherwise just keep original order
-    all_items.sort(
-        key=lambda x: x["published"] or datetime.utcnow(), reverse=True
-    )
-
-    # Cap to something reasonable; the LLM doesn't need 100 articles
-    return all_items[:25]
-
-
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
-    Turn the scraped items into a markdown block that your /api/chat mode
-    feeds into the OpenAI model as 'intel'.
+    Turn the article list into markdown the AI can reason over.
     """
     if not items:
-        return (
-            "No recent Indiana industrial / warehouse / logistics developments were "
-            "found in the requested timeframe."
-        )
+        return "No recent Indiana warehouse / distribution developments were found."
 
     lines: List[str] = []
-    lines.append("**Recent Indiana industrial / warehouse developments:**")
+    lines.append("Recent Indiana warehouse / logistics developments:")
+    for it in items[:20]:
+        title = it.get("title", "")
+        src = it.get("source", "")
+        published = it.get("published", "")
+        url = it.get("url", "")
+        summary = it.get("summary", "")
 
-    for it in items:
-        title = it.get("title", "").strip()
-        link = it.get("link", "").strip()
-        date_str = it.get("date_str", "").strip()
-        source = it.get("source", "").strip()
-        loc_hint = it.get("location_hint", "").strip()
-
-        bullet = "- "
-        if date_str:
-            bullet += f"{date_str} — "
-        bullet += title if title else "(no title)"
-
+        header = f"- **{title}**"
         meta_bits = []
-        if source:
-            meta_bits.append(source)
-        if loc_hint:
-            meta_bits.append(loc_hint)
+        if src:
+            meta_bits.append(src)
+        if published:
+            meta_bits.append(published)
         if meta_bits:
-            bullet += " (" + ", ".join(meta_bits) + ")"
+            header += f" ({', '.join(meta_bits)})"
+        if url:
+            header += f" — {url}"
 
-        lines.append(bullet)
-        if link:
-            lines.append(f"  {link}")
+        lines.append(header)
+        if summary:
+            lines.append(f"  - Summary: {summary}")
 
     return "\n".join(lines)
