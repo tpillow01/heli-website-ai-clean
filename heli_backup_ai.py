@@ -1413,17 +1413,101 @@ def chat():
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
 
-        # Indiana Developments (web intel — project list only)
+        # Indiana Developments (web intel – project scope only)
         if mode == "indiana_developments":
             try:
-                # Adjust days if you want a different time window (e.g. 365 for last year)
+                # Look back ~12 months by default
                 items = search_indiana_developments(user_q, days=365)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
-            intel_md = render_developments_markdown(items)
-            return _ok_payload(intel_md)
+            if not items:
+                return _ok_payload(
+                    "_No clear Indiana warehouse/logistics projects were found for that query based on the current search results. "
+                    "Try a different county/city or a broader timeframe._"
+                )
+
+            # Build a plain-text block of search hits for the model to work from
+            lines: list[str] = []
+            for i, item in enumerate(items[:15], start=1):
+                title = item.get("title") or ""
+                snippet = (item.get("snippet") or "").strip()
+                url = item.get("url") or ""
+                provider = item.get("provider") or ""
+                date = item.get("date") or ""
+                city_hint = item.get("city_hint") or ""
+                county_hint = item.get("county_hint") or ""
+
+                lines.append(f"Result {i}:")
+                if title:
+                    lines.append(f"  Title: {title}")
+                if county_hint or city_hint:
+                    loc_bits = []
+                    if city_hint:
+                        loc_bits.append(city_hint)
+                    if county_hint:
+                        loc_bits.append(county_hint)
+                    lines.append(f"  Location_hint: {', '.join(loc_bits)} (Indiana)")
+                if date:
+                    lines.append(f"  Date: {date}")
+                if provider:
+                    lines.append(f"  Source: {provider}")
+                if snippet:
+                    lines.append(f"  Snippet: {snippet}")
+                if url:
+                    lines.append(f"  URL: {url}")
+                lines.append("")  # blank line between results
+
+            search_block = "\n".join(lines)
+
+            system_prompt = {
+                "role": "system",
+                "content": (
+                    "You are a research assistant for a forklift dealership in Indiana.\n"
+                    "You are given web search results about Indiana industrial, warehouse, and logistics developments.\n"
+                    "Your job is ONLY to identify actual warehouse, distribution, logistics, or industrial facility PROJECTS\n"
+                    "and summarize the scope of each project based strictly on the snippets provided.\n\n"
+                    "For each real project you find, output in this format:\n"
+                    "Project Name (City, County, Indiana)\n"
+                    "- Type: warehouse / distribution center / logistics hub / industrial / manufacturing / other\n"
+                    "- Scope: size, number of buildings, acreage, investment amount, jobs, or other concrete details mentioned in the snippets. "
+                    "If not stated, say 'Scope details not specified in snippet.'\n"
+                    "- Status: announced / proposed / under construction / expansion / completed, if mentioned. If not stated, say 'Status not specified.'\n"
+                    "- Source: domain name and URL\n\n"
+                    "Rules:\n"
+                    "- Do NOT invent numbers or project details that are not clearly implied by the snippets.\n"
+                    "- If a result is a general county overview, tourism page, or unrelated topic (gardening, events, etc.), ignore it.\n"
+                    "- Do NOT give sales advice, outreach steps, or general strategy. Only describe the projects and their scope.\n"
+                    "- If you cannot find any concrete projects in the results, say: 'No specific warehouse or logistics projects were clearly identified in these search results.'"
+                ),
+            }
+
+            messages = [
+                system_prompt,
+                {
+                    "role": "system",
+                    "content": f"SEARCH_RESULTS:\n{search_block}",
+                },
+                {
+                    "role": "user",
+                    "content": user_q,
+                },
+            ]
+
+            try:
+                resp = client.chat.completions.create(
+                    model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
+                    messages=messages,
+                    max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
+                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.2")),
+                )
+                ai_reply = (resp.choices[0].message.content or "").strip()
+            except Exception as e:
+                app.logger.exception("Indiana developments AI summarization error: %s", e)
+                ai_reply = f"❌ Internal error summarizing Indiana developments: {e}"
+
+            return _ok_payload(ai_reply or "_No response produced._")
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
