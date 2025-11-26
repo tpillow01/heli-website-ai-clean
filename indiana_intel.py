@@ -41,7 +41,7 @@ GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
 # We don't really have dates from Google CSE reliably, so "days" is mostly
 # conceptual here, but we keep the parameter for future tuning.
-DEFAULT_DAYS = 60
+DEFAULT_DAYS = 90
 
 # Base industrial / logistics keywords for Indiana
 BASE_KEYWORDS = (
