@@ -1,5 +1,5 @@
 """
-indiana_intel.py  (v2 – 2025-11-26)
+indiana_intel.py
 
 Indiana developments lead-finder for Tynan / Heli AI site.
 
@@ -36,8 +36,14 @@ if not log.handlers:
 # Config: Google CSE
 # ---------------------------------------------------------------------------
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
-GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
-GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
+
+# Strip whitespace so a value like "  abc123  " still works
+GOOGLE_CSE_KEY = (os.environ.get("GOOGLE_CSE_KEY") or "").strip()
+GOOGLE_CSE_CX = (os.environ.get("GOOGLE_CSE_CX") or "").strip()
+
+# DEBUG: log whether the keys are present on startup (True/False, not the actual key)
+log.info("indiana_intel: GOOGLE_CSE_KEY present: %s", bool(GOOGLE_CSE_KEY))
+log.info("indiana_intel: GOOGLE_CSE_CX present: %s", bool(GOOGLE_CSE_CX))
 
 # We don't really have dates from Google CSE reliably, so "days" is mostly
 # conceptual here, but we keep the parameter for future tuning.
@@ -48,6 +54,7 @@ BASE_KEYWORDS = (
     'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
     'OR plant OR factory OR industrial OR fulfillment)'
 )
+
 
 # ---------------------------------------------------------------------------
 # Small helpers
@@ -62,10 +69,6 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     - Finds 'X County' → county='X County'
     - Tries to grab a city name after 'in ' if it looks like 'Greenwood' or 'Greenwood, IN'
     Returns (city, county).
-
-    Note: if the user says "Boone County or Hendricks County" we will just
-    grab the first one ("Boone County") as a hint – that's good enough
-    for biasing the search.
     """
     if not q:
         return (None, None)
@@ -89,14 +92,12 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     return (city, county)
 
 
-# Slightly expanded stopword list so we don't stuff the query with junk words
 _STOPWORDS = {
-    "what", "are", "there", "any", "new", "or", "in", "the", "last",
-    "month", "months", "recent", "recently", "project", "projects",
-    "have", "has", "been", "announced", "announcement", "for",
-    "about", "on", "of", "a", "an", "county", "indiana", "logistics",
-    "warehouse", "warehouses", "distribution", "center", "centers",
-    "developments", "development",
+    "what", "are", "there", "any", "new", "or", "in", "the", "last", "month",
+    "months", "recent", "recently", "project", "projects", "have", "has",
+    "been", "announced", "announcement", "for", "about", "on", "of", "a",
+    "an", "county", "indiana", "logistics", "warehouse", "distribution",
+    "center", "centers",
 }
 
 
@@ -121,9 +122,7 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
         if tl in _STOPWORDS:
             continue
         extra_tokens.append(tok)
-
     if extra_tokens:
-        # Cap so we don't blow up the query string
         parts.append(" ".join(extra_tokens[:8]))
 
     query = " ".join(parts)
@@ -137,7 +136,12 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
     Returns a list of raw results.
     """
     if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
-        log.warning("GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set; returning empty result list.")
+        log.warning(
+            "GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set or empty; returning empty result list. "
+            "GOOGLE_CSE_KEY present=%s, GOOGLE_CSE_CX present=%s",
+            bool(GOOGLE_CSE_KEY),
+            bool(GOOGLE_CSE_CX),
+        )
         return []
 
     params = {
@@ -281,9 +285,9 @@ def search_indiana_developments(
             r["county_hint"] = county
             filtered.append(r)
 
-    # If our filter killed everything, just fall back to the top few raw items
+    # If our filter killed everything, just fall back to the raw items
     if not filtered:
-        log.info("No items passed relevance filter; falling back to raw top items.")
+        log.info("No items passed relevance filter; falling back to raw items.")
         filtered = raw_results[:5]
         for r in filtered:
             r["city_hint"] = city
