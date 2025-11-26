@@ -316,18 +316,21 @@ def search_indiana_developments(
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
-    Compact markdown summary for chat UI or as context into GPT.
+    Compact HTML summary for chat UI or as context into GPT.
+    - No Markdown (** or __)
+    - Project titles in bold dark red for easy scanning
     """
     if not items:
-        return "_No recent Indiana developments found for that query. Try widening the date range or adjusting the city/county._"
+        return "No recent Indiana developments found for that query. Try widening the date range or adjusting the city/county."
 
-    lines: List[str] = ["**Recent Indiana Developments (lead candidates):**"]
+    lines: List[str] = ['<div class="indiana-intel-list">']
     for i, item in enumerate(items[:15], start=1):
         title = item.get("title") or "Untitled"
         snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
         provider = item.get("provider") or ""
         date = item.get("date") or ""
+
         if date:
             try:
                 dt = datetime.fromisoformat(date)
@@ -342,18 +345,20 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             meta_bits.append(date)
         meta = " • ".join(meta_bits)
 
-        lines.append(f"{i}. **{title}**")
+        lines.append('  <div class="intel-item">')
+        lines.append(
+            '    <div class="intel-title">'
+            f'<span style="color:#b00000;font-weight:bold;">{title}</span>'
+            '</div>'
+        )
         if meta:
-            lines.append(f"   - _{meta}_")
+            lines.append(f'    <div class="intel-meta">{meta}</div>')
         if snippet:
-            lines.append(f"   - {snippet}")
+            lines.append(f'    <div class="intel-snippet">{snippet}</div>')
         if url:
-            lines.append(f"   - {url}")
+            lines.append(f'    <div class="intel-link">{url}</div>')
+        lines.append('  </div>')
 
+    lines.append('</div>')
     return "\n".join(lines)
 
-
-__all__ = [
-    "search_indiana_developments",
-    "render_developments_markdown",
-]
