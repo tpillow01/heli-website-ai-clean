@@ -4,13 +4,13 @@ indiana_intel.py
 Indiana developments lead-finder for Tynan / Heli AI site.
 
 Responsibilities:
-- Take a natural-language question (e.g. "new warehouses in Boone County in the last 12–18 months")
+- Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
 - Hit Google Custom Search JSON API (Programmable Search Engine) for
-  Indiana industrial / logistics / manufacturing / warehouse projects
+  Indiana industrial / logistics / manufacturing projects
 - Normalize results into simple dicts
-- Provide markdown rendering for the chat UI and AI prompt
+- Provide HTML rendering for the chat UI and AI prompt
 
-Environment variables required (set in Render):
+Environment variables required:
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
 - GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured to search the web
 """
@@ -39,17 +39,11 @@ GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
-# We don't really have reliable dates from CSE; keep "days" parameter for API compatibility.
+# We keep this for future tuning; many CSE results don't have reliable dates.
 DEFAULT_DAYS = 365
 
-# Base industrial / logistics keywords for Indiana
-BASE_KEYWORDS = (
-    'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
-    'OR plant OR factory OR industrial OR fulfillment OR "industrial park")'
-)
-
 # ---------------------------------------------------------------------------
-# Small helpers
+# Helper utilities
 # ---------------------------------------------------------------------------
 def _lower(s: Any) -> str:
     return str(s or "").lower()
@@ -59,7 +53,7 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Very light-weight extractor:
     - Finds 'X County' → county='X County'
-    - Tries to grab a city name after 'in ' / 'around ' / 'near '.
+    - Tries to grab a city name after 'in ' if it looks like 'Greenwood' or 'Greenwood, IN'
     Returns (city, county).
     """
     if not q:
@@ -67,69 +61,71 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     text = q.strip()
 
     # County: e.g. "in Boone County", "Boone County leads", etc.
-    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text, flags=re.I)
+    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text)
     county = None
     if m_county:
-        # Title-case for nicer logging/queries
-        name = m_county.group(1).strip()
-        county = f"{name.title()} County"
+        county = f"{m_county.group(1).strip()} County"
 
-    # City: e.g. "in Greenwood", "around Plainfield, IN", etc.
-    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text, flags=re.I)
+    # City: look for "in Greenwood", "around Greenwood, IN", etc.
+    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text)
     city = None
     if m_city:
         raw = m_city.group(1).strip()
-        # Strip trailing "Indiana" / "IN"
         raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
         if raw:
-            city = raw.title()
+            city = raw
 
     return (city, county)
 
 
-# Words from the user question we don't want to blindly shove into the Google query
 _STOPWORDS = {
     "what", "are", "there", "any", "new", "or", "in", "the", "last", "month",
     "months", "recent", "recently", "project", "projects", "have", "has",
     "been", "announced", "announcement", "for", "about", "on", "of", "a",
-    "an", "county", "indiana", "logistics", "warehouse", "warehouses",
-    "distribution", "center", "centers", "developments", "development",
-    "years", "year", "days", "day",
+    "an", "county", "indiana", "logistics", "warehouse", "distribution",
+    "center", "centers",
 }
 
 
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
-    Build a Google CSE query that:
-    - Always anchors on Indiana + industrial/warehouse keywords
-    - Adds city / county if we found them
-    - Adds a small cleaned tail from the question as a soft signal
+    Build a Google CSE query that strongly targets facility-type results.
+    We REQUIRE facility-style terms in the Google query so we don't pull
+    gardening clubs, tourism, or generic county pages.
     """
-    parts: List[str] = [BASE_KEYWORDS]
+    parts: List[str] = []
 
+    # Geo anchor first
     if county:
         parts.append(f'"{county}"')
     if city:
         parts.append(f'"{city}"')
 
-    # Clean the user question and add a few non-boring keywords as a soft hint
+    # Always anchor on Indiana
+    parts.append("Indiana")
+
+    # Facility-type keywords we actually care about
+    facility_clause = (
+        '("warehouse" OR "distribution center" OR "distribution facility" '
+        'OR "logistics center" OR "logistics hub" OR "logistics park" '
+        'OR "fulfillment center" OR "industrial park" OR "industrial park")'
+    )
+    parts.append(facility_clause)
+
+    # Small tail from user question, minus boring words
     cleaned = re.sub(r"[“”\"']", " ", user_q or "")
     tokens = re.findall(r"[A-Za-z0-9]+", cleaned)
     extra_tokens: List[str] = []
     for tok in tokens:
         tl = tok.lower()
-        # Skip stopwords and pure numbers (12, 18, etc.)
         if tl in _STOPWORDS:
             continue
-        if tl.isdigit():
-            continue
         extra_tokens.append(tok)
-
     if extra_tokens:
-        parts.append(" ".join(extra_tokens[:8]))
+        parts.append(" ".join(extra_tokens[:6]))
 
-    query = " ".join(parts)
-    log.info("indiana_intel: Google CSE query: %s", query)
+    query = " ".join(parts).strip()
+    log.info("Google CSE query: %s", query)
     return query
 
 
@@ -138,14 +134,12 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
     Thin wrapper around Google Custom Search JSON API.
     Returns a list of raw results.
     """
-    key_present = bool(GOOGLE_CSE_KEY)
-    cx_present = bool(GOOGLE_CSE_CX)
-    if not key_present or not cx_present:
+    if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
         log.warning(
             "GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set or empty; returning empty result list. "
             "GOOGLE_CSE_KEY present=%s, GOOGLE_CSE_CX present=%s",
-            key_present,
-            cx_present,
+            bool(GOOGLE_CSE_KEY),
+            bool(GOOGLE_CSE_CX),
         )
         return []
 
@@ -165,7 +159,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         return []
 
     items = data.get("items", []) or []
-    log.info("indiana_intel: Google CSE returned %s items", len(items))
+    log.info("Google CSE returned %s items", len(items))
 
     out: List[Dict[str, Any]] = []
     for it in items:
@@ -175,7 +169,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         title = it.get("title") or ""
         snippet = it.get("snippet") or it.get("htmlSnippet") or ""
         url = it.get("link") or ""
-        provider = ""  # CSE usually doesn't give us a clean provider name
+        provider = ""
 
         # Try to sniff out a date from metatags (best-effort only)
         dt_iso: Optional[str] = None
@@ -222,36 +216,33 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
 
 def _looks_relevant(item: Dict[str, Any]) -> bool:
     """
-    Quick relevance filter: look for industrial / facility terms in title/snippet.
-    If nothing passes this filter, the caller will fall back to raw items.
+    STRONGER relevance filter:
+    - We only keep results that clearly look like a FACILITY or SITE,
+      not generic county info or tourism pages.
+    - To pass, the text must include at least one of a list of facility terms.
     """
     text = _lower(item.get("title", "") + " " + item.get("snippet", ""))
     if not text:
         return False
 
-    hits = 0
-    for kw in (
+    facility_terms = (
         "warehouse",
         "distribution center",
         "distribution facility",
-        "logistics",
-        "fulfillment",
-        "industrial park",
-        "industrial",
-        "plant",
-        "factory",
-        "manufacturing",
-        "facility",
-        "expansion",
-        "distribution hub",
-        "cold storage",
-        "logistics park",
         "logistics center",
-    ):
-        if kw in text:
-            hits += 1
+        "logistics hub",
+        "logistics park",
+        "fulfillment center",
+        "industrial park",
+        "industrial park",  # duplicated intentionally, it's cheap
+        "spec building",
+        "industrial building",
+        "logistics campus",
+        "industrial campus",
+        "cold storage",
+    )
 
-    return hits > 0
+    return any(term in text for term in facility_terms)
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +256,7 @@ def search_indiana_developments(
     Main entrypoint.
 
     - Extracts simple city/county hints from the user question.
-    - Builds a Google CSE query anchored on Indiana industrial projects.
+    - Builds a Google CSE query anchored on Indiana facility-type projects.
     - Returns a list of normalized dicts:
       {
         "title": str,
@@ -276,15 +267,20 @@ def search_indiana_developments(
         "city_hint": Optional[str],
         "county_hint": Optional[str],
       }
+
+    IMPORTANT:
+    - We DO NOT fall back to generic county/tourism/gardening pages.
+      If nothing passes the facility filter, we return [] and let the
+      caller say "no projects found" cleanly.
     """
     city, county = _extract_geo_hint(user_q)
     query = _build_query(user_q, city, county)
 
     raw_results = _google_cse_search(query, days=days)
     if not raw_results:
+        log.info("No items returned by Google CSE.")
         return []
 
-    # First pass: apply relevance filter
     filtered: List[Dict[str, Any]] = []
     for r in raw_results:
         if _looks_relevant(r):
@@ -292,13 +288,9 @@ def search_indiana_developments(
             r["county_hint"] = county
             filtered.append(r)
 
-    # If our filter killed everything, just fall back to the top few raw items
     if not filtered:
-        log.info("indiana_intel: No items passed relevance filter; falling back to raw top items.")
-        filtered = raw_results[:5]
-        for r in filtered:
-            r["city_hint"] = city
-            r["county_hint"] = county
+        log.info("No items passed facility relevance filter; returning empty list.")
+        return []
 
     # Sort by date desc (newest first) when we have dates; otherwise keep API order
     def _dt(item: Dict[str, Any]) -> float:
@@ -317,20 +309,22 @@ def search_indiana_developments(
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
     Compact HTML summary for chat UI or as context into GPT.
-    - No Markdown (** or __)
-    - Project titles in bold dark red for easy scanning
+    We keep a neutral, structured HTML format; styling is handled by the caller.
     """
     if not items:
-        return "No recent Indiana developments found for that query. Try widening the date range or adjusting the city/county."
+        return "_No recent Indiana developments found for that query._"
 
-    lines: List[str] = ['<div class="indiana-intel-list">']
+    # HTML only – no Markdown asterisks.
+    lines: List[str] = []
+    lines.append("<div>")
+    lines.append("  <ol>")
+
     for i, item in enumerate(items[:15], start=1):
         title = item.get("title") or "Untitled"
         snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
         provider = item.get("provider") or ""
         date = item.get("date") or ""
-
         if date:
             try:
                 dt = datetime.fromisoformat(date)
@@ -338,27 +332,38 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             except Exception:
                 pass
 
-        meta_bits = []
-        if provider:
-            meta_bits.append(provider)
-        if date:
-            meta_bits.append(date)
-        meta = " • ".join(meta_bits)
+        location_hint_parts = []
+        city_hint = item.get("city_hint")
+        county_hint = item.get("county_hint")
+        if city_hint:
+            location_hint_parts.append(city_hint)
+        if county_hint:
+            location_hint_parts.append(county_hint)
+        location_hint = ", ".join(location_hint_parts) or "Indiana"
 
-        lines.append('  <div class="intel-item">')
+        lines.append("    <li>")
+        # Name styled in dark red + bold; if your UI strips HTML, you'll just see the text.
         lines.append(
-            '    <div class="intel-title">'
-            f'<span style="color:#b00000;font-weight:bold;">{title}</span>'
-            '</div>'
+            f'      <span style="color:#b00000;font-weight:bold;">{title}</span><br>'
         )
-        if meta:
-            lines.append(f'    <div class="intel-meta">{meta}</div>')
+        lines.append(f"      Location hint: {location_hint}<br>")
+        if provider:
+            lines.append(f"      Source: {provider}<br>")
+        if date:
+            lines.append(f"      Date (from metadata): {date}<br>")
         if snippet:
-            lines.append(f'    <div class="intel-snippet">{snippet}</div>')
+            lines.append(f"      Snippet: {snippet}<br>")
         if url:
-            lines.append(f'    <div class="intel-link">{url}</div>')
-        lines.append('  </div>')
+            lines.append(f'      URL: <a href="{url}" target="_blank">{url}</a>')
+        lines.append("    </li>")
 
-    lines.append('</div>')
+    lines.append("  </ol>")
+    lines.append("</div>")
+
     return "\n".join(lines)
 
+
+__all__ = [
+    "search_indiana_developments",
+    "render_developments_markdown",
+]
