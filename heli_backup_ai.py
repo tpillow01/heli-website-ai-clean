@@ -1425,8 +1425,7 @@ def chat():
             # If nothing came back at all, bail early with a clear message
             if not items:
                 return _ok_payload(
-                    "No specific warehouse or logistics projects were clearly identified in these search results "
-                    "for the requested area and timeframe."
+                    "No specific warehouse or logistics projects were clearly identified in these search results for the requested area and timeframe."
                 )
 
             # Turn those into structured HTML snippets for the model to read
@@ -1438,36 +1437,47 @@ def chat():
                     "You are an Indiana industrial project research assistant for a forklift dealership.\n"
                     "You are given HTML that lists recent web search results about Indiana industrial, warehouse, "
                     "distribution, logistics, and manufacturing activity.\n\n"
-                    "Your ONLY job is to describe concrete facility projects, such as:\n"
-                    "- new warehouses\n"
-                    "- distribution centers\n"
-                    "- logistics hubs\n"
-                    "- industrial parks\n"
-                    "- manufacturing plants\n"
-                    "- major warehouse / logistics expansions\n\n"
-                    "Do NOT give sales advice, outreach suggestions, or generic strategy.\n"
-                    "Do NOT use asterisks or Markdown formatting.\n\n"
-                    "If the search results do not contain any clear facility-type projects for the requested county/city "
-                    "and timeframe, reply with exactly this one sentence and nothing else:\n"
-                    "No specific warehouse or logistics projects were clearly identified in these search results for the requested area and timeframe.\n\n"
-                    "Otherwise, output HTML in this structure:\n"
+                    "PRIMARY GOAL:\n"
+                    "- Identify concrete facility projects, such as:\n"
+                    "  - new warehouses\n"
+                    "  - distribution centers\n"
+                    "  - logistics hubs\n"
+                    "  - industrial parks\n"
+                    "  - manufacturing plants\n"
+                    "  - major warehouse / logistics expansions\n\n"
+                    "For EACH clear project, output one <li> with:\n"
+                    "- Project name\n"
+                    "- Location (city/county, Indiana) if mentioned\n"
+                    "- Facility type (warehouse, DC, logistics hub, industrial park, plant, etc.) if mentioned\n"
+                    "- Scope (size, number of buildings, tenants/uses, etc.) using ONLY what is clearly implied by the search snippets; "
+                    "if something is not mentioned, say \"Not specified in search snippet.\"\n"
+                    "- Timeline (announced / under construction / completed, with dates if present; otherwise \"Not specified in search snippet.\")\n"
+                    "- Source (URL)\n\n"
+                    "IMPORTANT RULES:\n"
+                    "- Base every detail strictly on the provided HTML intel; do NOT invent numbers, sizes, or tenants.\n"
+                    "- If a detail is not mentioned, explicitly say: \"Not specified in search snippet.\"\n"
+                    "- Do NOT give sales advice, outreach suggestions, or generic strategy.\n"
+                    "- Do NOT use asterisks or Markdown formatting. Output pure HTML only.\n\n"
+                    "IF NO CLEAR FACILITY PROJECTS ARE FOUND:\n"
+                    "- First sentence must be EXACTLY:\n"
+                    "  No clearly dated new warehouse or logistics project announcements were found in the search results for the requested time window.\n"
+                    "- After that sentence, still provide a short HTML overview of the county's industrial/logistics landscape using the SAME <ol>/<li> structure, "
+                    "treating named industrial parks, logistics corridors, or key logistics themes as \"items\".\n"
+                    "- Again, ONLY use what is present in the intel HTML; do not hallucinate specific projects.\n\n"
+                    "OUTPUT FORMAT (always use this structure):\n"
                     "<div>\n"
                     "  <ol>\n"
                     "    <li>\n"
-                    "      <span style=\"color:#b00000;font-weight:bold;\">PROJECT NAME</span><br>\n"
-                    "      Location: city/county, Indiana (if known).<br>\n"
-                    "      Type: warehouse, distribution center, logistics hub, industrial park, manufacturing plant, etc. (if known).<br>\n"
-                    "      Scope: describe size, number of buildings, tenants/uses, and any other scope details that are clearly implied "
-                    "by the search snippets. If something is not mentioned, say \"Not specified in search snippet.\"<br>\n"
-                    "      Timeline: announced / under construction / completed with any dates mentioned "
-                    "(or \"Not specified in search snippet.\").<br>\n"
+                    "      <span style=\"color:#b00000;font-weight:bold;\">PROJECT OR ITEM NAME</span><br>\n"
+                    "      Location: ...<br>\n"
+                    "      Type: ...<br>\n"
+                    "      Scope: ...<br>\n"
+                    "      Timeline: ...<br>\n"
                     "      Source: URL\n"
                     "    </li>\n"
-                    "    <!-- one <li> per project -->\n"
+                    "    <!-- one <li> per project or relevant industrial/logistics item -->\n"
                     "  </ol>\n"
-                    "</div>\n\n"
-                    "Only include projects that are clearly about facilities. Ignore tourism, events, gardening, "
-                    "general county history pages, or unrelated topics."
+                    "</div>\n"
                 ),
             }
 
@@ -1487,7 +1497,9 @@ def chat():
                 ai_reply = (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 app.logger.exception("Indiana developments AI error: %s", e)
-                ai_reply = f"❌ Internal error generating Indiana project intel: {e}"
+                ai_reply = (
+                    f"❌ Internal error generating Indiana project intel: {e}"
+                )
 
             return _ok_payload(
                 ai_reply
