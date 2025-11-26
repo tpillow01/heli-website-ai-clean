@@ -1,5 +1,5 @@
 """
-indiana_intel.py
+indiana_intel.py  (v2 – 2025-11-26)
 
 Indiana developments lead-finder for Tynan / Heli AI site.
 
@@ -49,7 +49,6 @@ BASE_KEYWORDS = (
     'OR plant OR factory OR industrial OR fulfillment)'
 )
 
-
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
@@ -63,6 +62,10 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     - Finds 'X County' → county='X County'
     - Tries to grab a city name after 'in ' if it looks like 'Greenwood' or 'Greenwood, IN'
     Returns (city, county).
+
+    Note: if the user says "Boone County or Hendricks County" we will just
+    grab the first one ("Boone County") as a hint – that's good enough
+    for biasing the search.
     """
     if not q:
         return (None, None)
@@ -86,12 +89,14 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     return (city, county)
 
 
+# Slightly expanded stopword list so we don't stuff the query with junk words
 _STOPWORDS = {
-    "what", "are", "there", "any", "new", "or", "in", "the", "last", "month",
-    "months", "recent", "recently", "project", "projects", "have", "has",
-    "been", "announced", "announcement", "for", "about", "on", "of", "a",
-    "an", "county", "indiana", "logistics", "warehouse", "distribution",
-    "center", "centers",
+    "what", "are", "there", "any", "new", "or", "in", "the", "last",
+    "month", "months", "recent", "recently", "project", "projects",
+    "have", "has", "been", "announced", "announcement", "for",
+    "about", "on", "of", "a", "an", "county", "indiana", "logistics",
+    "warehouse", "warehouses", "distribution", "center", "centers",
+    "developments", "development",
 }
 
 
@@ -116,7 +121,9 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
         if tl in _STOPWORDS:
             continue
         extra_tokens.append(tok)
+
     if extra_tokens:
+        # Cap so we don't blow up the query string
         parts.append(" ".join(extra_tokens[:8]))
 
     query = " ".join(parts)
