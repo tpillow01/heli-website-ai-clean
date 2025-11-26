@@ -1413,40 +1413,48 @@ def chat():
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
 
-        # Indiana Developments (web intel)
+        # Indiana Developments (web intel – project details only)
         if mode == "indiana_developments":
             try:
-                # Import here so the site still runs even if that module has issues
-                from indiana_intel import (
-                    search_indiana_developments,
-                    render_developments_markdown,
-                )
-            except Exception as e:
-                app.logger.exception("Indiana developments import error: %s", e)
-                return _ok_payload(f"❌ Indiana developments import error: {e}")
-
-            try:
-                # Look back ~24 months for larger projects
-                items = search_indiana_developments(user_q, days=730)
+                # 1) Pull recent Indiana developments based on what the user asked
+                #    You can tweak days= if you want a narrower window.
+                items = search_indiana_developments(user_q, days=365)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
+            # 2) Turn those into markdown (projects, locations, links)
             intel_md = render_developments_markdown(items)
 
+            # 3) System prompt focused on summarizing projects ONLY
             system_prompt = {
                 "role": "system",
                 "content": (
-                    "You are an assistant for Tynan Equipment Company, a forklift dealership in Indiana.\n"
-                    "You are given a list of recent Indiana industrial, warehouse, manufacturing, or logistics developments.\n"
-                    "Using that list and the user's question, identify which projects look like good forklift or "
-                    "material-handling opportunities and suggest practical next steps (who to approach, what to offer, and why).\n"
-                    "Emphasize counties and cities mentioned by the user. Be concise, sales-focused, and actionable."
+                    "You are a research assistant for Tynan Equipment Company.\n"
+                    "You are given a markdown list of search results about industrial, warehouse, "
+                    "manufacturing, or logistics projects in Indiana.\n\n"
+                    "Your job is to:\n"
+                    "- Focus ONLY on describing projects (no sales advice, no outreach suggestions).\n"
+                    "- For each clearly relevant project, summarize:\n"
+                    "  - Project / facility name\n"
+                    "  - Company or developer (if clear)\n"
+                    "  - City and county\n"
+                    "  - Type of facility (warehouse, distribution center, logistics park, plant, etc.)\n"
+                    "  - Any mentioned size (square footage), investment amount, or number of jobs\n"
+                    "  - Status and timing (announced, under construction, completion date if given)\n"
+                    "  - A short one-line description of what the site will be used for\n"
+                    "  - Link to the main source\n\n"
+                    "Important rules:\n"
+                    "- Do NOT invent numbers or companies that aren’t in the intel list.\n"
+                    "- If details are missing (size, jobs, etc.), say they are not specified.\n"
+                    "- Do NOT give recommendations on who to call or how to sell. Just describe projects.\n"
+                    "- If no solid projects are found for the requested area/timeframe, say that clearly.\n"
                 )
             }
 
             messages = [
                 system_prompt,
+                # Raw intel as context
                 {"role": "system", "content": intel_md or "No recent developments found."},
                 {"role": "user", "content": user_q},
             ]
@@ -1489,6 +1497,7 @@ def chat():
     except Exception as e:
         app.logger.exception("Unhandled /api/chat error: %s", e)
         return _ok_payload(f"❌ Unhandled error in /api/chat: {e}"), 500
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Modes list

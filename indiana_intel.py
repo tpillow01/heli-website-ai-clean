@@ -4,13 +4,13 @@ indiana_intel.py
 Indiana developments lead-finder for Tynan / Heli AI site.
 
 Responsibilities:
-- Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
+- Take a natural-language question (e.g. "new warehouses in Boone County in the last 12–18 months")
 - Hit Google Custom Search JSON API (Programmable Search Engine) for
-  Indiana industrial / logistics / manufacturing projects
+  Indiana industrial / logistics / manufacturing / warehouse projects
 - Normalize results into simple dicts
 - Provide markdown rendering for the chat UI and AI prompt
 
-Environment variables required:
+Environment variables required (set in Render):
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
 - GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured to search the web
 """
@@ -36,25 +36,17 @@ if not log.handlers:
 # Config: Google CSE
 # ---------------------------------------------------------------------------
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
+GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
+GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
-# Strip whitespace so a value like "  abc123  " still works
-GOOGLE_CSE_KEY = (os.environ.get("GOOGLE_CSE_KEY") or "").strip()
-GOOGLE_CSE_CX = (os.environ.get("GOOGLE_CSE_CX") or "").strip()
-
-# DEBUG: log whether the keys are present on startup (True/False, not the actual key)
-log.info("indiana_intel: GOOGLE_CSE_KEY present: %s", bool(GOOGLE_CSE_KEY))
-log.info("indiana_intel: GOOGLE_CSE_CX present: %s", bool(GOOGLE_CSE_CX))
-
-# We don't really have dates from Google CSE reliably, so "days" is mostly
-# conceptual here, but we keep the parameter for future tuning.
-DEFAULT_DAYS = 90
+# We don't really have reliable dates from CSE; keep "days" parameter for API compatibility.
+DEFAULT_DAYS = 365
 
 # Base industrial / logistics keywords for Indiana
 BASE_KEYWORDS = (
     'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
-    'OR plant OR factory OR industrial OR fulfillment)'
+    'OR plant OR factory OR industrial OR fulfillment OR "industrial park")'
 )
-
 
 # ---------------------------------------------------------------------------
 # Small helpers
@@ -67,7 +59,7 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Very light-weight extractor:
     - Finds 'X County' → county='X County'
-    - Tries to grab a city name after 'in ' if it looks like 'Greenwood' or 'Greenwood, IN'
+    - Tries to grab a city name after 'in ' / 'around ' / 'near '.
     Returns (city, county).
     """
     if not q:
@@ -75,36 +67,43 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     text = q.strip()
 
     # County: e.g. "in Boone County", "Boone County leads", etc.
-    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text)
+    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text, flags=re.I)
     county = None
     if m_county:
-        county = f"{m_county.group(1).strip()} County"
+        # Title-case for nicer logging/queries
+        name = m_county.group(1).strip()
+        county = f"{name.title()} County"
 
-    # City: look for "in Greenwood", "around Greenwood, IN", etc.
-    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text)
+    # City: e.g. "in Greenwood", "around Plainfield, IN", etc.
+    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text, flags=re.I)
     city = None
     if m_city:
         raw = m_city.group(1).strip()
+        # Strip trailing "Indiana" / "IN"
         raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
         if raw:
-            city = raw
+            city = raw.title()
 
     return (city, county)
 
 
+# Words from the user question we don't want to blindly shove into the Google query
 _STOPWORDS = {
     "what", "are", "there", "any", "new", "or", "in", "the", "last", "month",
     "months", "recent", "recently", "project", "projects", "have", "has",
     "been", "announced", "announcement", "for", "about", "on", "of", "a",
-    "an", "county", "indiana", "logistics", "warehouse", "distribution",
-    "center", "centers",
+    "an", "county", "indiana", "logistics", "warehouse", "warehouses",
+    "distribution", "center", "centers", "developments", "development",
+    "years", "year", "days", "day",
 }
 
 
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
-    Build a Google CSE query that always anchors on Indiana industrial keywords,
-    with optional city / county bias, and a *small* extra keyword tail from the question.
+    Build a Google CSE query that:
+    - Always anchors on Indiana + industrial/warehouse keywords
+    - Adds city / county if we found them
+    - Adds a small cleaned tail from the question as a soft signal
     """
     parts: List[str] = [BASE_KEYWORDS]
 
@@ -119,14 +118,18 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
     extra_tokens: List[str] = []
     for tok in tokens:
         tl = tok.lower()
+        # Skip stopwords and pure numbers (12, 18, etc.)
         if tl in _STOPWORDS:
             continue
+        if tl.isdigit():
+            continue
         extra_tokens.append(tok)
+
     if extra_tokens:
         parts.append(" ".join(extra_tokens[:8]))
 
     query = " ".join(parts)
-    log.info("Google CSE query: %s", query)
+    log.info("indiana_intel: Google CSE query: %s", query)
     return query
 
 
@@ -135,12 +138,14 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
     Thin wrapper around Google Custom Search JSON API.
     Returns a list of raw results.
     """
-    if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
+    key_present = bool(GOOGLE_CSE_KEY)
+    cx_present = bool(GOOGLE_CSE_CX)
+    if not key_present or not cx_present:
         log.warning(
             "GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set or empty; returning empty result list. "
             "GOOGLE_CSE_KEY present=%s, GOOGLE_CSE_CX present=%s",
-            bool(GOOGLE_CSE_KEY),
-            bool(GOOGLE_CSE_CX),
+            key_present,
+            cx_present,
         )
         return []
 
@@ -160,7 +165,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         return []
 
     items = data.get("items", []) or []
-    log.info("Google CSE returned %s items", len(items))
+    log.info("indiana_intel: Google CSE returned %s items", len(items))
 
     out: List[Dict[str, Any]] = []
     for it in items:
@@ -170,7 +175,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         title = it.get("title") or ""
         snippet = it.get("snippet") or it.get("htmlSnippet") or ""
         url = it.get("link") or ""
-        provider = ""
+        provider = ""  # CSE usually doesn't give us a clean provider name
 
         # Try to sniff out a date from metatags (best-effort only)
         dt_iso: Optional[str] = None
@@ -218,7 +223,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
 def _looks_relevant(item: Dict[str, Any]) -> bool:
     """
     Quick relevance filter: look for industrial / facility terms in title/snippet.
-    If nothing passes this filter, we will fall back to the raw items.
+    If nothing passes this filter, the caller will fall back to raw items.
     """
     text = _lower(item.get("title", "") + " " + item.get("snippet", ""))
     if not text:
@@ -240,6 +245,8 @@ def _looks_relevant(item: Dict[str, Any]) -> bool:
         "expansion",
         "distribution hub",
         "cold storage",
+        "logistics park",
+        "logistics center",
     ):
         if kw in text:
             hits += 1
@@ -285,9 +292,9 @@ def search_indiana_developments(
             r["county_hint"] = county
             filtered.append(r)
 
-    # If our filter killed everything, just fall back to the raw items
+    # If our filter killed everything, just fall back to the top few raw items
     if not filtered:
-        log.info("No items passed relevance filter; falling back to raw items.")
+        log.info("indiana_intel: No items passed relevance filter; falling back to raw top items.")
         filtered = raw_results[:5]
         for r in filtered:
             r["city_hint"] = city
