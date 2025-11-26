@@ -5,15 +5,14 @@ Indiana developments lead-finder for Tynan / Heli AI site.
 
 Responsibilities:
 - Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
-- Hit Google Programmable Search (Custom Search JSON API) for Indiana
-  industrial / logistics / manufacturing projects
+- Hit Google Custom Search JSON API (Programmable Search Engine) for
+  Indiana industrial / logistics / manufacturing projects
 - Normalize results into simple dicts
 - Provide markdown rendering for the chat UI and AI prompt
 
-NOTE:
-- You MUST set these environment variables in Render:
-    GOOGLE_CSE_API_KEY  -> your Google API key
-    GOOGLE_CSE_CX       -> your Custom Search Engine ID
+Environment variables required:
+- GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
+- GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured to search the web
 """
 
 from __future__ import annotations
@@ -34,19 +33,20 @@ if not log.handlers:
     )
 
 # ---------------------------------------------------------------------------
-# Config: Google Programmable Search
+# Config: Google CSE
 # ---------------------------------------------------------------------------
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
-GOOGLE_CSE_API_KEY = os.environ.get("GOOGLE_CSE_API_KEY")
+GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
-# This is just a semantic parameter now (Google API doesn't take "days")
+# We don't really have dates from Google CSE reliably, so "days" is mostly
+# conceptual here, but we keep the parameter for future tuning.
 DEFAULT_DAYS = 60
 
-# Base keywords to bias toward forklift-relevant projects in Indiana
+# Base industrial / logistics keywords for Indiana
 BASE_KEYWORDS = (
-    "Indiana (warehouse OR \"distribution center\" OR logistics OR "
-    "manufacturing OR plant OR factory OR industrial OR fulfillment)"
+    'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
+    'OR plant OR factory OR industrial OR fulfillment)'
 )
 
 
@@ -61,8 +61,7 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Very light-weight extractor:
     - Finds 'X County' → county='X County'
-    - Tries to grab a city name after 'in ' if it looks like 'Greenwood'
-      or 'Greenwood, IN'
+    - Tries to grab a city name after 'in ' if it looks like 'Greenwood' or 'Greenwood, IN'
     Returns (city, county).
     """
     if not q:
@@ -80,7 +79,6 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     city = None
     if m_city:
         raw = m_city.group(1).strip()
-        # Remove trailing "Indiana" / "IN"
         raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
         if raw:
             city = raw
@@ -88,42 +86,59 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     return (city, county)
 
 
+_STOPWORDS = {
+    "what", "are", "there", "any", "new", "or", "in", "the", "last", "month",
+    "months", "recent", "recently", "project", "projects", "have", "has",
+    "been", "announced", "announcement", "for", "about", "on", "of", "a",
+    "an", "county", "indiana", "logistics", "warehouse", "distribution",
+    "center", "centers",
+}
+
+
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
-    Build a Google-friendly query that anchors on Indiana industrial keywords,
-    with optional city / county bias.
+    Build a Google CSE query that always anchors on Indiana industrial keywords,
+    with optional city / county bias, and a *small* extra keyword tail from the question.
     """
-    parts = [BASE_KEYWORDS]
+    parts: List[str] = [BASE_KEYWORDS]
 
     if county:
         parts.append(f'"{county}"')
     if city:
         parts.append(f'"{city}"')
 
-    cleaned = user_q.strip()
-    if cleaned:
-        parts.append(f"({cleaned})")
+    # Clean the user question and add a few non-boring keywords as a soft hint
+    cleaned = re.sub(r"[“”\"']", " ", user_q or "")
+    tokens = re.findall(r"[A-Za-z0-9]+", cleaned)
+    extra_tokens: List[str] = []
+    for tok in tokens:
+        tl = tok.lower()
+        if tl in _STOPWORDS:
+            continue
+        extra_tokens.append(tok)
+    if extra_tokens:
+        parts.append(" ".join(extra_tokens[:8]))
 
-    return " ".join(parts)
+    query = " ".join(parts)
+    log.info("Google CSE query: %s", query)
+    return query
 
 
 def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
     """
-    Thin wrapper around Google Programmable Search (Custom Search JSON API).
-    Returns a list of *raw* result dicts.
+    Thin wrapper around Google Custom Search JSON API.
+    Returns a list of raw results.
     """
-    if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX:
-        log.warning("GOOGLE_CSE_API_KEY or GOOGLE_CSE_CX not set; returning empty result list.")
+    if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
+        log.warning("GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set; returning empty result list.")
         return []
 
     params = {
-        "key": GOOGLE_CSE_API_KEY,
+        "key": GOOGLE_CSE_KEY,
         "cx": GOOGLE_CSE_CX,
         "q": query,
-        "num": 10,  # up to 10 per request
+        "num": 10,
     }
-
-    log.info("Google CSE query: %s", query)
 
     try:
         resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=10)
@@ -134,50 +149,47 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         return []
 
     items = data.get("items", []) or []
+    log.info("Google CSE returned %s items", len(items))
+
     out: List[Dict[str, Any]] = []
-
     for it in items:
+        if not isinstance(it, dict):
+            continue
+
         title = it.get("title") or ""
-        snippet = it.get("snippet") or ""
+        snippet = it.get("snippet") or it.get("htmlSnippet") or ""
         url = it.get("link") or ""
-
-        # Rough "provider" = domain of the URL
         provider = ""
-        if url:
-            m_host = re.search(r"https?://([^/]+)/?", url)
-            if m_host:
-                provider = m_host.group(1)
 
-        # Try to grab a published date from metadata if present
-        date_str: Optional[str] = None
-        try:
-            pagemap = it.get("pagemap", {}) or {}
-            metatags = pagemap.get("metatags", [])
-            if isinstance(metatags, list) and metatags:
-                meta0 = metatags[0]
-                # Common fields websites use
+        # Try to sniff out a date from metatags (best-effort only)
+        dt_iso: Optional[str] = None
+        pagemap = it.get("pagemap") or {}
+        meta_list = pagemap.get("metatags") or []
+        if isinstance(meta_list, list):
+            for m in meta_list:
+                if not isinstance(m, dict):
+                    continue
                 for key in (
                     "article:published_time",
                     "og:updated_time",
                     "date",
+                    "dc.date",
                     "pubdate",
                 ):
-                    if key in meta0:
-                        date_str = str(meta0[key])
+                    if key in m:
+                        dt_iso = str(m[key])
                         break
-        except Exception:
-            date_str = None
+                if dt_iso:
+                    break
 
-        dt_iso: Optional[str] = None
-        if date_str:
-            # Best-effort parse; many formats exist, so be defensive
+        # Normalize date string a bit
+        if dt_iso:
             try:
-                # Handle "2024-01-02T12:34:56Z" or similar
-                ds = date_str.replace("Z", "+00:00")
-                dt = datetime.fromisoformat(ds)
-                dt_iso = dt.iso8601()
+                dt = datetime.fromisoformat(dt_iso.replace("Z", "+00:00"))
+                dt_iso = dt.isoformat()
             except Exception:
-                dt_iso = None
+                # keep raw if we can't parse
+                pass
 
         out.append(
             {
@@ -185,7 +197,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
                 "snippet": snippet,
                 "url": url,
                 "provider": provider,
-                "date": dt_iso,
+                "date": dt_iso,  # may be None
             }
         )
 
@@ -195,6 +207,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
 def _looks_relevant(item: Dict[str, Any]) -> bool:
     """
     Quick relevance filter: look for industrial / facility terms in title/snippet.
+    If nothing passes this filter, we will fall back to the raw items.
     """
     text = _lower(item.get("title", "") + " " + item.get("snippet", ""))
     if not text:
@@ -204,6 +217,7 @@ def _looks_relevant(item: Dict[str, Any]) -> bool:
     for kw in (
         "warehouse",
         "distribution center",
+        "distribution facility",
         "logistics",
         "fulfillment",
         "industrial park",
@@ -222,6 +236,9 @@ def _looks_relevant(item: Dict[str, Any]) -> bool:
     return hits > 0
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 def search_indiana_developments(
     user_q: str,
     days: int = DEFAULT_DAYS,
@@ -236,8 +253,8 @@ def search_indiana_developments(
         "title": str,
         "snippet": str,
         "url": str,
-        "provider": str,
-        "date": "YYYY-MM-DD" or None,
+        "provider": str (often empty with CSE),
+        "date": ISO string or None,
         "city_hint": Optional[str],
         "county_hint": Optional[str],
       }
@@ -246,17 +263,26 @@ def search_indiana_developments(
     query = _build_query(user_q, city, county)
 
     raw_results = _google_cse_search(query, days=days)
+    if not raw_results:
+        return []
+
+    # First pass: apply relevance filter
     filtered: List[Dict[str, Any]] = []
-
     for r in raw_results:
-        if not _looks_relevant(r):
-            continue
+        if _looks_relevant(r):
+            r["city_hint"] = city
+            r["county_hint"] = county
+            filtered.append(r)
 
-        r["city_hint"] = city
-        r["county_hint"] = county
-        filtered.append(r)
+    # If our filter killed everything, just fall back to the top few raw items
+    if not filtered:
+        log.info("No items passed relevance filter; falling back to raw top items.")
+        filtered = raw_results[:5]
+        for r in filtered:
+            r["city_hint"] = city
+            r["county_hint"] = county
 
-    # Sort by date desc if we have dates; otherwise keep Google order
+    # Sort by date desc (newest first) when we have dates; otherwise keep API order
     def _dt(item: Dict[str, Any]) -> float:
         d = item.get("date")
         if not d:
@@ -275,10 +301,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     Compact markdown summary for chat UI or as context into GPT.
     """
     if not items:
-        return (
-            "_No recent Indiana developments found for that query. "
-            "Try adjusting the city/county or your keywords._"
-        )
+        return "_No recent Indiana developments found for that query. Try widening the date range or adjusting the city/county._"
 
     lines: List[str] = ["**Recent Indiana Developments (lead candidates):**"]
     for i, item in enumerate(items[:15], start=1):
