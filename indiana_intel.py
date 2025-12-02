@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import re
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -242,10 +242,10 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
     return out
 
 # ---------------------------------------------------------------------------
-# Classification & filtering – forklift relevance + junk removal
+# Project heuristics (forklift-relevant vs. junk)
 # ---------------------------------------------------------------------------
 
-# Forklift-relevant positive signals
+# Needs to look like the kind of site that would realistically use forklifts
 _FORKLIFT_POSITIVE = [
     "warehouse",
     "distribution center",
@@ -270,7 +270,39 @@ _FORKLIFT_POSITIVE = [
     "equipment plant",
 ]
 
-# Obvious “not a forklift customer” signals (or low-value noise)
+# Needs to sound like an actual project / build, not a generic marketing page
+_PROJECT_VERBS = [
+    "project",
+    "development",
+    "redevelopment",
+    "build",
+    "building",
+    "constructed",
+    "construction",
+    "construct",
+    "expansion",
+    "expands",
+    "expand",
+    "adding jobs",
+    "add jobs",
+    "will invest",
+    "investment",
+    "investing",
+    "broke ground",
+    "groundbreaking",
+    "opens",
+    "opening",
+    "to open",
+    "to locate in",
+    "to locate",
+    "to build",
+    "new facility",
+    "new plant",
+    "new warehouse",
+    "new distribution center",
+]
+
+# Phrases that usually mean "generic info / tourism / services / housing"
 _PROJECT_NEGATIVE_TEXT = [
     "official website",
     "faq",
@@ -321,40 +353,49 @@ _PROJECT_NEGATIVE_TEXT = [
     "condominiums",
     "senior living",
     "assisted living",
+    "key industries",  # this knocks out those generic "Key Industries - Hendricks County" pages
 ]
 
+# Domains that are almost never real development projects
 _PROJECT_NEGATIVE_URL = [
     "facebook.com",
     "instagram.com",
     "twitter.com",
     "x.com",
     "youtube.com",
-    "visit hendrickscounty",
     "visithendrickscounty",
+    "visit hendrickscounty",
     "tripadvisor.com",
+    "hcedp.org/key-industries",
 ]
 
 
 def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
     """
-    Decide whether this CSE hit looks like a concrete forklift-relevant project
-    vs. generic marketing, tourism, FAQ, or random news.
+    Decide whether a search hit is a forklift-relevant *project* vs.
+    generic county marketing / tourism / news noise.
     """
     text = _lower(f"{title} {snippet}")
     url_l = _lower(url or "")
 
-    # Kill obvious junk domains
+    # Kill obvious junk by URL
     for bad in _PROJECT_NEGATIVE_URL:
         if bad in url_l:
             return False
 
-    # Kill obvious non-forklift-y content
+    # Kill obvious junk by text
     for neg in _PROJECT_NEGATIVE_TEXT:
         if neg in text:
             return False
 
-    # Require at least one forklift-relevant positive signal
-    if not any(pos in text for pos in _FORKLIFT_POSITIVE):
+    # Must mention forklift-relevant facility type
+    has_positive = any(pos in text for pos in _FORKLIFT_POSITIVE)
+    if not has_positive:
+        return False
+
+    # And must sound like a project / build / expansion, not just "key industries"
+    has_project_verb = any(pv in text for pv in _PROJECT_VERBS)
+    if not has_project_verb:
         return False
 
     return True
@@ -384,6 +425,7 @@ def _classify_scope_and_location(
         c = city.lower()
         if c and c in text:
             scope = "local"
+        # If no county, we can show the city as the label
         if not county:
             loc_label = city
 
@@ -410,9 +452,6 @@ def _infer_project_type(title: str, snippet: str) -> str:
 
     return "Industrial / commercial project"
 
-# ---------------------------------------------------------------------------
-# Normalization
-# ---------------------------------------------------------------------------
 
 def _normalize_projects(
     raw_items: List[Dict[str, Any]],
@@ -422,7 +461,8 @@ def _normalize_projects(
 ) -> List[Dict[str, Any]]:
     """
     Convert raw CSE results into the structured dicts used by the chat layer.
-    We do NOT invent square footage, job counts, or dollars – those stay None.
+    We do NOT invent square footage, job counts, or dollars – those stay None
+    unless we explicitly parse them (currently we don't).
     """
     inferred_year = _extract_year_from_question(user_q)
     original_area_label = county or city or "Indiana"
@@ -435,14 +475,13 @@ def _normalize_projects(
         provider = it.get("provider") or ""
         dt = it.get("date")  # datetime or None
 
-        # Filter out obvious non-project / non-forklift hits
+        # Hard filter: must look like a forklift-relevant project
         if not _looks_like_project_hit(title, snippet, url):
             continue
 
         scope, location_label = _classify_scope_and_location(title, snippet, city, county)
         project_type = _infer_project_type(title, snippet)
 
-        # Timeline
         timeline_year: Optional[int] = dt.year if isinstance(dt, datetime) else None
         if inferred_year and (timeline_year is not None) and (timeline_year != inferred_year):
             timeline_stage = "outside requested timeframe"
@@ -461,7 +500,7 @@ def _normalize_projects(
                 "location_label": location_label,
                 "original_area_label": original_area_label,
 
-                # Scale / economics – kept None (no guessing)
+                # Scale / economics (left as None – no guessing)
                 "sqft": None,
                 "jobs": None,
                 "investment": None,
@@ -469,7 +508,7 @@ def _normalize_projects(
                 # Timeline
                 "timeline_stage": timeline_stage,
                 "timeline_year": timeline_year,
-                "raw_date": dt,  # keep raw datetime for recency sorting
+                "raw_date": dt,
 
                 # Source
                 "url": url,
@@ -479,6 +518,7 @@ def _normalize_projects(
         )
 
     return projects
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -497,9 +537,6 @@ def search_indiana_developments(
     - First attempts a county/city-biased search.
     - If no results at all, falls back to a statewide search (no city/county constraints)
       so the chat layer can still talk about major Indiana projects.
-    - Applies a recency preference: it tries to keep only items whose date is within
-      `days` (but not more than about 4 years). If that would yield nothing, it
-      falls back to "whatever we have" instead of returning empty.
     - Returns a list of normalized project dicts:
 
       {
@@ -517,12 +554,15 @@ def search_indiana_developments(
         "url": str,
         "provider": str,
         "snippet": str,
-        "raw_date": Optional[datetime],
       }
+
+    NOTE: We currently do NOT hard-filter by `days` – instead we sort by recency
+    and use a "recent vs older" split capped at ~4 years, so you still get
+    something even if nothing super-fresh exists.
     """
     city, county = _extract_geo_hint(user_q)
     original_area_label = county or city or "Indiana"
-    _ = original_area_label  # reserved for future use
+    _ = original_area_label  # reserved if you want it later
 
     # 1) County/city-biased search
     query_local = _build_query(user_q, city, county)
@@ -534,23 +574,22 @@ def search_indiana_developments(
         query_statewide = _build_query(user_q, city=None, county=None)
         raw_statewide = _google_cse_search(query_statewide)
         if not raw_statewide:
+            # Truly nothing – return empty list so the chat layer can explain that
             return []
 
         projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
     else:
-        # We have some local-biased hits; normalize them.
+        # 3) We have some local-biased hits; normalize them.
         projects = _normalize_projects(raw_local, city=city, county=county, user_q=user_q)
 
     if not projects:
+        # Either everything was filtered as non-forklift-relevant, or CSE was junk
         return []
 
-    # -------------------------------------------------------------------
-    # Recency preference
-    # -------------------------------------------------------------------
-    # Interpret `days` as "prefer results within this many days, capped at ~4 years".
-    # Your /api/chat currently passes something like 365*10; this keeps it from
-    # dragging in very old stuff if newer projects exist.
-    max_recent_days = min(days, 365 * 4)  # ~4 years max window
+    # -----------------------------------------------------------------------
+    # Recency preference: split into "recent" vs "older"
+    # -----------------------------------------------------------------------
+    max_recent_days = min(days, 365 * 4)  # cap at ~4 years even if you pass 10
     now = datetime.utcnow()
 
     recent: List[Dict[str, Any]] = []
@@ -565,33 +604,26 @@ def search_indiana_developments(
             else:
                 older.append(p)
         else:
-            # No date info; treat as older / unknown
+            # No date info – treat as "older / unknown"
             older.append(p)
 
-    if recent:
-        candidates = recent
-    else:
-        # Nothing recent – fall back so we give *something* instead of "nothing found"
-        candidates = older
+    candidates = recent if recent else older
 
-    # Sort newest → oldest using raw_date
+    # Sort newest → oldest
     def _sort_key(p: Dict[str, Any]) -> datetime:
         dt = p.get("raw_date")
         if isinstance(dt, datetime):
             return dt
-        # Push unknown dates to the back
         return datetime(1900, 1, 1)
 
     candidates.sort(key=_sort_key, reverse=True)
-
     return candidates[:max_items]
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
-    Simple markdown-ish debug formatter. This is what your /api/chat mode
-    passes into the model as context, so we make sure it includes recency
-    and forklift relevance.
+    Simple markdown-ish debug formatter. This is NOT what your chat UI uses
+    for the final answer, but it's handy for logging and manual tests.
     """
     if not items:
         return (
@@ -613,6 +645,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         ptype = item.get("project_type") or "Industrial / commercial project"
 
         lines.append(f"{i}. {title} — {loc}")
+
         meta_bits = [ptype]
         if provider:
             meta_bits.append(provider)
