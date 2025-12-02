@@ -98,7 +98,6 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
     """
     Build a Google CSE query anchored on Indiana industrial/commercial keywords,
     with optional city / county bias, plus a small keyword tail from the question.
-    (No domain restriction – we want as many relevant hits as possible.)
     """
     parts: List[str] = [BASE_KEYWORDS]
 
@@ -191,24 +190,75 @@ def _score_relevance(user_q: str, title: str, snippet: str) -> int:
     return score
 
 
-def _infer_project_type(title: str, snippet: str) -> str:
+def _classify_and_describe_project(title: str, snippet: str) -> Tuple[str, str]:
     """
-    Tiny heuristic to guess project type from title/snippet.
-    Just used for UI/context – not mission critical.
+    Classify what kind of project this is, and produce a short 'what this is' description.
+    This is where we distinguish between:
+    - Warehouse / logistics
+    - Manufacturing / plant
+    - Industrial / business park
+    - Office / HQ
+    - Civic / arts venue
+    - Public services / recycling / utilities
+    - Generic county info
     """
     text = f"{title} {snippet}".lower()
 
-    if "distribution center" in text or "fulfillment center" in text:
-        return "Warehouse / logistics"
-    if "warehouse" in text or "logistics park" in text or "logistics center" in text:
-        return "Warehouse / logistics"
-    if "manufacturing" in text or "factory" in text or "plant" in text:
-        return "Manufacturing / plant"
-    if "headquarters" in text or "hq" in text:
-        return "Headquarters / office"
-    if "business park" in text or "industrial park" in text:
-        return "Business / industrial park"
-    return "Industrial / commercial project"
+    # Civic / arts / events
+    if any(k in text for k in ("theatre", "theater", "performing arts", "concert", "music venue", "stage", "arts center", "event space")):
+        proj_type = "Civic / arts venue"
+        desc = "Performing arts and events venue (theatre / event space / public gathering space), not a warehouse or manufacturing facility."
+        return proj_type, desc
+
+    # Public services / recycling / utilities
+    if any(k in text for k in ("yard waste", "recycling center", "solid waste", "transfer station", "landfill", "compost", "hazardous waste")):
+        proj_type = "Public services / recycling facility"
+        desc = "Public yard-waste / recycling / solid waste facility serving local residents, not a distribution center or manufacturing plant."
+        return proj_type, desc
+
+    # Generic county / extension / info page
+    if any(k in text for k in ("extension office", "purdue extension", "4-h", "nutrition education", "county profile")):
+        proj_type = "General county information (not a specific project)"
+        desc = "General information page about the county and its industries, not a single construction project or facility."
+        return proj_type, desc
+
+    # Warehouse / logistics
+    if any(k in text for k in ("distribution center", "fulfillment center", "logistics park", "logistics center", "cross-dock", "bulk warehouse")):
+        proj_type = "Warehouse / logistics"
+        desc = "Warehouse or logistics facility focused on storage, distribution, or fulfillment operations."
+        return proj_type, desc
+
+    if "warehouse" in text:
+        proj_type = "Warehouse / logistics"
+        desc = "Warehouse facility that may involve storage, order picking, shipping, and receiving operations."
+        return proj_type, desc
+
+    # Manufacturing / plant
+    if any(k in text for k in ("manufacturing", "manufacturing plant", "production plant", "factory", "assembly plant", "industrial plant")):
+        proj_type = "Manufacturing / plant"
+        desc = "Manufacturing or production plant involving industrial processes and material handling."
+        return proj_type, desc
+
+    # Industrial / business park
+    if any(k in text for k in ("industrial park", "business park", "commerce park", "logistics park")):
+        proj_type = "Industrial / business park"
+        desc = "Industrial or business park with multiple commercial / industrial buildings and potential warehouse or manufacturing tenants."
+        return proj_type, desc
+
+    # Office / HQ
+    if any(k in text for k in ("headquarters", "hq", "office building", "corporate office")):
+        proj_type = "Office / headquarters"
+        desc = "Office or headquarters project; forklift opportunities depend on whether there are associated warehouse / logistics facilities."
+        return proj_type, desc
+
+    # Fallback
+    proj_type = "Industrial / commercial project"
+    snippet_clean = " ".join((snippet or "").split())
+    if snippet_clean:
+        desc = snippet_clean
+    else:
+        desc = "Industrial / commercial project; the snippet did not provide additional details."
+    return proj_type, desc
 
 
 def _build_scope_summary(snippet: str) -> str:
@@ -248,7 +298,6 @@ def _build_scope_summary(snippet: str) -> str:
     m_inv = re.search(r"\$[\d,\.]+\s*(million|billion)?", text, flags=re.I)
     if m_inv:
         investment = m_inv.group(0)
-        # Keeps 'million'/'billion' as written if present
 
     bits: List[str] = []
     if sqft:
@@ -306,6 +355,47 @@ def _short_snippet(snippet: str, max_len: int = 260) -> str:
     return s[: max_len - 3].rstrip() + "..."
 
 
+def _infer_company_name(it: Dict[str, Any], url: str, title: str) -> Optional[str]:
+    """
+    Best-effort attempt to infer the company / developer name from Google's pagemap
+    and the URL. Never guesses wildly; falls back to the host name if needed.
+    """
+    pagemap = it.get("pagemap") or {}
+
+    # Organization-like objects
+    for key in ("organization", "localbusiness", "corporation", "place"):
+        entries = pagemap.get(key) or []
+        if isinstance(entries, list):
+            for ent in entries:
+                if isinstance(ent, dict):
+                    name = ent.get("name") or ent.get("legalname") or ent.get("legal_name")
+                    if name:
+                        return str(name).strip()
+
+    # Metatags like og:site_name
+    metas = pagemap.get("metatags") or []
+    if isinstance(metas, list):
+        for m in metas:
+            if not isinstance(m, dict):
+                continue
+            for key in ("og:site_name", "twitter:title", "application-name"):
+                if key in m and m[key]:
+                    cand = str(m[key]).strip()
+                    if cand and len(cand) >= 3:
+                        return cand
+
+    # Try to peel a clean name from the title before a dash / pipe
+    base_title = re.split(r"[-|–—]", title)[0].strip()
+    if base_title and len(base_title.split()) <= 6:
+        # e.g. "Hendricks Live!" or "Mohr Logistics Park"
+        return base_title
+
+    # Fallback to host
+    host = re.sub(r"^https?://", "", url).split("/")[0]
+    host = host.replace("www.", "")
+    return host or None
+
+
 def _google_cse_search(
     query: str,
     max_items: int = 10,
@@ -341,7 +431,6 @@ def _google_cse_search(
             "start": start,
         }
         if days and days > 0:
-            # "d90" = last 90 days
             params["dateRestrict"] = f"d{days}"
 
         try:
@@ -371,6 +460,8 @@ def _google_cse_search(
             seen_urls.add(url)
 
             dt_iso = _parse_date_from_pagemap(it)
+            company_name = _infer_company_name(it, url, title)
+            project_type, what_this_is = _classify_and_describe_project(title, snippet)
 
             out.append(
                 {
@@ -378,12 +469,14 @@ def _google_cse_search(
                     "snippet": snippet,
                     "url": url,
                     "provider": provider,
-                    "date": dt_iso,  # may be None
+                    "date": dt_iso,          # may be None
+                    "company_name": company_name,
+                    "project_type": project_type,
+                    "what_this_is": what_this_is,
                 }
             )
 
         start += len(items)
-        # Conservative safety break to avoid looping forever if something weird happens
         if len(items) < num:
             break
 
@@ -417,6 +510,8 @@ def search_indiana_developments(
         "county_hint": Optional[str],
         "score": int,                 # crude relevance score
         "project_type": str,          # e.g. "Warehouse / logistics"
+        "what_this_is": str,          # one-sentence explanation
+        "company_name": Optional[str]
       }
     """
     city, county = _extract_geo_hint(user_q)
@@ -447,16 +542,13 @@ def search_indiana_developments(
 
         # Soft filter by recency only if we actually got a date
         if parsed_dt and parsed_dt < cutoff:
-            # Too old for requested window; skip
             continue
 
         score = _score_relevance(user_q, title, snippet)
-        proj_type = _infer_project_type(title, snippet)
 
         r["city_hint"] = city
         r["county_hint"] = county
         r["score"] = score
-        r["project_type"] = proj_type
         r["_parsed_dt"] = parsed_dt  # private helper key for sorting
 
         enriched.append(r)
@@ -470,7 +562,6 @@ def search_indiana_developments(
 
     enriched.sort(key=_sort_key, reverse=True)
 
-    # Strip internal helper key
     for r in enriched:
         r.pop("_parsed_dt", None)
 
@@ -481,16 +572,17 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
     Structured plain-text summary for chat UI or as context into GPT.
 
-    Format example:
+    Example shape:
 
-    Here are some industrial and logistics related projects connected to Hancock County based on web search results.
+    Here are some industrial and logistics related projects connected to Hendricks County based on web search results.
 
-    Project Name – Hancock County, Indiana
-    Type: Warehouse / logistics
-    Company / Developer: not specified in snippet
-    Scope: approx. 1,000,000-square-foot facility, around 500 jobs, $300M investment
+    Hendricks Live! – Hendricks County, Indiana
+    Type: Civic / arts venue
+    Company / Developer: Hendricks Live!
+    What this is: Performing arts and events venue (theatre / event space / public gathering space), not a warehouse or manufacturing facility.
+    Scope: approx. ... (if detected)
     Timeline: announcement year 2025
-    Source: https://...
+    Source: https://hendrickslive.org/
     Notes: Short cleaned snippet...
     """
     if not items:
@@ -499,7 +591,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             "Try adjusting the date range or phrasing."
         )
 
-    # Try to build a location-focused heading
+    # Heading based on first item's location hints
     first = items[0]
     county_hint = (first.get("county_hint") or "").strip()
     city_hint = (first.get("city_hint") or "").strip()
@@ -523,10 +615,22 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         provider = item.get("provider") or ""
         date = item.get("date") or ""
         proj_type = item.get("project_type") or "Industrial / commercial project"
+        what_this_is = item.get("what_this_is") or ""
+        company_name = item.get("company_name") or ""
         city_hint = (item.get("city_hint") or "").strip()
         county_hint = (item.get("county_hint") or "").strip()
 
-        # Location label on first line
+        # Normalize date display
+        if date:
+            try:
+                dt = datetime.fromisoformat(date.replace("Z", "+00:00"))
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                date = dt.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+        # Location label
         if county_hint:
             loc_line = f"{county_hint}, Indiana"
         elif city_hint:
@@ -535,12 +639,10 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             loc_line = "Indiana"
 
         # Timeline label
-        timeline_label = _infer_timeline_label(date, snippet)
+        timeline_label = _infer_timeline_label(date if date else None, snippet)
 
-        # Scope summary from snippet
+        # Scope summary & notes
         scope_summary = _build_scope_summary(snippet)
-
-        # Short notes from snippet
         notes = _short_snippet(snippet)
 
         # Project heading
@@ -550,8 +652,14 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         lines.append(f"Type: {proj_type}")
 
         # Company / Developer
-        # We don't reliably have this in the Google response; keep explicit.
-        lines.append("Company / Developer: not specified in snippet")
+        if company_name:
+            lines.append(f"Company / Developer: {company_name}")
+        else:
+            lines.append("Company / Developer: not clearly specified in the search result; check the source site for details.")
+
+        # What this is (plain English)
+        if what_this_is:
+            lines.append(f"What this is: {what_this_is}")
 
         # Scope
         lines.append(f"Scope: {scope_summary}")
@@ -559,16 +667,12 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         # Timeline
         lines.append(f"Timeline: {timeline_label}")
 
-        # Source
-        if provider:
-            lines.append(f"Source: {url} ({provider})")
-        else:
+        # Source (clean URL; provider is implied by host)
+        if url:
             lines.append(f"Source: {url}")
 
         # Notes from snippet
         lines.append(f"Notes: {notes}")
-
-        # Blank line between projects
         lines.append("")
 
     return "\n".join(lines).rstrip()
