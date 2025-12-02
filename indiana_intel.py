@@ -535,8 +535,9 @@ def search_indiana_developments(
     - Extracts simple city/county hints from the user question.
     - Builds a Google CSE query anchored on Indiana industrial/commercial projects.
     - First attempts a county/city-biased search.
-    - If no results at all, falls back to a statewide search (no city/county constraints)
-      so the chat layer can still talk about major Indiana projects.
+    - If no results at all, OR if all local results are filtered out as non-projects,
+      falls back to a statewide search (no city/county constraints) so the chat layer
+      can still talk about major Indiana projects.
     - Returns a list of normalized project dicts:
 
       {
@@ -556,34 +557,43 @@ def search_indiana_developments(
         "snippet": str,
       }
 
-    NOTE: We currently do NOT hard-filter by `days` – instead we sort by recency
-    and use a "recent vs older" split capped at ~4 years, so you still get
-    something even if nothing super-fresh exists.
+    NOTE: We do not hard-filter by `days` – instead we sort by recency and use
+    a "recent vs older" split capped at ~4 years, so you still get something
+    even if nothing super-fresh exists.
     """
     city, county = _extract_geo_hint(user_q)
     original_area_label = county or city or "Indiana"
-    _ = original_area_label  # reserved if you want it later
+    _ = original_area_label  # reserved if needed later
 
     # 1) County/city-biased search
     query_local = _build_query(user_q, city, county)
     raw_local = _google_cse_search(query_local)
 
-    # 2) If nothing at all came back, fall back to a statewide search
-    if not raw_local:
-        log.info("No local results; trying statewide fallback query")
+    projects: List[Dict[str, Any]] = []
+
+    if raw_local:
+        # We have local-biased hits – normalize & filter them
+        projects = _normalize_projects(raw_local, city=city, county=county, user_q=user_q)
+
+        # If everything was filtered out as non-projects, try statewide instead
+        if not projects:
+            log.info("No forklift-relevant local projects; trying statewide fallback after filtering")
+            query_statewide = _build_query(user_q, city=None, county=None)
+            raw_statewide = _google_cse_search(query_statewide)
+            if not raw_statewide:
+                return []
+            projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
+    else:
+        # 2) No local CSE hits at all – go straight to statewide search
+        log.info("No local CSE results; trying statewide fallback query")
         query_statewide = _build_query(user_q, city=None, county=None)
         raw_statewide = _google_cse_search(query_statewide)
         if not raw_statewide:
-            # Truly nothing – return empty list so the chat layer can explain that
             return []
-
         projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
-    else:
-        # 3) We have some local-biased hits; normalize them.
-        projects = _normalize_projects(raw_local, city=city, county=county, user_q=user_q)
 
     if not projects:
-        # Either everything was filtered as non-forklift-relevant, or CSE was junk
+        # Even statewide had nothing that looked like a forklift-relevant project
         return []
 
     # -----------------------------------------------------------------------
@@ -618,7 +628,6 @@ def search_indiana_developments(
 
     candidates.sort(key=_sort_key, reverse=True)
     return candidates[:max_items]
-
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
