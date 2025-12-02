@@ -1413,52 +1413,69 @@ def chat():
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
 
-        # Indiana Developments (web intel – project details only, no sales advice)
+        # Indiana Developments (web intel)
         if mode == "indiana_developments":
             try:
-                # pull roughly last 12 months of projects (we enforce recency inside indiana_intel)
-                items = search_indiana_developments(user_q, days=365)
+                # Pull Indiana developments for up to ~5 years back to avoid missing older but relevant projects
+                items = search_indiana_developments(user_q, days=365 * 5)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
-            intel_block = render_developments_markdown(items)
-            has_any = bool(items)
+            intel_text = render_developments_markdown(items)
+
+            # If literally nothing came back from Google, just say that plainly
+            if not items:
+                return _ok_payload(
+                    "I couldn’t find any web results for that location and timeframe. "
+                    "Try adjusting the date range, county, or city name."
+                )
 
             system_prompt = {
                 "role": "system",
                 "content": (
-                    "You are an assistant for Tynan Equipment Company, a forklift dealership in Indiana.\n"
-                    "You will be given search results about Indiana industrial, warehouse, manufacturing, or logistics developments. "
-                    "Each result includes at least a title, snippet, URL, and sometimes a date.\n\n"
+                    "You are a research assistant for Tynan Equipment Company in Indiana.\n"
+                    "You are given web search hits about Indiana industrial, warehouse, "
+                    "logistics, manufacturing, business park, headquarters, and other "
+                    "commercial/industrial facility projects.\n\n"
                     "Your job:\n"
-                    "1) From these results, identify ONLY entries that clearly describe a specific project:\n"
-                    "   - new warehouse, distribution center, logistics facility, industrial plant, factory, or major expansion\n"
-                    "   - ignore generic county profiles, tourism pages, gardening events, statistics pages, etc.\n"
-                    "2) For each real project you find, output a clean, detailed summary using ONLY information available in the snippets or obvious general knowledge "
-                    "   about the company (e.g., HarperCollins is a large book publisher). Do NOT invent project-specific numbers (square footage, job counts, dollar amounts) "
-                    "   if they are not present in the snippet.\n\n"
-                    "Formatting rules (VERY IMPORTANT):\n"
-                    "- Do NOT use markdown asterisks (** or *).\n"
-                    "- For each project, output a block like this:\n"
-                    "  <span style=\"color:#b00020; font-weight:bold;\">PROJECT NAME – City, County</span>\n"
-                    "  Type: (e.g. logistics distribution center, cold storage warehouse, manufacturing plant)\n"
-                    "  Company / Developer: (company building or operating it, if clear from snippet; otherwise 'Not specified in snippet.')\n"
-                    "  Scope: (what the project is for, approximate role/scale as described in the snippet; if size or jobs aren't mentioned, say 'Not specified in snippet.')\n"
-                    "  Timeline: (any dates such as announcement, groundbreaking, expected completion; if none, say 'Not specified in snippet.')\n"
-                    "  Source: URL\n\n"
-                    "Additional guidance:\n"
-                    "- Focus ONLY on describing the projects themselves. Do NOT give sales advice, outreach steps, or what Tynan should do.\n"
-                    "- If there are no entries that clearly look like a new build or expansion project, respond with exactly:\n"
-                    "  No clearly identified new warehouse or logistics projects were found in the search results for the requested area and timeframe.\n"
-                    "- If there IS at least one project, DO NOT include any sentence about 'no clearly dated projects'. Just list the project blocks.\n"
+                    "- Identify and list as many concrete projects as possible for the city "
+                    "and county mentioned in the user's question.\n"
+                    "- Do NOT limit yourself only to warehouses or logistics; also include "
+                    "manufacturing plants, industrial parks, HQ buildings, large distribution "
+                    "facilities, and similar major commercial/industrial sites.\n"
+                    "- Prefer more recent projects (last 1–3 years), but if recent projects "
+                    "are scarce, still list older relevant projects instead of saying there "
+                    "are none.\n"
+                    "- As long as the search results contain multiple plausible candidates, "
+                    "you should normally list at least 3–6 projects.\n"
+                    "- Use ONLY the information visible in the provided search-result text. "
+                    "Do NOT invent square footage, job counts, cities, dollar amounts, or dates. "
+                    "If something is not mentioned, say 'not specified in snippet'.\n"
+                    "- NEVER answer with 'no projects found' if there is *any* result that can "
+                    "reasonably be interpreted as a project or facility.\n\n"
+                    "Formatting:\n"
+                    "- Start with one short sentence summarizing roughly how many projects you "
+                    "found for that county/city and the overall timeframe (for example: "
+                    "'Here are 4 notable industrial and logistics projects connected to Hendricks County from the web hits provided.').\n"
+                    "- Then list each project as a separate block in this exact structure "
+                    "(plain text, no bullets, no asterisks):\n"
+                    "  PROJECT NAME – City, County\n"
+                    "  Type: <warehouse / logistics facility / plant / HQ / etc.>\n"
+                    "  Company / Developer: <company or developer name if mentioned; otherwise 'not specified in snippet'>\n"
+                    "  Scope: <square footage, jobs, investment, or simply 'not specified in snippet'>\n"
+                    "  Timeline: <announcement or groundbreaking year/date if mentioned; otherwise 'not specified in snippet'>\n"
+                    "  Source: <URL>\n\n"
+                    "If a result looks more like general county marketing material or statistics "
+                    "rather than a single project, you may either skip it or include it as one "
+                    "project-like entry clearly labeled as general economic context.\n"
                 )
             }
 
             messages = [
                 system_prompt,
-                # raw intel as context
-                {"role": "system", "content": intel_block or "No search results found."},
+                # Raw web intel as context
+                {"role": "system", "content": intel_text},
                 {"role": "user", "content": user_q},
             ]
 
@@ -1467,14 +1484,15 @@ def chat():
                     model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
                     messages=messages,
                     max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
-                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.2"))  # low temp for factual summarizing
+                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35")),
                 )
                 ai_reply = (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 app.logger.exception("Indiana developments AI error: %s", e)
-                ai_reply = f"❌ Internal error generating Indiana intel: {e}"
+                ai_reply = f"❌ Internal error generating Indiana projects summary: {e}"
 
             return _ok_payload(ai_reply or "_No response produced._")
+
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
