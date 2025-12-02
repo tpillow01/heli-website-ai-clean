@@ -260,11 +260,8 @@ def search_indiana_developments(
     """
     Main entrypoint.
 
-    Strategy:
-    - Extract simple city/county hints from the user question.
-    - First do a county/city-biased search.
-    - If fewer than 2 relevant projects are found, do a broader Indiana-wide search
-      to pull in 1–3 additional projects from elsewhere in the state.
+    - Extracts simple city/county hints from the user question.
+    - Builds one or more Google CSE queries anchored on Indiana industrial projects.
     - Returns a list of normalized dicts:
       {
         "title": str,
@@ -278,54 +275,97 @@ def search_indiana_developments(
     """
     city, county = _extract_geo_hint(user_q)
 
-    # ----- 1) County / city-biased search
-    query_local = _build_query(user_q, city, county)
-    raw_local = _google_cse_search(query_local, days=days)
+    # --- 1) Primary query (as before) ---
+    primary_query = _build_query(user_q, city, county)
+    all_raw: List[Dict[str, Any]] = _google_cse_search(primary_query, days=days)
 
-    filtered_local: List[Dict[str, Any]] = []
-    for r in raw_local:
+    # --- 2) Extra queries to pull in more candidates for that county ---
+    # We keep these pretty generic so Google can find:
+    # - press releases
+    # - town / county meeting notes
+    # - industrial park announcements, etc.
+    county_term = county or ""
+    city_term = city or ""
+
+    extra_queries: List[str] = []
+
+    if county_term:
+        extra_queries.append(
+            f'Indiana "{county_term}" (warehouse OR '
+            f'"distribution center" OR logistics OR "industrial park" OR '
+            f'"logistics park" OR "fulfillment center" OR "industrial development")'
+        )
+
+    # If we have a city, bias another query to that city name.
+    if city_term:
+        extra_queries.append(
+            f'"{city_term}" Indiana (warehouse OR "distribution center" '
+            f'OR logistics OR "industrial park" OR "logistics park")'
+        )
+
+    # If user asked about 12 months / last year etc., add a generic
+    # "project" query too to catch things that don’t say “warehouse”
+    # in the snippet but are clearly developments.
+    q_lower = (user_q or "").lower()
+    if "12" in q_lower or "last year" in q_lower or "12 months" in q_lower:
+        extra_queries.append(
+            f'Indiana "{county_term or city_term}" '
+            f'(project OR development OR expansion) '
+            f'(industrial OR logistics OR warehouse OR distribution)'
+        )
+
+    # Run all extra queries and merge results
+    for q in extra_queries:
+        more = _google_cse_search(q, days=days)
+        if more:
+            all_raw.extend(more)
+
+    if not all_raw:
+        return []
+
+    # --- 3) De-duplicate by URL so the same article doesn’t show up 3 times ---
+    seen_urls: set[str] = set()
+    deduped: List[Dict[str, Any]] = []
+    for r in all_raw:
+        url = (r.get("url") or "").strip()
+        if not url:
+            continue
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        deduped.append(r)
+
+    if not deduped:
+        return []
+
+    # --- 4) Apply a *soft* relevance filter ---
+    filtered: List[Dict[str, Any]] = []
+    for r in deduped:
         if _looks_relevant(r):
             r["city_hint"] = city
             r["county_hint"] = county
-            filtered_local.append(r)
+            filtered.append(r)
 
-    # If we got enough local projects, just return those (sorted by date desc)
-    if len(filtered_local) >= 2:
-        filtered_local.sort(key=_sort_key_date, reverse=True)
-        return filtered_local
+    # If our filter killed everything, fall back to the top few raw items
+    if not filtered:
+        log.info("No items passed relevance filter; falling back to raw top items.")
+        filtered = deduped[:8]
+        for r in filtered:
+            r["city_hint"] = city
+            r["county_hint"] = county
 
-    # ----- 2) Statewide fallback if too few local projects
-    log.info(
-        "Fewer than 2 local projects found (count=%s); doing statewide fallback search.",
-        len(filtered_local),
-    )
+    # --- 5) Sort by date if we have it; otherwise keep Google’s order ---
+    def _dt(item: Dict[str, Any]) -> float:
+        d = item.get("date")
+        if not d:
+            return 0.0
+        try:
+            return datetime.fromisoformat(d).timestamp()
+        except Exception:
+            return 0.0
 
-    query_state = _build_query(user_q, city=None, county=None)
-    raw_state = _google_cse_search(query_state, days=days)
-
-    # Track URLs to avoid duplicates
-    seen_urls = {r.get("url") for r in filtered_local if r.get("url")}
-    for r in raw_state:
-        if not _looks_relevant(r):
-            continue
-        url = r.get("url")
-        if url and url in seen_urls:
-            continue
-        seen_urls.add(url)
-        # These are statewide, so we don't force city/county hints
-        r.setdefault("city_hint", None)
-        r.setdefault("county_hint", None)
-        filtered_local.append(r)
-        # Cap total at ~6 to keep context tight
-        if len(filtered_local) >= 6:
-            break
-
-    # If we still have nothing, just return empty and let the caller handle it
-    if not filtered_local:
-        return []
-
-    filtered_local.sort(key=_sort_key_date, reverse=True)
-    return filtered_local
+    filtered.sort(key=_dt, reverse=True)
+    return filtered
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
