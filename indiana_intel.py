@@ -8,7 +8,7 @@ Responsibilities:
 - Hit Google Custom Search JSON API (Programmable Search Engine) for
   Indiana industrial / logistics / manufacturing projects
 - Normalize results into simple dicts
-- Provide a compact text/markdown rendering for AI context or display
+- Provide a compact text summary for the chat UI or as context into GPT
 
 Environment variables required:
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
@@ -40,24 +40,13 @@ GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
 # How far back we try to keep things by default
-DEFAULT_DAYS = 365
+DEFAULT_DAYS = 365  # roughly last 12 months
 
 # Base industrial / logistics keywords for Indiana
 BASE_KEYWORDS = (
     'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
     'OR plant OR factory OR industrial OR fulfillment)'
 )
-
-# Bias toward economic development / gov / business news domains
-PREFERRED_DOMAIN_HINTS = [
-    "site:.gov",
-    "site:.us",
-    "site:.org",
-    "site:.edu",
-    "site:.in.us",
-    "site:insideindianabusiness.com",
-    "site:ibj.com",
-]
 
 # ---------------------------------------------------------------------------
 # Small helpers
@@ -108,8 +97,8 @@ _STOPWORDS = {
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
     Build a Google CSE query that always anchors on Indiana industrial keywords,
-    with optional city / county bias, + a small keyword tail from the question.
-    We also include one of the PREFERRED_DOMAIN_HINTS to bias toward news / econ dev.
+    with optional city / county bias, plus a small keyword tail from the question.
+    (No domain restriction – we want as many relevant hits as possible.)
     """
     parts: List[str] = [BASE_KEYWORDS]
 
@@ -129,11 +118,6 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
         extra_tokens.append(tok)
     if extra_tokens:
         parts.append(" ".join(extra_tokens[:6]))
-
-    # Add a domain hint to bias toward useful sources
-    # (we just pick the first one for now)
-    if PREFERRED_DOMAIN_HINTS:
-        parts.append(PREFERRED_DOMAIN_HINTS[0])
 
     query = " ".join(parts)
     log.info("Google CSE query: %s", query)
@@ -171,11 +155,10 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[str]:
         try:
             dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
         except Exception:
-            # Loose parsing for common "YYYY-MM-DD" or "YYYY/MM/DD" forms
+            dt = None
             for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y"):
                 try:
                     dt = datetime.strptime(val[:10], fmt)
-                    # Treat as local → convert to UTC naive
                     dt = dt.replace(tzinfo=None)
                     break
                 except Exception:
@@ -192,7 +175,7 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
+def _google_cse_search(query: str) -> List[Dict[str, Any]]:
     """
     Thin wrapper around Google Custom Search JSON API.
     Returns a list of normalized raw results.
@@ -230,11 +213,8 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         title = it.get("title") or ""
         snippet = it.get("snippet") or it.get("htmlSnippet") or ""
         url = it.get("link") or ""
-
-        # provider: use displayLink if available
         provider = it.get("displayLink") or ""
 
-        # Date: from metatags if we can
         dt_iso = _parse_date_from_pagemap(it)
 
         out.append(
@@ -309,6 +289,22 @@ def _within_days(item: Dict[str, Any], days: int) -> bool:
     return dt >= cutoff
 
 
+def _dt_score(item: Dict[str, Any]) -> float:
+    """
+    Turn item['date'] into a sortable timestamp (0.0 if unknown).
+    """
+    d = item.get("date")
+    if not d:
+        return 0.0
+    try:
+        dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.timestamp()
+    except Exception:
+        return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -332,32 +328,47 @@ def search_indiana_developments(
         "city_hint": Optional[str],
         "county_hint": Optional[str],
       }
+
+    Recency & quantity behavior:
+    - Try to keep items within `days` (e.g. last 12 months).
+    - If that yields 0–1 projects, we append older relevant projects as backup
+      so you see multiple developments even if they’re a bit older.
     """
     city, county = _extract_geo_hint(user_q)
     query = _build_query(user_q, city, county)
 
-    raw_results = _google_cse_search(query, days=days)
+    raw_results = _google_cse_search(query)
     if not raw_results:
         return []
 
-    # First pass: apply relevance filter
-    relevant: List[Dict[str, Any]] = []
-    for r in raw_results:
-        if _looks_relevant(r):
-            relevant.append(r)
+    # First pass: relevance filter
+    relevant: List[Dict[str, Any]] = [r for r in raw_results if _looks_relevant(r)]
 
     # If nothing looks relevant, fall back to everything
     if not relevant:
         log.info("No items passed relevance filter; falling back to raw Google items.")
         relevant = list(raw_results)
 
-    # Second pass: try to keep items within the date window if we have dates
-    recent_only = [r for r in relevant if _within_days(r, days)]
-    if recent_only:
-        chosen = recent_only
+    # Split into "recent" vs "older" based on days window
+    recent = [r for r in relevant if _within_days(r, days)]
+    older = [r for r in relevant if r not in recent]
+
+    # Choose results with a smart fallback:
+    # - If we have 2+ recent → use those
+    # - If we have 1 recent → keep it + a few older
+    # - If we have 0 recent → just use relevance-ordered set
+    if len(recent) >= 2:
+        chosen = recent
+    elif len(recent) == 1:
+        # 1 very recent project + top 3 older ones
+        older_sorted = sorted(older, key=_dt_score, reverse=True)
+        chosen = [recent[0]] + older_sorted[:3]
     else:
-        # No date-qualified hits; keep the relevant set but log it
-        log.info("No items had parseable dates within %s days; returning relevance-filtered set.", days)
+        # nothing clearly within the date window – return top relevant hits
+        log.info(
+            "No items had parseable dates within %s days; returning relevance-filtered set.",
+            days,
+        )
         chosen = relevant
 
     # Annotate with geo hints
@@ -365,38 +376,26 @@ def search_indiana_developments(
         r["city_hint"] = city
         r["county_hint"] = county
 
-    # Sort by date desc (newest first) when we have dates; otherwise keep API order
-    def _dt(item: Dict[str, Any]) -> float:
-        d = item.get("date")
-        if not d:
-            return 0.0
-        try:
-            dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            return dt.timestamp()
-        except Exception:
-            return 0.0
+    # Sort chosen by date desc (newest first) when we have dates; otherwise keep current order
+    chosen_sorted = sorted(chosen, key=_dt_score, reverse=True)
 
-    chosen.sort(key=_dt, reverse=True)
-
-    # Cap to a reasonable number for AI context
-    return chosen[:20]
+    # Cap to a reasonable number for AI context / UI
+    return chosen_sorted[:20]
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
-    Compact markdown/text summary for chat UI or as context into GPT.
+    Compact plain-text summary for chat UI or as context into GPT.
     (No *** or other markdown styling that will clash with your own prompt.)
     """
     if not items:
         return (
-            "No clearly dated new warehouse / logistics project announcements were found "
-            "in the search results for the requested time window."
+            "No clearly identified new warehouse or logistics projects were found "
+            "in the search results for the requested area and timeframe."
         )
 
     lines: List[str] = []
-    lines.append("Recent Indiana projects (raw web hits):")
+    lines.append("Recent Indiana projects (web search hits):")
 
     for i, item in enumerate(items[:15], start=1):
         title = item.get("title") or "Untitled"
@@ -414,13 +413,13 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
                 pass
 
         lines.append(f"{i}. {title}")
-        if provider or date:
-            pieces = []
-            if provider:
-                pieces.append(provider)
-            if date:
-                pieces.append(date)
-            lines.append("   " + " • ".join(pieces))
+        meta_bits = []
+        if provider:
+            meta_bits.append(provider)
+        if date:
+            meta_bits.append(date)
+        if meta_bits:
+            lines.append("   " + " • ".join(meta_bits))
         if snippet:
             lines.append(f"   {snippet}")
         if url:
