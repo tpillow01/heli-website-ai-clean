@@ -6,7 +6,7 @@ Indiana developments lead-finder for Tynan / Heli AI site.
 Responsibilities:
 - Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
 - Hit Google Custom Search JSON API (Programmable Search Engine) for
-  Indiana industrial / logistics / manufacturing projects
+  Indiana industrial / logistics / manufacturing / commercial projects
 - Normalize results into simple dicts
 - Provide a compact text summary for the chat UI or as context into GPT
 
@@ -39,13 +39,14 @@ GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
-# How far back we try to keep things by default
-DEFAULT_DAYS = 365  # roughly last 12 months
+# Try to focus roughly on last 12 months by default
+DEFAULT_DAYS = 365
 
-# Base industrial / logistics keywords for Indiana
+# Base industrial / logistics / commercial keywords for Indiana
 BASE_KEYWORDS = (
     'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
-    'OR plant OR factory OR industrial OR fulfillment)'
+    'OR plant OR factory OR industrial OR fulfillment OR "business park" '
+    'OR "industrial park" OR "logistics park" OR headquarters OR facility)'
 )
 
 # ---------------------------------------------------------------------------
@@ -91,12 +92,13 @@ _STOPWORDS = {
     "been", "announced", "announcement", "for", "about", "on", "of", "a",
     "an", "county", "indiana", "logistics", "warehouse", "distribution",
     "center", "centers", "companies", "coming", "to", "area", "city",
+    "kind", "sort", "type",
 }
 
 
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
-    Build a Google CSE query that always anchors on Indiana industrial keywords,
+    Build a Google CSE query anchored on Indiana industrial/commercial keywords,
     with optional city / county bias, plus a small keyword tail from the question.
     (No domain restriction – we want as many relevant hits as possible.)
     """
@@ -230,10 +232,11 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _looks_relevant(item: Dict[str, Any]) -> bool:
+def _looks_relevant(item: Dict[str, Any], city: Optional[str], county: Optional[str]) -> bool:
     """
-    Quick relevance filter: look for industrial / facility terms in title/snippet.
-    If nothing passes this filter, we will fall back to the raw items.
+    Relevance filter:
+    - Strong: facility / project keywords
+    - Soft: county / city name plus generic "new project / expansion / investment" language
     """
     text = _lower(item.get("title", "") + " " + item.get("snippet", ""))
     if not text:
@@ -258,11 +261,34 @@ def _looks_relevant(item: Dict[str, Any]) -> bool:
         "supply chain",
         "logistics facility",
         "distribution campus",
+        "business park",
+        "headquarters",
+        "hq",
+        "job creation",
+        "new jobs",
+        "investment",
+        "million",
     ):
         if kw in text:
             hits += 1
 
-    return hits > 0
+    if hits > 0:
+        return True
+
+    # Softer rule: if county or city name shows up in the text along with
+    # generic project-y words, treat as relevant.
+    geo_hit = False
+    if county and county.lower().split()[0] in text:
+        geo_hit = True
+    if city and city.lower() in text:
+        geo_hit = True
+
+    if geo_hit:
+        for soft_kw in ("project", "expansion", "development", "new facility", "groundbreaking"):
+            if soft_kw in text:
+                return True
+
+    return False
 
 
 def _within_days(item: Dict[str, Any], days: int) -> bool:
@@ -317,7 +343,7 @@ def search_indiana_developments(
     Main entrypoint.
 
     - Extracts simple city/county hints from the user question.
-    - Builds a Google CSE query anchored on Indiana industrial projects.
+    - Builds a Google CSE query anchored on Indiana industrial/commercial projects.
     - Returns a list of normalized dicts:
       {
         "title": str,
@@ -331,8 +357,9 @@ def search_indiana_developments(
 
     Recency & quantity behavior:
     - Try to keep items within `days` (e.g. last 12 months).
-    - If that yields 0–1 projects, we append older relevant projects as backup
-      so you see multiple developments even if they’re a bit older.
+    - If we get < 3 "relevant" items, we fall back to the top Google results
+      to ensure you see multiple projects/companies, even if some are older
+      or more general.
     """
     city, county = _extract_geo_hint(user_q)
     query = _build_query(user_q, city, county)
@@ -341,12 +368,18 @@ def search_indiana_developments(
     if not raw_results:
         return []
 
-    # First pass: relevance filter
-    relevant: List[Dict[str, Any]] = [r for r in raw_results if _looks_relevant(r)]
+    # First pass: relevance filter (using geo hints)
+    relevant: List[Dict[str, Any]] = [
+        r for r in raw_results if _looks_relevant(r, city, county)
+    ]
 
-    # If nothing looks relevant, fall back to everything
-    if not relevant:
-        log.info("No items passed relevance filter; falling back to raw Google items.")
+    # If relevance is too picky and we end up with fewer than 3 items,
+    # fall back to the top Google results so you get more quantity.
+    if len(relevant) < 3:
+        log.info(
+            "Only %d items passed relevance filter; falling back to top Google items.",
+            len(relevant),
+        )
         relevant = list(raw_results)
 
     # Split into "recent" vs "older" based on days window
@@ -356,15 +389,13 @@ def search_indiana_developments(
     # Choose results with a smart fallback:
     # - If we have 2+ recent → use those
     # - If we have 1 recent → keep it + a few older
-    # - If we have 0 recent → just use relevance-ordered set
+    # - If we have 0 recent → just use top relevant hits
     if len(recent) >= 2:
         chosen = recent
     elif len(recent) == 1:
-        # 1 very recent project + top 3 older ones
         older_sorted = sorted(older, key=_dt_score, reverse=True)
-        chosen = [recent[0]] + older_sorted[:3]
+        chosen = [recent[0]] + older_sorted[:4]
     else:
-        # nothing clearly within the date window – return top relevant hits
         log.info(
             "No items had parseable dates within %s days; returning relevance-filtered set.",
             days,
@@ -390,8 +421,8 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
     if not items:
         return (
-            "No clearly identified new warehouse or logistics projects were found "
-            "in the search results for the requested area and timeframe."
+            "No clearly identified new warehouse, logistics, or industrial projects "
+            "were found in the search results for the requested area and timeframe."
         )
 
     lines: List[str] = []
