@@ -1303,7 +1303,13 @@ def chat():
                 from contact_finder import chat_contact_finder as _cf_handler
                 page = int((data.get("page") or 1))
                 page_size = int((data.get("page_size") or 25))
-                with app.test_request_context(json={"message": user_q, "page": page, "page_size": page_size}):
+                with app.test_request_context(
+                    json={
+                        "message": user_q,
+                        "page": page,
+                        "page_size": page_size,
+                    }
+                ):
                     resp = _cf_handler()
                 payload = resp.get_json() if hasattr(resp, "get_json") else (resp or {})
                 text = payload.get("text") or payload.get("error") or "_No contacts found._"
@@ -1388,7 +1394,7 @@ def chat():
                     "- Three concrete tasks.\n\n"
                     "Recent Invoices\n"
                     "- Up to 5 as: YYYY-MM-DD | Type | $Amount | Description\n"
-                )
+                ),
             }
 
             messages = [
@@ -1404,17 +1410,110 @@ def chat():
                     model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
                     messages=messages,
                     max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
-                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35"))
+                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35")),
                 )
                 ai_reply = (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 ai_reply = f"❌ Internal error: {e}"
 
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
-            return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
+            return _ok_payload(
+                f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._"
+            )
 
-        # Indiana Developments (web intel)
+        # Indiana Developments (web intel) — NO GPT, just real scraped projects
         if mode == "indiana_developments":
+
+            def _format_indiana_projects_for_chat(items):
+                """
+                Format Indiana project results into the HTML-ish structure expected
+                for this mode, without calling GPT (prevents hallucinated projects).
+                """
+                if not items:
+                    return (
+                        "Based on web search results, there do not appear to be clearly "
+                        "identified new warehouse, logistics, or manufacturing projects "
+                        "in this area for the specified timeframe. Most public results are "
+                        "generic statewide announcements, tourism, or public-service pages "
+                        "that do not represent specific new facilities."
+                    )
+
+                original_area = (
+                    items[0].get("original_area_label")
+                    or items[0].get("location_label")
+                    or "Indiana"
+                )
+
+                local_items = [p for p in items if p.get("scope") == "local"]
+                statewide_items = [p for p in items if p.get("scope") == "statewide"]
+
+                lines = []
+
+                if local_items:
+                    area_label = local_items[0].get("location_label") or original_area
+                    lines.append(
+                        f"Here are some industrial and logistics related projects connected to {area_label} based on web search results.\n"
+                    )
+                    projects_to_show = local_items
+                elif statewide_items:
+                    lines.append(
+                        f"I couldn’t find any clearly identified new warehouse, logistics, or manufacturing projects "
+                        f"in {original_area} for the timeframe you asked about.\n"
+                    )
+                    lines.append(
+                        "However, here are some notable Indiana-wide projects from a similar period that may still be relevant:\n"
+                    )
+                    projects_to_show = statewide_items
+                else:
+                    return (
+                        "Based on web search results, there do not appear to be clearly "
+                        "identified new facility projects matching that request."
+                    )
+
+                for proj in projects_to_show[:15]:
+                    name = proj.get("project_name") or "Unnamed project"
+                    company = proj.get("company") or "not specified in snippet"
+                    ptype = proj.get("project_type") or "Industrial / commercial project"
+                    sqft = proj.get("sqft")
+                    jobs = proj.get("jobs")
+                    invest = proj.get("investment")
+                    stage = proj.get("timeline_stage") or "not specified in snippet"
+                    year = proj.get("timeline_year")
+                    url = proj.get("url") or ""
+                    location_label = (
+                        proj.get("location_label")
+                        or proj.get("original_area_label")
+                        or "Indiana"
+                    )
+
+                    scope_bits = []
+                    if sqft:
+                        scope_bits.append(f"~{sqft} sq ft")
+                    if jobs:
+                        scope_bits.append(f"{jobs} jobs")
+                    if invest:
+                        scope_bits.append(f"{invest} investment")
+                    scope_str = (
+                        ", ".join(scope_bits) if scope_bits else "not specified in snippet"
+                    )
+
+                    if year:
+                        timeline_str = f"{stage} ({year})"
+                    else:
+                        timeline_str = stage or "not specified in snippet"
+
+                    lines.append(
+                        f'<span style="color:#990000; font-weight:bold">{name} – {location_label}</span>'
+                    )
+                    lines.append(f"Type: {ptype}")
+                    lines.append(f"Company / Developer: {company}")
+                    lines.append(f"Scope: {scope_str}")
+                    lines.append(f"Timeline: {timeline_str}")
+                    lines.append(f"Source: {url or 'not specified in snippet'}")
+                    lines.append("")
+
+                return "\n".join(lines).rstrip()
+
             try:
                 # Look back up to ~10 years so we always have something to talk about
                 items = search_indiana_developments(user_q, days=365 * 10)
@@ -1422,79 +1521,8 @@ def chat():
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
-            # Build the web-intel summary (this now handles:
-            # - local projects
-            # - statewide fallback if nothing local
-            # - and a clear explanation if truly nothing useful exists)
-            intel_text = render_developments_markdown(items)
-
-            system_prompt = {
-                "role": "system",
-                "content": (
-                    "You are a research assistant for Tynan Equipment Company in Indiana.\n"
-                    "You are given web search hits about Indiana industrial, warehouse, "
-                    "logistics, manufacturing, business park, headquarters, and other "
-                    "commercial/industrial facility projects.\n\n"
-                    "Your job:\n"
-                    "- Identify and list as many concrete projects as possible for the city "
-                    "and county mentioned in the user's question.\n"
-                    "- Do NOT limit yourself only to warehouses or logistics; also include "
-                    "manufacturing plants, industrial parks, business parks, HQ buildings, "
-                    "large distribution facilities, and similar major commercial/industrial sites.\n"
-                    "- Prefer more recent projects (roughly the last 1–3 years), but if few "
-                    "projects match that timeframe, still include older projects (up to ~10 years) "
-                    "instead of saying there are none.\n"
-                    "- If a project is clearly outside the requested timeframe (for example the "
-                    "user asks for 12 months but the snippet looks like 2021), you may still "
-                    "include it, but clearly mark the timeline as 'outside requested timeframe'.\n"
-                    "- As long as the search results contain multiple plausible candidates, you "
-                    "should normally list at least 3–6 projects. If there are fewer than 3 real "
-                    "projects visible in the hits, return as many as you honestly can, but never "
-                    "fewer than one.\n"
-                    "- Use ONLY the information visible in the provided search-result text. "
-                    "Do NOT invent square footage, job counts, cities, dollar amounts, or dates. "
-                    "If something is not mentioned, say 'not specified in snippet'.\n"
-                    "- NEVER answer with 'no projects found', '0 projects', or similar wording "
-                    "as long as there is any result that can reasonably be interpreted as a "
-                    "project or facility.\n\n"
-                    "Formatting rules (very important):\n"
-                    "- Do NOT echo or restate the user's question.\n"
-                    "- Do NOT use bullet points, hyphens, asterisks, markdown headings, or numbered lists.\n"
-                    "- Start with a single introductory line, such as:\n"
-                    "  'Here are some industrial and logistics related projects connected to the requested county based on web search results.'\n"
-                    "- Then, for each project, output EXACTLY this structure, with a blank line between projects:\n\n"
-                    "  <span style=\"color:#990000; font-weight:bold\">PROJECT NAME – City, County</span>\n"
-                    "  Type: <warehouse / logistics facility / plant / HQ / etc.>\n"
-                    "  Company / Developer: <company or developer name if mentioned; otherwise 'not specified in snippet'>\n"
-                    "  Scope: <square footage, jobs, dollar amount, or 'not specified in snippet'>\n"
-                    "  Timeline: <announcement or groundbreaking year/date if mentioned; otherwise 'not specified in snippet' or 'outside requested timeframe'>\n"
-                    "  Source: <URL>\n\n"
-                    "If a result looks more like general county marketing material or statistics "
-                    "rather than a single specific project, you may either skip it or include it as "
-                    "one entry clearly labeled as general economic context.\n"
-                )
-            }
-
-            messages = [
-                system_prompt,
-                # Raw web intel as context (this now includes the smarter summary/fallback)
-                {"role": "system", "content": intel_text},
-                {"role": "user", "content": user_q},
-            ]
-
-            try:
-                resp = client.chat.completions.create(
-                    model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
-                    messages=messages,
-                    max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
-                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35")),
-                )
-                ai_reply = (resp.choices[0].message.content or "").strip()
-            except Exception as e:
-                app.logger.exception("Indiana developments AI error: %s", e)
-                ai_reply = f"❌ Internal error generating Indiana projects summary: {e}"
-
-            return _ok_payload(ai_reply or "_No response produced._")
+            intel_text = _format_indiana_projects_for_chat(items)
+            return _ok_payload(intel_text)
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
@@ -1503,11 +1531,11 @@ def chat():
         meta = top_pick_meta(user_q)
         if meta:
             top_code, top_class, top_power = meta
-            if re.search(r'\b(lpg|propane|lp gas)\b', user_q, re.I):
+            if re.search(r"\b(lpg|propane|lp gas)\b", user_q, re.I):
                 top_power = "lpg"
-            elif re.search(r'\bdiesel\b', user_q, re.I):
+            elif re.search(r"\bdiesel\b", user_q, re.I):
                 top_power = "diesel"
-            elif re.search(r'\b(lithium|li[-\s]?ion|electric|battery)\b', user_q, re.I):
+            elif re.search(r"\b(lithium|li[-\s]?ion|electric|battery)\b", user_q, re.I):
                 top_power = "lithium"
 
             promo_list = promos_for_context(top_code, top_class, top_power or "")
