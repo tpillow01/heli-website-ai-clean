@@ -1416,18 +1416,18 @@ def chat():
         # Indiana Developments (web intel)
         if mode == "indiana_developments":
             try:
-                # Pull Indiana developments for up to ~5 years back to avoid missing older but relevant projects
-                items = search_indiana_developments(user_q, days=365 * 5)
+                # Look back up to ~10 years so we always have something to talk about
+                items = search_indiana_developments(user_q, days=365 * 10)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
             intel_text = render_developments_markdown(items)
 
-            # If literally nothing came back from Google, just say that plainly
+            # If literally nothing came back from Google at all
             if not items:
                 return _ok_payload(
-                    "I couldn’t find any web results for that location and timeframe. "
+                    "I couldn’t find any web results for that location. "
                     "Try adjusting the date range, county, or city name."
                 )
 
@@ -1442,33 +1442,39 @@ def chat():
                     "- Identify and list as many concrete projects as possible for the city "
                     "and county mentioned in the user's question.\n"
                     "- Do NOT limit yourself only to warehouses or logistics; also include "
-                    "manufacturing plants, industrial parks, HQ buildings, large distribution "
-                    "facilities, and similar major commercial/industrial sites.\n"
-                    "- Prefer more recent projects (last 1–3 years), but if recent projects "
-                    "are scarce, still list older relevant projects instead of saying there "
-                    "are none.\n"
-                    "- As long as the search results contain multiple plausible candidates, "
-                    "you should normally list at least 3–6 projects.\n"
+                    "manufacturing plants, industrial parks, business parks, HQ buildings, "
+                    "large distribution facilities, and similar major commercial/industrial sites.\n"
+                    "- Prefer more recent projects (roughly the last 1–3 years), but if few "
+                    "projects match that timeframe, still include older projects (up to ~10 years) "
+                    "instead of saying there are none.\n"
+                    "- If a project is clearly outside the requested timeframe (for example the "
+                    "user asks for 12 months but the snippet looks like 2021), you may still "
+                    "include it, but clearly mark the timeline as 'outside requested timeframe'.\n"
+                    "- As long as the search results contain multiple plausible candidates, you "
+                    "should normally list at least 3–6 projects. If there are fewer than 3 real "
+                    "projects visible in the hits, return as many as you honestly can, but never "
+                    "fewer than one.\n"
                     "- Use ONLY the information visible in the provided search-result text. "
                     "Do NOT invent square footage, job counts, cities, dollar amounts, or dates. "
                     "If something is not mentioned, say 'not specified in snippet'.\n"
-                    "- NEVER answer with 'no projects found' if there is *any* result that can "
-                    "reasonably be interpreted as a project or facility.\n\n"
-                    "Formatting:\n"
-                    "- Start with one short sentence summarizing roughly how many projects you "
-                    "found for that county/city and the overall timeframe (for example: "
-                    "'Here are 4 notable industrial and logistics projects connected to Hendricks County from the web hits provided.').\n"
-                    "- Then list each project as a separate block in this exact structure "
-                    "(plain text, no bullets, no asterisks):\n"
-                    "  PROJECT NAME – City, County\n"
+                    "- NEVER answer with 'no projects found', '0 projects', or similar wording "
+                    "as long as there is any result that can reasonably be interpreted as a "
+                    "project or facility.\n\n"
+                    "Formatting rules (very important):\n"
+                    "- Do NOT echo or restate the user's question.\n"
+                    "- Do NOT use bullet points, hyphens, asterisks, markdown headings, or numbered lists.\n"
+                    "- Start with a single introductory line, such as:\n"
+                    "  'Here are some industrial and logistics related projects connected to the requested county based on web search results.'\n"
+                    "- Then, for each project, output EXACTLY this structure, with a blank line between projects:\n\n"
+                    "  <span style=\"color:#990000; font-weight:bold\">PROJECT NAME – City, County</span>\n"
                     "  Type: <warehouse / logistics facility / plant / HQ / etc.>\n"
                     "  Company / Developer: <company or developer name if mentioned; otherwise 'not specified in snippet'>\n"
-                    "  Scope: <square footage, jobs, investment, or simply 'not specified in snippet'>\n"
-                    "  Timeline: <announcement or groundbreaking year/date if mentioned; otherwise 'not specified in snippet'>\n"
+                    "  Scope: <square footage, jobs, dollar amount, or 'not specified in snippet'>\n"
+                    "  Timeline: <announcement or groundbreaking year/date if mentioned; otherwise 'not specified in snippet' or 'outside requested timeframe'>\n"
                     "  Source: <URL>\n\n"
                     "If a result looks more like general county marketing material or statistics "
-                    "rather than a single project, you may either skip it or include it as one "
-                    "project-like entry clearly labeled as general economic context.\n"
+                    "rather than a single specific project, you may either skip it or include it as "
+                    "one entry clearly labeled as general economic context.\n"
                 )
             }
 
@@ -1492,7 +1498,6 @@ def chat():
                 ai_reply = f"❌ Internal error generating Indiana projects summary: {e}"
 
             return _ok_payload(ai_reply or "_No response produced._")
-
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
