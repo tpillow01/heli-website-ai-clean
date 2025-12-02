@@ -290,12 +290,92 @@ def _infer_project_type(title: str, snippet: str) -> str:
         return "warehouse / logistics facility"
     if any(w in text for w in ("manufacturing plant", "factory", "plant expansion")):
         return "manufacturing plant"
-    if any(w in text for w in ("business park", "industrial park", "industrial park")):
+    if any(w in text for w in ("business park", "industrial park")):
         return "business / industrial park"
-    if any(w in text for w in ("headquarters", "hq", "office building")):
+    if any(w in text for w in ("headquarters", "hq", "office building", "showroom")):
         return "HQ / office project"
 
     return "Industrial / commercial project"
+
+
+# ---------------------------------------------------------------------------
+# Project-level filtering to drop obvious noise
+# ---------------------------------------------------------------------------
+
+# Positive phrases that tend to indicate a real project/development
+_PROJECT_POSITIVE = [
+    "project",
+    "development",
+    "development project",
+    "distribution center",
+    "fulfillment center",
+    "logistics center",
+    "logistics hub",
+    "logistics park",
+    "warehouse",
+    "manufacturing plant",
+    "production plant",
+    "factory",
+    "industrial park",
+    "business park",
+    "to locate in",
+    "plans to build",
+    "will build",
+    "to build a",
+    "broke ground",
+    "groundbreaking",
+    "expansion",
+    "new facility",
+    "facility opening",
+    "complex",
+    "campus",
+    "headquarters",
+    "hq",
+]
+
+# Negative signals: generic homepages, FAQs, tourism, Facebook chatter, incidents, etc.
+_PROJECT_NEGATIVE = [
+    "official website",
+    "faq",
+    "faqs",
+    "civicengage",
+    "visit plainfield",
+    "visit hendricks county",
+    "events, shopping & family fun",
+    "welcome to plainfield",
+    "quarterly welcome",
+    "police shooting",
+    "shooting incident",
+    "facebook.com",
+    "plainfield chatter",
+    "news flash",
+    "city of plainfield",
+]
+
+
+def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
+    """
+    Decide whether this CSE hit looks like a concrete project / facility
+    vs. generic marketing, tourism, FAQ, or random news.
+
+    We keep this heuristic simple and conservative:
+    - If it contains any strong negative patterns → drop.
+    - Otherwise, require at least one positive phrase (project/development/facility).
+    """
+    text = _lower(f"{title} {snippet}")
+    url_l = _lower(url or "")
+
+    # Hard filters first: domains/content we basically never want as "projects"
+    if "facebook.com" in url_l:
+        return False
+    if any(neg in text for neg in _PROJECT_NEGATIVE):
+        return False
+
+    # Require at least one positive signal
+    if any(pos in text for pos in _PROJECT_POSITIVE):
+        return True
+
+    return False
 
 
 def _normalize_projects(
@@ -319,6 +399,10 @@ def _normalize_projects(
         url = it.get("url") or ""
         provider = it.get("provider") or ""
         dt = it.get("date")  # datetime or None
+
+        # NEW: filter out obvious non-project hits (city homepage, FAQs, Facebook, etc.)
+        if not _looks_like_project_hit(title, snippet, url):
+            continue
 
         scope, location_label = _classify_scope_and_location(title, snippet, city, county)
         project_type = _infer_project_type(title, snippet)
@@ -406,6 +490,7 @@ def search_indiana_developments(
     """
     city, county = _extract_geo_hint(user_q)
     original_area_label = county or city or "Indiana"
+    _ = original_area_label  # kept for future use/debug
 
     # 1) County/city-biased search
     query_local = _build_query(user_q, city, county)
