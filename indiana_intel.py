@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import re
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -38,9 +38,6 @@ if not log.handlers:
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
-
-# Try to focus roughly on last 12 months by default
-DEFAULT_DAYS = 365
 
 # Base industrial / logistics / commercial keywords for Indiana
 BASE_KEYWORDS = (
@@ -136,7 +133,6 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[str]:
     if not isinstance(meta_list, list):
         return None
 
-    candidates: List[str] = []
     for m in meta_list:
         if not isinstance(m, dict):
             continue
@@ -149,30 +145,27 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[str]:
             "pubdate",
         ):
             if key in m and m[key]:
-                candidates.append(str(m[key]))
-
-    for raw in candidates:
-        val = raw.strip()
-        # Try ISO first, then fall back to some common date patterns
-        try:
-            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-        except Exception:
-            dt = None
-            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y"):
+                raw = str(m[key]).strip()
+                # Try ISO first
                 try:
-                    dt = datetime.strptime(val[:10], fmt)
-                    dt = dt.replace(tzinfo=None)
-                    break
+                    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
                 except Exception:
                     dt = None
-            if not dt:
-                continue
+                    # Fallback short formats
+                    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y"):
+                        try:
+                            dt = datetime.strptime(raw[:10], fmt)
+                            dt = dt.replace(tzinfo=None)
+                            break
+                        except Exception:
+                            dt = None
+                    if not dt:
+                        continue
 
-        # Normalize to UTC naive
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-        return dt.isoformat()
+                # Normalize to UTC naive
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                return dt.isoformat()
 
     return None
 
@@ -232,119 +225,20 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _looks_relevant(item: Dict[str, Any], city: Optional[str], county: Optional[str]) -> bool:
-    """
-    Relevance filter:
-    - Strong: facility / project keywords
-    - Soft: county / city name plus generic "new project / expansion / investment" language
-    """
-    text = _lower(item.get("title", "") + " " + item.get("snippet", ""))
-    if not text:
-        return False
-
-    hits = 0
-    for kw in (
-        "warehouse",
-        "distribution center",
-        "distribution facility",
-        "logistics",
-        "fulfillment",
-        "industrial park",
-        "industrial",
-        "plant",
-        "factory",
-        "manufacturing",
-        "facility",
-        "expansion",
-        "distribution hub",
-        "cold storage",
-        "supply chain",
-        "logistics facility",
-        "distribution campus",
-        "business park",
-        "headquarters",
-        "hq",
-        "job creation",
-        "new jobs",
-        "investment",
-        "million",
-    ):
-        if kw in text:
-            hits += 1
-
-    if hits > 0:
-        return True
-
-    # Softer rule: if county or city name shows up in the text along with
-    # generic project-y words, treat as relevant.
-    geo_hit = False
-    if county and county.lower().split()[0] in text:
-        geo_hit = True
-    if city and city.lower() in text:
-        geo_hit = True
-
-    if geo_hit:
-        for soft_kw in ("project", "expansion", "development", "new facility", "groundbreaking"):
-            if soft_kw in text:
-                return True
-
-    return False
-
-
-def _within_days(item: Dict[str, Any], days: int) -> bool:
-    """
-    True if item.date is within the last N days (when date is parseable).
-
-    We normalize everything to UTC *naive* so we don't get
-    'can't compare offset-naive and offset-aware datetimes'.
-    If no date or parsing fails, we treat it as unknown (return True)
-    so we don't accidentally throw away possibly-good results.
-    """
-    d = item.get("date")
-    if not d:
-        return True
-
-    try:
-        dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    except Exception:
-        return True
-
-    cutoff = datetime.utcnow() - timedelta(days=max(1, days))
-    return dt >= cutoff
-
-
-def _dt_score(item: Dict[str, Any]) -> float:
-    """
-    Turn item['date'] into a sortable timestamp (0.0 if unknown).
-    """
-    d = item.get("date")
-    if not d:
-        return 0.0
-    try:
-        dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt.timestamp()
-    except Exception:
-        return 0.0
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def search_indiana_developments(
     user_q: str,
-    days: int = DEFAULT_DAYS,
+    days: int = 365,
 ) -> List[Dict[str, Any]]:
     """
     Main entrypoint.
 
     - Extracts simple city/county hints from the user question.
     - Builds a Google CSE query anchored on Indiana industrial/commercial projects.
-    - Returns a list of normalized dicts:
+    - Returns ALL normalized dicts Google gives us (up to 10):
       {
         "title": str,
         "snippet": str,
@@ -355,11 +249,8 @@ def search_indiana_developments(
         "county_hint": Optional[str],
       }
 
-    Recency & quantity behavior:
-    - Try to keep items within `days` (e.g. last 12 months).
-    - If we get < 3 "relevant" items, we fall back to the top Google results
-      to ensure you see multiple projects/companies, even if some are older
-      or more general.
+    NOTE: This version does NOT filter by relevance or recency.
+    If Google returns 10 items, you get up to 10 items.
     """
     city, county = _extract_geo_hint(user_q)
     query = _build_query(user_q, city, county)
@@ -368,50 +259,11 @@ def search_indiana_developments(
     if not raw_results:
         return []
 
-    # First pass: relevance filter (using geo hints)
-    relevant: List[Dict[str, Any]] = [
-        r for r in raw_results if _looks_relevant(r, city, county)
-    ]
-
-    # If relevance is too picky and we end up with fewer than 3 items,
-    # fall back to the top Google results so you get more quantity.
-    if len(relevant) < 3:
-        log.info(
-            "Only %d items passed relevance filter; falling back to top Google items.",
-            len(relevant),
-        )
-        relevant = list(raw_results)
-
-    # Split into "recent" vs "older" based on days window
-    recent = [r for r in relevant if _within_days(r, days)]
-    older = [r for r in relevant if r not in recent]
-
-    # Choose results with a smart fallback:
-    # - If we have 2+ recent → use those
-    # - If we have 1 recent → keep it + a few older
-    # - If we have 0 recent → just use top relevant hits
-    if len(recent) >= 2:
-        chosen = recent
-    elif len(recent) == 1:
-        older_sorted = sorted(older, key=_dt_score, reverse=True)
-        chosen = [recent[0]] + older_sorted[:4]
-    else:
-        log.info(
-            "No items had parseable dates within %s days; returning relevance-filtered set.",
-            days,
-        )
-        chosen = relevant
-
-    # Annotate with geo hints
-    for r in chosen:
+    for r in raw_results:
         r["city_hint"] = city
         r["county_hint"] = county
 
-    # Sort chosen by date desc (newest first) when we have dates; otherwise keep current order
-    chosen_sorted = sorted(chosen, key=_dt_score, reverse=True)
-
-    # Cap to a reasonable number for AI context / UI
-    return chosen_sorted[:20]
+    return raw_results
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
@@ -421,8 +273,8 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
     if not items:
         return (
-            "No clearly identified new warehouse, logistics, or industrial projects "
-            "were found in the search results for the requested area and timeframe."
+            "No web results were found for that location and timeframe. "
+            "Try adjusting the date range or phrasing."
         )
 
     lines: List[str] = []
