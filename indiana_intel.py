@@ -58,7 +58,7 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Very light-weight extractor:
     - Finds 'X County' → county='X County'
-    - Tries to grab a city name after 'in ' if it looks like 'Greenwood' or 'Greenwood, IN'
+    - Tries to grab a city name after 'in ' if it looks like 'Plainfield' or 'Plainfield, IN'
     Returns (city, county).
     """
     if not q:
@@ -241,6 +241,118 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
 
     return out
 
+# ---------------------------------------------------------------------------
+# HTML fetch + fact extraction
+# ---------------------------------------------------------------------------
+
+def _fetch_html(url: str) -> str:
+    """
+    Fetch page HTML for deeper facts. We keep this lightweight and tolerant of failures.
+    """
+    if not url:
+        return ""
+    try:
+        resp = requests.get(
+            url,
+            timeout=8,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; TynanIntelBot/1.0)"
+            },
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        log.info("Failed to fetch page HTML: %s (%s)", url, e)
+        return ""
+
+    ctype = resp.headers.get("Content-Type", "").lower()
+    if "text/html" not in ctype:
+        return ""
+    return resp.text or ""
+
+
+def _find_first_group(patterns, text: str) -> Optional[str]:
+    for pat in patterns:
+        m = re.search(pat, text, flags=re.I)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _guess_company_from_title_snippet(title: str, snippet: str) -> Optional[str]:
+    """
+    Very rough heuristic: look at patterns like:
+      'ACME Corp to build new distribution center in Plainfield, Indiana'
+      'Amazon announces new fulfillment center in ...'
+    We NEVER pretend we know the company if we don't see a clear pattern.
+    """
+    candidates = [title, snippet]
+    for text in candidates:
+        if not text:
+            continue
+        t = text.replace("–", "-")
+        for kw in (" to build", " to locate", " to open", " announces", " plans ", " expands", " investing", " breaks ground"):
+            idx = t.lower().find(kw.strip())
+            if idx > 3:
+                name = t[:idx].strip(" -–:|")
+                if name and not name.lower().startswith(("city of", "town of", "county of")):
+                    return name
+    return None
+
+
+def _extract_project_facts_from_html(html: str) -> Dict[str, Optional[str]]:
+    """
+    Try to pull out sq ft, jobs, investment, and (if needed) a year from HTML.
+    We deliberately keep everything as strings – no numeric guessing.
+    """
+    if not html:
+        return {
+            "sqft": None,
+            "jobs": None,
+            "investment": None,
+            "year": None,
+        }
+
+    # Lowercase for pattern matching
+    text = _lower(html)
+
+    # Sq ft: 100,000 square feet / sq ft / SF
+    sqft_match = re.search(r'([\d,]{4,})\s*(square\s*feet|sq\.?\s*ft|sf\b)', text)
+    sqft = f"{sqft_match.group(1)} sq ft" if sqft_match else None
+
+    # Jobs: 200 jobs, 300 new jobs
+    jobs_match = re.search(r'(\d{2,4})\s+(?:new\s+)?jobs\b', text)
+    jobs = f"{jobs_match.group(1)} jobs" if jobs_match else None
+
+    # Investment: $100 million, $250M, etc.
+    inv_match = re.search(r'\$\s*([\d,.]+)\s*(million|billion|m|bn)?', text)
+    if inv_match:
+        amt = inv_match.group(1)
+        unit = inv_match.group(2) or ""
+        unit = unit.strip().lower()
+        if unit in {"m", "million"}:
+            unit = "million"
+        elif unit in {"bn", "billion"}:
+            unit = "billion"
+        else:
+            unit = ""
+        investment = f"${amt} {unit}".strip()
+    else:
+        investment = None
+
+    # Year hint if we didn't get one from metadata
+    year_match = re.search(r'\b(20[2-4][0-9])\b', text)
+    year = year_match.group(1) if year_match else None
+
+    return {
+        "sqft": sqft,
+        "jobs": jobs,
+        "investment": investment,
+        "year": year,
+    }
+
+# ---------------------------------------------------------------------------
+# Classification & filtering
+# ---------------------------------------------------------------------------
 
 def _classify_scope_and_location(
     title: str,
@@ -252,16 +364,12 @@ def _classify_scope_and_location(
     Very light classification into:
       - scope: "local" (explicitly mentions city/county) or "statewide"
       - location_label: human-readable label for display.
-
-    We NEVER fake the county: we only say "Hendricks County" etc. if user asked
-    for it. Otherwise we just fall back to "Indiana" as the label.
     """
     text = _lower(title) + " " + _lower(snippet)
     loc_label = "Indiana"
 
     scope = "statewide"
     if county:
-        # Use the county name itself (e.g. "hendricks") as a signal
         base = county.split()[0].lower()
         if base and base in text:
             scope = "local"
@@ -270,7 +378,6 @@ def _classify_scope_and_location(
         c = city.lower()
         if c and c in text:
             scope = "local"
-        # If no county, we can show the city as the label
         if not county:
             loc_label = city
 
@@ -284,11 +391,11 @@ def _infer_project_type(title: str, snippet: str) -> str:
     """
     text = _lower(title + " " + snippet)
 
-    if any(w in text for w in ("warehouse", "fulfillment center", "distribution center")):
+    if any(w in text for w in ("warehouse", "fulfillment center", "distribution center", "distribution hub")):
         return "warehouse / logistics facility"
     if any(w in text for w in ("logistics hub", "logistics park")):
         return "warehouse / logistics facility"
-    if any(w in text for w in ("manufacturing plant", "factory", "plant expansion")):
+    if any(w in text for w in ("manufacturing plant", "factory", "plant expansion", "production plant")):
         return "manufacturing plant"
     if any(w in text for w in ("business park", "industrial park")):
         return "business / industrial park"
@@ -297,10 +404,6 @@ def _infer_project_type(title: str, snippet: str) -> str:
 
     return "Industrial / commercial project"
 
-
-# ---------------------------------------------------------------------------
-# Project-level filtering to drop obvious noise
-# ---------------------------------------------------------------------------
 
 # Positive phrases that tend to indicate a real project/development
 _PROJECT_POSITIVE = [
@@ -357,15 +460,11 @@ def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
     """
     Decide whether this CSE hit looks like a concrete project / facility
     vs. generic marketing, tourism, FAQ, or random news.
-
-    We keep this heuristic simple and conservative:
-    - If it contains any strong negative patterns → drop.
-    - Otherwise, require at least one positive phrase (project/development/facility).
     """
     text = _lower(f"{title} {snippet}")
     url_l = _lower(url or "")
 
-    # Hard filters first: domains/content we basically never want as "projects"
+    # Hard filters first
     if "facebook.com" in url_l:
         return False
     if any(neg in text for neg in _PROJECT_NEGATIVE):
@@ -377,6 +476,9 @@ def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
 
     return False
 
+# ---------------------------------------------------------------------------
+# Normalization
+# ---------------------------------------------------------------------------
 
 def _normalize_projects(
     raw_items: List[Dict[str, Any]],
@@ -387,7 +489,7 @@ def _normalize_projects(
     """
     Convert raw CSE results into the structured dicts used by the chat layer.
     We do NOT invent square footage, job counts, or dollars – those stay None
-    unless we explicitly parse them (currently we don't).
+    unless we explicitly parse them.
     """
     inferred_year = _extract_year_from_question(user_q)
     original_area_label = county or city or "Indiana"
@@ -400,18 +502,26 @@ def _normalize_projects(
         provider = it.get("provider") or ""
         dt = it.get("date")  # datetime or None
 
-        # NEW: filter out obvious non-project hits (city homepage, FAQs, Facebook, etc.)
+        # Filter out obvious non-project hits
         if not _looks_like_project_hit(title, snippet, url):
             continue
 
         scope, location_label = _classify_scope_and_location(title, snippet, city, county)
         project_type = _infer_project_type(title, snippet)
 
-        # Timeline: we just expose whatever date we found as "announcement".
-        # If there's a user-asked year and it doesn't match, the formatter
-        # will label it as "outside requested timeframe" (that logic can live
-        # in the UI / chat layer if needed).
+        # Fetch HTML and extract deeper facts (best-effort; failures are fine)
+        html = _fetch_html(url) if url else ""
+        facts = _extract_project_facts_from_html(html)
+        company_guess = _guess_company_from_title_snippet(title, snippet)
+
+        # Timeline: use metadata date if present, otherwise fallback to HTML year hint
         timeline_year: Optional[int] = dt.year if isinstance(dt, datetime) else None
+        if not timeline_year and facts.get("year"):
+            try:
+                timeline_year = int(facts["year"])
+            except Exception:
+                timeline_year = None
+
         if inferred_year and (timeline_year is not None) and (timeline_year != inferred_year):
             timeline_stage = "outside requested timeframe"
         else:
@@ -421,7 +531,7 @@ def _normalize_projects(
             {
                 # Core identity
                 "project_name": title or "Untitled project",
-                "company": None,  # we let the UI say "not specified in snippet"
+                "company": company_guess,  # may be None
                 "project_type": project_type,
 
                 # Geography
@@ -429,10 +539,10 @@ def _normalize_projects(
                 "location_label": location_label,
                 "original_area_label": original_area_label,
 
-                # Scale / economics (left as None – no guessing)
-                "sqft": None,
-                "jobs": None,
-                "investment": None,
+                # Scale / economics
+                "sqft": facts.get("sqft"),
+                "jobs": facts.get("jobs"),
+                "investment": facts.get("investment"),
 
                 # Timeline
                 "timeline_stage": timeline_stage,
@@ -446,7 +556,6 @@ def _normalize_projects(
         )
 
     return projects
-
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -490,21 +599,18 @@ def search_indiana_developments(
     """
     city, county = _extract_geo_hint(user_q)
     original_area_label = county or city or "Indiana"
-    _ = original_area_label  # kept for future use/debug
+    _ = original_area_label  # reserved for future use
 
     # 1) County/city-biased search
     query_local = _build_query(user_q, city, county)
     raw_local = _google_cse_search(query_local)
 
     # 2) If nothing at all came back, fall back to a statewide search
-    #    (BASE_KEYWORDS + extra tokens, no explicit city/county).
     if not raw_local:
         log.info("No local results; trying statewide fallback query")
         query_statewide = _build_query(user_q, city=None, county=None)
         raw_statewide = _google_cse_search(query_statewide)
         if not raw_statewide:
-            # Truly nothing – return empty list so the chat layer can say
-            # "there do not appear to be clearly identified projects..."
             return []
 
         projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
@@ -517,9 +623,8 @@ def search_indiana_developments(
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
-    Simple markdown-ish debug formatter. This is NOT what your chat UI uses
-    for the final answer anymore (that logic now lives in /api/chat), but
-    it's handy for logging and manual tests.
+    Simple markdown-ish debug formatter. This is what your /api/chat mode
+    passes into the model as context, so we include the richer facts here.
     """
     if not items:
         return (
@@ -538,6 +643,10 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         year = item.get("timeline_year")
         stage = item.get("timeline_stage") or ""
         loc = item.get("location_label") or item.get("original_area_label") or "Indiana"
+        company = item.get("company") or "not specified"
+        sqft = item.get("sqft") or "not specified"
+        jobs = item.get("jobs") or "not specified"
+        investment = item.get("investment") or "not specified"
 
         lines.append(f"{i}. {title} — {loc}")
         meta_bits = []
@@ -550,10 +659,14 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
                 meta_bits.append(stage)
         if meta_bits:
             lines.append("   " + " • ".join(meta_bits))
+
+        lines.append(f"   Company: {company}")
+        lines.append(f"   Type: {item.get('project_type') or 'not specified'}")
+        lines.append(f"   Scale: sqft={sqft}; jobs={jobs}; investment={investment}")
         if snippet:
-            lines.append(f"   {snippet}")
+            lines.append(f"   Snippet: {snippet}")
         if url:
-            lines.append(f"   {url}")
+            lines.append(f"   URL: {url}")
 
     return "\n".join(lines)
 
