@@ -20,6 +20,16 @@ Goals:
     - Rough timing (announcement / groundbreaking / opening year)
     - Source URL
 
+Behavior:
+- First, do a STRICT local search based on the county/city in the question.
+- If no local projects are found, fall back to a statewide Indiana search
+  for the same timeframe.
+- Each project includes:
+    - scope: "local" or "statewide"
+    - original_area_label: the area mentioned in the user question
+      (e.g. "Hendricks County, Indiana") so the renderer can explain
+      when we're showing statewide fallback instead of local projects.
+
 Environment variables required:
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
 - GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured to search the web
@@ -658,37 +668,27 @@ def _score_relevance(user_q: str, text: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Core search logic (used for local and statewide)
 # ---------------------------------------------------------------------------
 
-def search_indiana_developments(
+def _core_search(
     user_q: str,
-    days: int = 365,
-    max_items: int = 20,
+    city_hint: Optional[str],
+    county_hint: Optional[str],
+    target_year: Optional[int],
+    days: int,
+    max_items: int,
+    restrict_location: bool,
+    scope: str,
+    original_area_label: str,
 ) -> List[Dict[str, Any]]:
     """
-    Main entrypoint.
+    Internal search routine used by both local and statewide searches.
 
-    Returns a list of *actual projects* (filtered and enriched), each like:
-
-    {
-      "project_name": str,
-      "company": str,
-      "project_type": str,          # e.g. "Warehouse", "Manufacturing / production plant"
-      "location_label": str,        # "Hendricks County, Indiana" etc.
-      "sqft": Optional[str],
-      "jobs": Optional[str],
-      "investment": Optional[str],
-      "timeline_stage": str,        # "announcement", "groundbreaking", ...
-      "timeline_year": Optional[int],
-      "url": str,
-      "provider": str,
-      "raw_snippet": str,
-    }
+    scope: "local" or "statewide"
+    restrict_location: if True, enforce county/city match; if False, ignore.
     """
-    city_hint, county_hint = _extract_geo_hint(user_q)
-    target_year = _extract_target_year(user_q)
-    query = _build_query(user_q, city_hint, county_hint)
+    query = _build_query(user_q, city_hint if restrict_location else None, county_hint if restrict_location else None)
 
     # If a specific year is requested (e.g. 2026), don't use dateRestrict;
     # we'll filter by year ourselves so we don't miss older announcements.
@@ -718,8 +718,8 @@ def search_indiana_developments(
         if not _looks_like_real_project(title, snippet, combined_text):
             continue
 
-        # Hard location filter: must mention the county/city explicitly if requested
-        if not _matches_location(combined_text, city_hint, county_hint):
+        # Location filter (only if we are in "local" mode)
+        if restrict_location and not _matches_location(combined_text, city_hint, county_hint):
             continue
 
         # Recency filter when no explicit target year requested:
@@ -748,10 +748,14 @@ def search_indiana_developments(
             if not (text_year_match or dt_year_match or timeline_match):
                 continue
 
-        if county_hint:
-            location_label = f"{county_hint}, Indiana"
-        elif city_hint:
-            location_label = f"{city_hint}, Indiana"
+        # Location label for this set
+        if restrict_location:
+            if county_hint:
+                location_label = f"{county_hint}, Indiana"
+            elif city_hint:
+                location_label = f"{city_hint}, Indiana"
+            else:
+                location_label = "Indiana"
         else:
             location_label = "Indiana"
 
@@ -761,6 +765,7 @@ def search_indiana_developments(
                 "company": company,
                 "project_type": project_type,
                 "location_label": location_label,
+                "original_area_label": original_area_label,
                 "sqft": sqft,
                 "jobs": jobs,
                 "investment": investment,
@@ -769,6 +774,7 @@ def search_indiana_developments(
                 "url": url,
                 "provider": provider,
                 "raw_snippet": snippet,
+                "scope": scope,  # "local" or "statewide"
                 "_score": score,
                 "_date_dt": dt or datetime.min,
             }
@@ -786,12 +792,99 @@ def search_indiana_developments(
     return projects
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def search_indiana_developments(
+    user_q: str,
+    days: int = 365,
+    max_items: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    Main entrypoint.
+
+    Behavior:
+    - First, search for *local* projects that match the county/city and timeframe
+      in the question.
+    - If no local projects are found, fall back to a statewide search for
+      similar projects in Indiana.
+    - Each project includes:
+        - scope: "local" or "statewide"
+        - original_area_label: the area from the question (e.g. "Hendricks County, Indiana")
+
+    Returns a list of projects like:
+
+    {
+      "project_name": str,
+      "company": str,
+      "project_type": str,          # e.g. "Warehouse", "Manufacturing / production plant"
+      "location_label": str,        # "Hendricks County, Indiana" or "Indiana"
+      "original_area_label": str,   # area from the question
+      "sqft": Optional[str],
+      "jobs": Optional[str],
+      "investment": Optional[str],
+      "timeline_stage": str,        # "announcement", "groundbreaking", ...
+      "timeline_year": Optional[int],
+      "url": str,
+      "provider": str,
+      "raw_snippet": str,
+      "scope": "local" | "statewide",
+    }
+    """
+    city_hint, county_hint = _extract_geo_hint(user_q)
+    target_year = _extract_target_year(user_q)
+
+    if county_hint:
+        original_area_label = f"{county_hint}, Indiana"
+    elif city_hint:
+        original_area_label = f"{city_hint}, Indiana"
+    else:
+        original_area_label = "Indiana"
+
+    # 1) Strict local search
+    local_projects = _core_search(
+        user_q=user_q,
+        city_hint=city_hint,
+        county_hint=county_hint,
+        target_year=target_year,
+        days=days,
+        max_items=max_items,
+        restrict_location=True,
+        scope="local",
+        original_area_label=original_area_label,
+    )
+
+    if local_projects:
+        return local_projects
+
+    # 2) Fallback statewide search (only if no local projects)
+    statewide_projects = _core_search(
+        user_q=user_q,
+        city_hint=None,
+        county_hint=None,
+        target_year=target_year,
+        days=days,
+        max_items=max_items,
+        restrict_location=False,
+        scope="statewide",
+        original_area_label=original_area_label,
+    )
+
+    return statewide_projects
+
+
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
     Turn the structured project list into a compact, readable summary string
     for your chat UI.
 
-    If there are no items, returns a clear "no real projects found" message.
+    Behavior:
+    - If there are LOCAL projects (scope="local"), show those only.
+    - If there are NO local projects but there ARE statewide projects, explain
+      that nothing was found for the requested county/city, then list the
+      statewide projects.
+    - If there are no projects at all, return a clear "no real projects" message.
     """
     if not items:
         return (
@@ -799,17 +892,39 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             "identified new warehouse, logistics, or manufacturing projects "
             "in this area for the specified timeframe. Most public results are "
             "generic statewide announcements, tourism, or public-service pages "
-            "that do not represent specific new facilities in that county."
+            "that do not represent specific new facilities."
         )
 
-    area_label = items[0].get("location_label") or "Indiana"
+    original_area = items[0].get("original_area_label") or items[0].get("location_label") or "Indiana"
+
+    local_items = [p for p in items if p.get("scope") == "local"]
+    statewide_items = [p for p in items if p.get("scope") == "statewide"]
 
     lines: List[str] = []
-    lines.append(
-        f"Here are some confirmed facility projects connected to {area_label} based on web search results.\n"
-    )
 
-    for proj in items[:15]:
+    if local_items:
+        area_label = local_items[0].get("location_label") or original_area
+        lines.append(
+            f"Here are some confirmed facility projects connected to {area_label} based on web search results.\n"
+        )
+        projects_to_show = local_items
+    elif statewide_items:
+        lines.append(
+            f"I couldn’t find any clearly identified new warehouse, logistics, or manufacturing projects "
+            f"in {original_area} for the timeframe you asked about.\n"
+        )
+        lines.append(
+            "However, here are some notable Indiana-wide projects from a similar period that may still be relevant:\n"
+        )
+        projects_to_show = statewide_items
+    else:
+        # Shouldn't happen, but just in case
+        return (
+            "Based on web search results, there do not appear to be clearly "
+            "identified new facility projects matching that request."
+        )
+
+    for proj in projects_to_show[:15]:
         name = proj.get("project_name") or "Unnamed project"
         company = proj.get("company") or "Unknown"
         ptype = proj.get("project_type") or "Industrial / commercial project"
