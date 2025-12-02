@@ -199,7 +199,7 @@ def _infer_project_type(title: str, snippet: str) -> str:
     text = f"{title} {snippet}".lower()
 
     if "distribution center" in text or "fulfillment center" in text:
-        return "Distribution / fulfillment center"
+        return "Warehouse / logistics"
     if "warehouse" in text or "logistics park" in text or "logistics center" in text:
         return "Warehouse / logistics"
     if "manufacturing" in text or "factory" in text or "plant" in text:
@@ -209,6 +209,101 @@ def _infer_project_type(title: str, snippet: str) -> str:
     if "business park" in text or "industrial park" in text:
         return "Business / industrial park"
     return "Industrial / commercial project"
+
+
+def _build_scope_summary(snippet: str) -> str:
+    """
+    Try to pull out rough scope from the snippet:
+    - Square footage
+    - Jobs created
+    - Investment amount
+    Returns a short human-readable string, or 'not specified in snippet'.
+    """
+    if not snippet:
+        return "not specified in snippet"
+
+    text = " ".join(snippet.split())
+    low = text.lower()
+
+    sqft = None
+    jobs = None
+    investment = None
+
+    # Approx square footage
+    m_sqft = re.search(
+        r"([\d,]+)\s*(square[-\s]?foot|square[-\s]?feet|sq\.?\s*ft|sf)",
+        low,
+        flags=re.I,
+    )
+    if m_sqft:
+        sqft_raw = m_sqft.group(1)
+        sqft = sqft_raw.replace(",", "")
+
+    # Jobs
+    m_jobs = re.search(r"(\d{2,5})\s+(?:new\s+)?jobs", low, flags=re.I)
+    if m_jobs:
+        jobs = m_jobs.group(1)
+
+    # Investment
+    m_inv = re.search(r"\$[\d,\.]+\s*(million|billion)?", text, flags=re.I)
+    if m_inv:
+        investment = m_inv.group(0)
+        # Keeps 'million'/'billion' as written if present
+
+    bits: List[str] = []
+    if sqft:
+        bits.append(f"approx. {sqft}-square-foot facility")
+    if jobs:
+        bits.append(f"around {jobs} jobs")
+    if investment:
+        bits.append(f"{investment} investment")
+
+    if bits:
+        return ", ".join(bits)
+
+    return "not specified in snippet"
+
+
+def _infer_timeline_label(date_str: Optional[str], snippet: str) -> str:
+    """
+    Turn date + wording into a friendlier timeline label:
+    - 'groundbreaking year 2024'
+    - 'opening/operational year 2026'
+    - 'announcement year 2025'
+    """
+    if not date_str:
+        return "not specified in snippet"
+
+    try:
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        year = dt.year
+    except Exception:
+        return "not specified in snippet"
+
+    low = (snippet or "").lower()
+
+    if any(k in low for k in ("broke ground", "groundbreaking", "shovels in the ground", "shovel-ready")):
+        return f"groundbreaking year {year}"
+    if any(k in low for k in ("opens in", "opening in", "set to open", "will open", "operational in")):
+        return f"opening/operational year {year}"
+    if any(k in low for k in ("expansion", "expanding", "expand", "expanded")):
+        return f"expansion announced year {year}"
+    return f"announcement year {year}"
+
+
+def _short_snippet(snippet: str, max_len: int = 260) -> str:
+    """
+    Clean and truncate the Google snippet so it can be shown as 'Notes:'.
+    """
+    if not snippet:
+        return "No additional details available in the snippet."
+
+    s = " ".join(snippet.split())
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3].rstrip() + "..."
 
 
 def _google_cse_search(
@@ -371,9 +466,9 @@ def search_indiana_developments(
         score = int(item.get("score") or 0)
         dt = item.get("_parsed_dt") or datetime.min
         title = item.get("title") or ""
-        return (-score, dt, title.lower())
+        return (score, dt, title.lower())
 
-    enriched.sort(key=_sort_key, reverse=False)  # because score is negated
+    enriched.sort(key=_sort_key, reverse=True)
 
     # Strip internal helper key
     for r in enriched:
@@ -384,8 +479,19 @@ def search_indiana_developments(
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
-    Compact plain-text summary for chat UI or as context into GPT.
-    (No *** or other markdown styling that will clash with your own prompt.)
+    Structured plain-text summary for chat UI or as context into GPT.
+
+    Format example:
+
+    Here are some industrial and logistics related projects connected to Hancock County based on web search results.
+
+    Project Name – Hancock County, Indiana
+    Type: Warehouse / logistics
+    Company / Developer: not specified in snippet
+    Scope: approx. 1,000,000-square-foot facility, around 500 jobs, $300M investment
+    Timeline: announcement year 2025
+    Source: https://...
+    Notes: Short cleaned snippet...
     """
     if not items:
         return (
@@ -393,58 +499,79 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             "Try adjusting the date range or phrasing."
         )
 
-    lines: List[str] = []
-    lines.append("Recent Indiana projects (web search hits):")
+    # Try to build a location-focused heading
+    first = items[0]
+    county_hint = (first.get("county_hint") or "").strip()
+    city_hint = (first.get("city_hint") or "").strip()
 
-    for i, item in enumerate(items[:15], start=1):
+    if county_hint:
+        area_label = county_hint
+    elif city_hint:
+        area_label = f"{city_hint}, Indiana"
+    else:
+        area_label = "Indiana"
+
+    lines: List[str] = []
+    lines.append(
+        f"Here are some industrial and logistics related projects connected to {area_label} based on web search results.\n"
+    )
+
+    for item in items[:15]:
         title = item.get("title") or "Untitled"
         snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
         provider = item.get("provider") or ""
         date = item.get("date") or ""
-        proj_type = item.get("project_type") or ""
-        city_hint = item.get("city_hint") or ""
-        county_hint = item.get("county_hint") or ""
+        proj_type = item.get("project_type") or "Industrial / commercial project"
+        city_hint = (item.get("city_hint") or "").strip()
+        county_hint = (item.get("county_hint") or "").strip()
 
-        # Normalize date display
-        if date:
-            try:
-                dt = datetime.fromisoformat(date.replace("Z", "+00:00"))
-                if dt.tzinfo is not None:
-                    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-                date = dt.strftime("%Y-%m-%d")
-            except Exception:
-                pass
-
-        lines.append(f"{i}. {title}")
-
-        # Meta line: provider, date, type
-        meta_bits = []
-        if provider:
-            meta_bits.append(provider)
-        if date:
-            meta_bits.append(date)
-        if proj_type:
-            meta_bits.append(proj_type)
-        if meta_bits:
-            lines.append("   " + " • ".join(meta_bits))
-
-        # Location hint, if any
-        loc_bits = []
-        if city_hint:
-            loc_bits.append(city_hint)
+        # Location label on first line
         if county_hint:
-            loc_bits.append(county_hint)
-        if loc_bits:
-            lines.append("   Location focus: " + ", ".join(loc_bits))
+            loc_line = f"{county_hint}, Indiana"
+        elif city_hint:
+            loc_line = f"{city_hint}, Indiana"
+        else:
+            loc_line = "Indiana"
 
-        # Snippet + URL
-        if snippet:
-            lines.append(f"   {snippet}")
-        if url:
-            lines.append(f"   {url}")
+        # Timeline label
+        timeline_label = _infer_timeline_label(date, snippet)
 
-    return "\n".join(lines)
+        # Scope summary from snippet
+        scope_summary = _build_scope_summary(snippet)
+
+        # Short notes from snippet
+        notes = _short_snippet(snippet)
+
+        # Project heading
+        lines.append(f"{title} – {loc_line}")
+
+        # Type
+        lines.append(f"Type: {proj_type}")
+
+        # Company / Developer
+        # We don't reliably have this in the Google response; keep explicit.
+        lines.append("Company / Developer: not specified in snippet")
+
+        # Scope
+        lines.append(f"Scope: {scope_summary}")
+
+        # Timeline
+        lines.append(f"Timeline: {timeline_label}")
+
+        # Source
+        if provider:
+            lines.append(f"Source: {url} ({provider})")
+        else:
+            lines.append(f"Source: {url}")
+
+        # Notes from snippet
+        lines.append(f"Notes: {notes}")
+
+        # Blank line between projects
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
 
 
 __all__ = [
