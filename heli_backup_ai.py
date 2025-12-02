@@ -1281,7 +1281,7 @@ def chat():
             or ""
         ).strip()
 
-        mode = (data.get("mode") or "recommendation").lower()
+        mode = (data.get("mode") or "").strip() or "recommendation"
 
         if not user_q:
             # Return 200 so strict front-ends don't drop the body on 400s
@@ -1422,14 +1422,11 @@ def chat():
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
+            # Build the web-intel summary (this now handles:
+            # - local projects
+            # - statewide fallback if nothing local
+            # - and a clear explanation if truly nothing useful exists)
             intel_text = render_developments_markdown(items)
-
-            # If literally nothing came back from Google at all
-            if not items:
-                return _ok_payload(
-                    "I couldn’t find any web results for that location. "
-                    "Try adjusting the date range, county, or city name."
-                )
 
             system_prompt = {
                 "role": "system",
@@ -1480,7 +1477,7 @@ def chat():
 
             messages = [
                 system_prompt,
-                # Raw web intel as context
+                # Raw web intel as context (this now includes the smarter summary/fallback)
                 {"role": "system", "content": intel_text},
                 {"role": "user", "content": user_q},
             ]
