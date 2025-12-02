@@ -431,18 +431,59 @@ def _looks_like_real_project(title: str, snippet: str, page_text: str) -> bool:
     return True
 
 
+def _infer_year_from_text(text: str) -> Optional[int]:
+    """
+    Infer the most recent year mentioned in the text (e.g. 2021, 2024).
+    Used as a fallback when we don't have a reliable article date.
+    """
+    if not text:
+        return None
+    years = re.findall(r"\b(20[1-3]\d)\b", text)
+    if not years:
+        return None
+    try:
+        return max(int(y) for y in years)
+    except ValueError:
+        return None
+
+
 def _matches_location(text: str, city_hint: Optional[str], county_hint: Optional[str]) -> bool:
     """
-    Ensure the article actually mentions the requested county/city,
-    so we don't treat statewide projects as county-specific.
+    Ensure the article actually matches the requested county/city in Indiana.
+
+    - If a county is requested (e.g. "Hendricks County"), we require that exact
+      phrase AND "Indiana" appear somewhere in the text.
+    - If a city is requested (e.g. "Plainfield"), we require that the city name
+      show up with "Indiana" or "IN" nearby (e.g. "Plainfield, Indiana",
+      "Plainfield, IN", "Plainfield (Hendricks County, Indiana)").
     """
     t = text.lower()
+
     if county_hint:
-        if county_hint.lower() not in t:
+        county_l = county_hint.lower()
+        if county_l not in t:
             return False
+        if "indiana" not in t:
+            return False
+
     if city_hint:
-        if city_hint.lower() not in t:
-            return False
+        city_l = city_hint.lower()
+        found = False
+        start = 0
+        while True:
+            idx = t.find(city_l, start)
+            if idx == -1:
+                break
+            window_end = min(len(t), idx + len(city_l) + 80)
+            window = t[idx:window_end]
+            if ("indiana" in window) or (", in" in window) or (" in " in window) or (" in," in window):
+                found = True
+                break
+            start = idx + len(city_l)
+        if not found:
+            if not county_hint:
+                return False
+
     return True
 
 
@@ -486,8 +527,8 @@ def _classify_facility_type(text: str) -> str:
     """
     t = text.lower()
 
-    if any(k in t for k in ("distribution center", "fulfillment center", "logistics center", "logistics hub")):
-        return "Warehouse / logistics center"
+    if any(k in t for k in ("distribution center", "fulfillment center", "logistics center", "logistics hub", "delivery station")):
+        return "Warehouse / logistics facility"
     if "warehouse" in t:
         return "Warehouse"
     if any(k in t for k in ("manufacturing plant", "production plant", "factory", "assembly plant")):
@@ -579,7 +620,7 @@ def _infer_timeline(dt: Optional[datetime], text: str) -> Tuple[str, Optional[in
             except ValueError:
                 pass
 
-    # Groundbreaking / shovel-ready (use article date if present)
+    # Fallback to article date if present
     if dt:
         year = dt.year
         if any(k in low for k in ("broke ground", "groundbreaking", "shovels in the ground", "shovel-ready")):
@@ -589,6 +630,11 @@ def _infer_timeline(dt: Optional[datetime], text: str) -> Tuple[str, Optional[in
             return ("expansion announcement", year)
 
         return ("announcement", year)
+
+    # Fallback to any year mentioned in text
+    year_guess = _infer_year_from_text(text)
+    if year_guess is not None:
+        return ("announcement", year_guess)
 
     return ("not specified", None)
 
@@ -664,10 +710,6 @@ def search_indiana_developments(
         provider = item.get("provider") or ""
         dt: Optional[datetime] = item.get("date_dt")
 
-        # If no specific year requested, apply a basic recency cut
-        if target_year is None and dt and dt < cutoff:
-            continue
-
         page_text = _fetch_page_text(url)
         combined_text = " ".join([title, snippet, page_text])
         combined_text = re.sub(r"\s+", " ", combined_text).strip()
@@ -679,6 +721,17 @@ def search_indiana_developments(
         # Hard location filter: must mention the county/city explicitly if requested
         if not _matches_location(combined_text, city_hint, county_hint):
             continue
+
+        # Recency filter when no explicit target year requested:
+        # use article date OR year inferred from text.
+        if target_year is None:
+            if dt and dt < cutoff:
+                continue
+            if not dt:
+                text_year = _infer_year_from_text(combined_text)
+                if text_year is not None and now.year - text_year > 1:
+                    # Older than ~1 year → treat as not "currently happening"
+                    continue
 
         # Extract scope + classification
         sqft, jobs, investment = _extract_scope(combined_text)
