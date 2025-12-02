@@ -6,7 +6,7 @@ Indiana developments lead-finder for Tynan / Heli AI site.
 Goals:
 - Given a natural-language question like:
     "Any new warehouses or distribution centers announced in Hendricks County
-     in the last 12 months?"
+     in 2026?"
 - Use Google Custom Search JSON API (Programmable Search Engine)
   to find *actual facility projects*:
     - New / expanded warehouses, distribution centers, logistics hubs
@@ -16,8 +16,8 @@ Goals:
 - Extract:
     - Company coming to the area (best-effort)
     - Project type (warehouse, plant, office, park, etc.)
-    - Project scope (sq ft, jobs, $, if present)
-    - Rough timing (announcement / groundbreaking / opening)
+    - Project scope (sq ft, jobs, $ if available)
+    - Rough timing (announcement / groundbreaking / opening year)
     - Source URL
 
 Environment variables required:
@@ -98,13 +98,25 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     return (city, county)
 
 
+def _extract_target_year(q: str) -> Optional[int]:
+    """
+    Look for a 4-digit year like 2025, 2026, etc. in the user question.
+    Returns int year or None.
+    """
+    if not q:
+        return None
+    m = re.search(r"\b(20[2-3]\d)\b", q)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
     Build a Google CSE query that is biased toward *real facility projects*.
-
-    We look for phrases like:
-    - "new distribution center", "to build a new warehouse", "manufacturing plant",
-      "to locate in", "groundbreaking", "investment", "creates X jobs".
     """
     geo_bits: List[str] = []
     if county:
@@ -125,6 +137,7 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
         '"to locate in"',
         '"plans to build"',
         '"will build"',
+        '"to build a"',
         '"broke ground"',
         '"groundbreaking"',
         '"expansion"',
@@ -330,7 +343,7 @@ def _google_cse_search(
 
 
 # ---------------------------------------------------------------------------
-# Extraction: decide if it's a real project and pull scope/company/timing
+# Extraction: project detection, scope, company, timeline, location
 # ---------------------------------------------------------------------------
 
 PROJECT_POSITIVE_KEYWORDS = (
@@ -390,6 +403,15 @@ PROJECT_NEGATIVE_KEYWORDS = (
     "tourism",
 )
 
+COMPANY_HOST_OVERRIDES = {
+    "toyotaforklift.com": "Toyota Material Handling",
+    "www.toyotaforklift.com": "Toyota Material Handling",
+    "pressroom.toyota.com": "Toyota",
+    "aboutamazon.com": "Amazon Web Services (AWS)",
+    "news.skhynix.com": "SK hynix",
+    "investor.lilly.com": "Eli Lilly and Company",
+}
+
 
 def _looks_like_real_project(title: str, snippet: str, page_text: str) -> bool:
     """
@@ -409,6 +431,21 @@ def _looks_like_real_project(title: str, snippet: str, page_text: str) -> bool:
     return True
 
 
+def _matches_location(text: str, city_hint: Optional[str], county_hint: Optional[str]) -> bool:
+    """
+    Ensure the article actually mentions the requested county/city,
+    so we don't treat statewide projects as county-specific.
+    """
+    t = text.lower()
+    if county_hint:
+        if county_hint.lower() not in t:
+            return False
+    if city_hint:
+        if city_hint.lower() not in t:
+            return False
+    return True
+
+
 def _extract_scope(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Grab square footage, jobs, and investment from a text blob.
@@ -421,24 +458,24 @@ def _extract_scope(text: str) -> Tuple[Optional[str], Optional[str], Optional[st
     jobs = None
     investment = None
 
-    # sq ft
+    # sq ft (e.g. "500,000 square-foot", "120000 sf")
     m_sqft = re.search(
-        r"([\d,]+)\s*(square[-\s]?foot|square[-\s]?feet|sq\.?\s*ft|sf)",
+        r"(\d{1,3}(?:,\d{3})*)\s*(square[-\s]?foot|square[-\s]?feet|sq\.?\s*ft|sf)",
         text,
         flags=re.I,
     )
     if m_sqft:
         sqft = m_sqft.group(1).replace(",", "")
 
-    # jobs
-    m_jobs = re.search(r"(\d{2,5})\s+(?:new\s+)?jobs", text, flags=re.I)
+    # jobs (e.g. "1,000 jobs", "500 new jobs")
+    m_jobs = re.search(r"(\d{1,3}(?:,\d{3})*)\s+(?:new\s+)?jobs", text, flags=re.I)
     if m_jobs:
-        jobs = m_jobs.group(1)
+        jobs = m_jobs.group(1).replace(",", "")
 
-    # investment
-    m_inv = re.search(r"\$[\d,]+(?:\.\d+)?\s*(million|billion)?", text, flags=re.I)
+    # investment (e.g. "$100 million", "$3.2 billion")
+    m_inv = re.search(r"(\$[\d,]+(?:\.\d+)?\s*(?:million|billion)?)", text, flags=re.I)
     if m_inv:
-        investment = m_inv.group(0)
+        investment = m_inv.group(1).strip()
 
     return sqft, jobs, investment
 
@@ -466,31 +503,37 @@ def _infer_company_name(text: str, title: str, provider: str, url: str) -> str:
     """
     Best-effort company extraction:
     - Look for "X will build", "X plans to build", etc.
-    - Fall back to the provider or host name.
+    - Then fallback to title, then provider/host; apply host overrides.
     """
-    t = text[:400]
+    t = text[:600]
+
     patterns = [
         r"([A-Z][A-Za-z0-9&\.\-]*(?:\s+[A-Z][A-Za-z0-9&\.\-]*){0,4})\s+(?:will|plans|plan|announced|announces|to)\b",
         r"([A-Z][A-Za-z0-9&\.\-]*(?:\s+[A-Z][A-Za-z0-9&\.\-]*){0,4})\s+is\s+investing\b",
+        r"([A-Z][A-Za-z0-9&\.\-]*(?:\s+[A-Z][A-Za-z0-9&\.\-]*){0,4})\s+expansion\b",
     ]
     for pat in patterns:
         m = re.search(pat, t)
         if m:
             name = m.group(1).strip()
-            if len(name.split()) <= 6:
+            if 1 <= len(name.split()) <= 6:
                 return name
+
+    # Try mapping host to company
+    host = re.sub(r"^https?://", "", url).split("/")[0]
+    host = host.replace("www.", "")
+    if host in COMPANY_HOST_OVERRIDES:
+        return COMPANY_HOST_OVERRIDES[host]
 
     # Fallback: first chunk of title before dash/pipe
     base_title = re.split(r"[-|–—]", title)[0].strip()
-    if base_title and len(base_title.split()) <= 6:
+    if base_title and len(base_title.split()) <= 8:
         return base_title
 
     # Fallback to provider or host
     if provider:
         return provider
 
-    host = re.sub(r"^https?://", "", url).split("/")[0]
-    host = host.replace("www.", "")
     return host or "Unknown"
 
 
@@ -499,21 +542,55 @@ def _infer_timeline(dt: Optional[datetime], text: str) -> Tuple[str, Optional[in
     Return (stage_label, year) like:
       ("announcement", 2025)
       ("groundbreaking", 2024)
-      ("opening", 2026)
+      ("opening / operational", 2026)
+
+    Prefer explicit years in text (e.g. "opens in 2026") over article date.
     """
-    if not dt:
-        return ("not specified", None)
-
-    year = dt.year
     low = text.lower()
+    year_from_text: Optional[int] = None
 
-    if any(k in low for k in ("broke ground", "groundbreaking", "shovels in the ground", "shovel-ready")):
-        return ("groundbreaking", year)
-    if any(k in low for k in ("opens in", "opening in", "set to open", "will open", "operational in")):
-        return ("opening / operational", year)
-    if any(k in low for k in ("expansion", "expanding", "expand", "expanded")):
-        return ("expansion announcement", year)
-    return ("announcement", year)
+    # Explicit opening / operational year
+    opening_patterns = [
+        r"opens in (20[2-3]\d)",
+        r"opening in (20[2-3]\d)",
+        r"set to open in (20[2-3]\d)",
+        r"operational in (20[2-3]\d)",
+    ]
+    for pat in opening_patterns:
+        m = re.search(pat, low)
+        if m:
+            try:
+                year_from_text = int(m.group(1))
+                return ("opening / operational", year_from_text)
+            except ValueError:
+                pass
+
+    # Explicit expansion year
+    expansion_patterns = [
+        r"expansion.*(20[2-3]\d)",
+        r"expanding.*(20[2-3]\d)",
+    ]
+    for pat in expansion_patterns:
+        m = re.search(pat, low)
+        if m:
+            try:
+                year_from_text = int(m.group(1))
+                return ("expansion announcement", year_from_text)
+            except ValueError:
+                pass
+
+    # Groundbreaking / shovel-ready (use article date if present)
+    if dt:
+        year = dt.year
+        if any(k in low for k in ("broke ground", "groundbreaking", "shovels in the ground", "shovel-ready")):
+            return ("groundbreaking", year)
+
+        if any(k in low for k in ("expansion", "expanding", "expand", "expanded")):
+            return ("expansion announcement", year)
+
+        return ("announcement", year)
+
+    return ("not specified", None)
 
 
 def _score_relevance(user_q: str, text: str) -> int:
@@ -564,9 +641,14 @@ def search_indiana_developments(
     }
     """
     city_hint, county_hint = _extract_geo_hint(user_q)
+    target_year = _extract_target_year(user_q)
     query = _build_query(user_q, city_hint, county_hint)
 
-    raw_items = _google_cse_search(query, days=days, max_items=max_items)
+    # If a specific year is requested (e.g. 2026), don't use dateRestrict;
+    # we'll filter by year ourselves so we don't miss older announcements.
+    cse_days = None if target_year is not None else days
+
+    raw_items = _google_cse_search(query, days=cse_days, max_items=max_items)
     if not raw_items:
         return []
 
@@ -580,9 +662,10 @@ def search_indiana_developments(
         snippet = item.get("snippet") or ""
         url = item.get("url") or ""
         provider = item.get("provider") or ""
-        dt = item.get("date_dt")
+        dt: Optional[datetime] = item.get("date_dt")
 
-        if dt and dt < cutoff:
+        # If no specific year requested, apply a basic recency cut
+        if target_year is None and dt and dt < cutoff:
             continue
 
         page_text = _fetch_page_text(url)
@@ -593,12 +676,24 @@ def search_indiana_developments(
         if not _looks_like_real_project(title, snippet, combined_text):
             continue
 
+        # Hard location filter: must mention the county/city explicitly if requested
+        if not _matches_location(combined_text, city_hint, county_hint):
+            continue
+
         # Extract scope + classification
         sqft, jobs, investment = _extract_scope(combined_text)
         project_type = _classify_facility_type(combined_text)
         company = _infer_company_name(combined_text, title, provider, url)
-        stage, year = _infer_timeline(dt, combined_text)
+        stage, timeline_year = _infer_timeline(dt, combined_text)
         score = _score_relevance(user_q, combined_text)
+
+        # If a specific target year is requested, require a year match
+        if target_year is not None:
+            text_year_match = str(target_year) in combined_text
+            dt_year_match = dt is not None and dt.year == target_year
+            timeline_match = timeline_year == target_year
+            if not (text_year_match or dt_year_match or timeline_match):
+                continue
 
         if county_hint:
             location_label = f"{county_hint}, Indiana"
@@ -617,7 +712,7 @@ def search_indiana_developments(
                 "jobs": jobs,
                 "investment": investment,
                 "timeline_stage": stage,
-                "timeline_year": year,
+                "timeline_year": timeline_year,
                 "url": url,
                 "provider": provider,
                 "raw_snippet": snippet,
@@ -648,10 +743,10 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     if not items:
         return (
             "Based on web search results, there do not appear to be clearly "
-            "identified new warehouse, logistics, or manufacturing projects in this area "
-            "within the recent period covered by this search. Most public results are "
-            "generic county / tourism / public-service pages that do not represent "
-            "specific new facilities."
+            "identified new warehouse, logistics, or manufacturing projects "
+            "in this area for the specified timeframe. Most public results are "
+            "generic statewide announcements, tourism, or public-service pages "
+            "that do not represent specific new facilities in that county."
         )
 
     area_label = items[0].get("location_label") or "Indiana"
