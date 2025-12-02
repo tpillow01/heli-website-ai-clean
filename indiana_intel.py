@@ -190,75 +190,92 @@ def _score_relevance(user_q: str, title: str, snippet: str) -> int:
     return score
 
 
-def _classify_and_describe_project(title: str, snippet: str) -> Tuple[str, str]:
+def _classify_and_describe_project(title: str, snippet: str) -> Tuple[str, str, bool]:
     """
-    Classify what kind of project this is, and produce a short 'what this is' description.
-    This is where we distinguish between:
+    Classify what kind of project this is, and produce a short 'what this is'
+    description PLUS a forklift_relevant flag indicating whether this is
+    something Tynan should realistically care about.
+
+    forklift_relevant == True only for:
     - Warehouse / logistics
     - Manufacturing / plant
     - Industrial / business park
-    - Office / HQ
-    - Civic / arts venue
-    - Public services / recycling / utilities
-    - Generic county info
+    - Office / HQ (borderline – might have associated warehouse)
     """
     text = f"{title} {snippet}".lower()
 
+    # Tourism / events / visitor bureau
+    if any(k in text for k in ("visit hendricks county", "visitors bureau", "tourism", "shopping & family fun")):
+        proj_type = "Tourism / visitor information (not a specific project)"
+        desc = "Tourism / visitor information site, not a specific warehouse, logistics, or manufacturing project."
+        return proj_type, desc, False
+
+    # Ordinances, county government pages
+    if any(k in text for k in ("ordinances", "resolutions", "county council", "board of commissioners", "clerk's office")):
+        proj_type = "County government information (not a specific project)"
+        desc = "County government / ordinances information page, not a distinct construction or industrial project."
+        return proj_type, desc, False
+
+    # Encyclopedia / general county history
+    if any(k in text for k in ("encyclopedia of indianapolis", "history of hendricks county", "county profile")):
+        proj_type = "General county information (not a specific project)"
+        desc = "General informational / historical page about the county, not a specific facility or project."
+        return proj_type, desc, False
+
     # Civic / arts / events
-    if any(k in text for k in ("theatre", "theater", "performing arts", "concert", "music venue", "stage", "arts center", "event space")):
+    if any(k in text for k in ("theatre", "theater", "performing arts", "concert", "music venue", "stage", "arts center", "event space", "civic center")):
         proj_type = "Civic / arts venue"
         desc = "Performing arts and events venue (theatre / event space / public gathering space), not a warehouse or manufacturing facility."
-        return proj_type, desc
+        return proj_type, desc, False
 
     # Public services / recycling / utilities
     if any(k in text for k in ("yard waste", "recycling center", "solid waste", "transfer station", "landfill", "compost", "hazardous waste")):
         proj_type = "Public services / recycling facility"
-        desc = "Public yard-waste / recycling / solid waste facility serving local residents, not a distribution center or manufacturing plant."
-        return proj_type, desc
-
-    # Generic county / extension / info page
-    if any(k in text for k in ("extension office", "purdue extension", "4-h", "nutrition education", "county profile")):
-        proj_type = "General county information (not a specific project)"
-        desc = "General information page about the county and its industries, not a single construction project or facility."
-        return proj_type, desc
+        desc = "Public yard-waste / recycling / solid waste facility; could involve loaders or light equipment, but not a core warehouse/logistics or manufacturing lead."
+        return proj_type, desc, False
 
     # Warehouse / logistics
     if any(k in text for k in ("distribution center", "fulfillment center", "logistics park", "logistics center", "cross-dock", "bulk warehouse")):
         proj_type = "Warehouse / logistics"
         desc = "Warehouse or logistics facility focused on storage, distribution, or fulfillment operations."
-        return proj_type, desc
+        return proj_type, desc, True
 
     if "warehouse" in text:
         proj_type = "Warehouse / logistics"
         desc = "Warehouse facility that may involve storage, order picking, shipping, and receiving operations."
-        return proj_type, desc
+        return proj_type, desc, True
 
     # Manufacturing / plant
     if any(k in text for k in ("manufacturing", "manufacturing plant", "production plant", "factory", "assembly plant", "industrial plant")):
         proj_type = "Manufacturing / plant"
         desc = "Manufacturing or production plant involving industrial processes and material handling."
-        return proj_type, desc
+        return proj_type, desc, True
 
     # Industrial / business park
     if any(k in text for k in ("industrial park", "business park", "commerce park", "logistics park")):
         proj_type = "Industrial / business park"
         desc = "Industrial or business park with multiple commercial / industrial buildings and potential warehouse or manufacturing tenants."
-        return proj_type, desc
+        return proj_type, desc, True
 
     # Office / HQ
     if any(k in text for k in ("headquarters", "hq", "office building", "corporate office")):
         proj_type = "Office / headquarters"
-        desc = "Office or headquarters project; forklift opportunities depend on whether there are associated warehouse / logistics facilities."
-        return proj_type, desc
+        desc = "Office or headquarters project; forklift opportunities depend on associated warehouse / logistics space."
+        return proj_type, desc, True  # borderline but worth showing
 
-    # Fallback
-    proj_type = "Industrial / commercial project"
+    # Fallback: treat as generic industrial/commercial; low-confidence forklift relevance
+    proj_type = "Industrial / commercial project (unspecified)"
     snippet_clean = " ".join((snippet or "").split())
     if snippet_clean:
         desc = snippet_clean
     else:
         desc = "Industrial / commercial project; the snippet did not provide additional details."
-    return proj_type, desc
+    # If we don't see any strong industrial/logistics/manufacturing cues, be conservative:
+    forklift_relevant = any(
+        k in text
+        for k in ("facility", "plant", "industrial", "logistics", "warehouse", "distribution")
+    )
+    return proj_type, desc, forklift_relevant
 
 
 def _build_scope_summary(snippet: str) -> str:
@@ -387,7 +404,6 @@ def _infer_company_name(it: Dict[str, Any], url: str, title: str) -> Optional[st
     # Try to peel a clean name from the title before a dash / pipe
     base_title = re.split(r"[-|–—]", title)[0].strip()
     if base_title and len(base_title.split()) <= 6:
-        # e.g. "Hendricks Live!" or "Mohr Logistics Park"
         return base_title
 
     # Fallback to host
@@ -461,7 +477,7 @@ def _google_cse_search(
 
             dt_iso = _parse_date_from_pagemap(it)
             company_name = _infer_company_name(it, url, title)
-            project_type, what_this_is = _classify_and_describe_project(title, snippet)
+            project_type, what_this_is, forklift_relevant = _classify_and_describe_project(title, snippet)
 
             out.append(
                 {
@@ -469,10 +485,11 @@ def _google_cse_search(
                     "snippet": snippet,
                     "url": url,
                     "provider": provider,
-                    "date": dt_iso,          # may be None
+                    "date": dt_iso,            # may be None
                     "company_name": company_name,
                     "project_type": project_type,
                     "what_this_is": what_this_is,
+                    "forklift_relevant": forklift_relevant,
                 }
             )
 
@@ -509,9 +526,10 @@ def search_indiana_developments(
         "city_hint": Optional[str],
         "county_hint": Optional[str],
         "score": int,                 # crude relevance score
-        "project_type": str,          # e.g. "Warehouse / logistics"
-        "what_this_is": str,          # one-sentence explanation
-        "company_name": Optional[str]
+        "project_type": str,
+        "what_this_is": str,
+        "company_name": Optional[str],
+        "forklift_relevant": bool,
       }
     """
     city, county = _extract_geo_hint(user_q)
@@ -572,24 +590,20 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
     Structured plain-text summary for chat UI or as context into GPT.
 
-    Example shape:
-
-    Here are some industrial and logistics related projects connected to Hendricks County based on web search results.
-
-    Hendricks Live! – Hendricks County, Indiana
-    Type: Civic / arts venue
-    Company / Developer: Hendricks Live!
-    What this is: Performing arts and events venue (theatre / event space / public gathering space), not a warehouse or manufacturing facility.
-    Scope: approx. ... (if detected)
-    Timeline: announcement year 2025
-    Source: https://hendrickslive.org/
-    Notes: Short cleaned snippet...
+    Behavior:
+    - Only shows items where forklift_relevant == True (warehouse/logistics/manufacturing/etc.).
+    - If none exist, explains clearly that no such projects were found and
+      notes that search hits were general county / tourism / public-service pages.
     """
     if not items:
         return (
             "No web results were found for that location and timeframe. "
             "Try adjusting the date range or phrasing."
         )
+
+    # Split into forklift-relevant and not
+    forklift_items = [it for it in items if it.get("forklift_relevant")]
+    non_forklift_items = [it for it in items if not it.get("forklift_relevant")]
 
     # Heading based on first item's location hints
     first = items[0]
@@ -603,12 +617,32 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     else:
         area_label = "Indiana"
 
+    # If we have no forklift-relevant results, say that plainly
+    if not forklift_items:
+        # Optional: describe what the non-forklift hits were, at a high level
+        categories = set()
+        for it in non_forklift_items:
+            pt = (it.get("project_type") or "").strip()
+            if pt:
+                categories.add(pt)
+
+        cat_list = ", ".join(sorted(categories)) if categories else "general information pages"
+
+        return (
+            f"Based on web search results, there do not appear to be clearly identified new "
+            f"warehouse, logistics, or manufacturing projects in {area_label} within the recent period "
+            f"covered by this search.\n\n"
+            f"Most of the search hits were {cat_list}, which are not specific industrial projects "
+            f"and have been omitted from this list so you don’t chase bad leads."
+        )
+
+    # Otherwise, show only forklift-relevant projects
     lines: List[str] = []
     lines.append(
-        f"Here are some industrial and logistics related projects connected to {area_label} based on web search results.\n"
+        f"Here are some warehouse, logistics, manufacturing, or industrial park projects connected to {area_label} based on web search results.\n"
     )
 
-    for item in items[:15]:
+    for item in forklift_items[:15]:
         title = item.get("title") or "Untitled"
         snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
@@ -667,7 +701,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         # Timeline
         lines.append(f"Timeline: {timeline_label}")
 
-        # Source (clean URL; provider is implied by host)
+        # Source (clean URL)
         if url:
             lines.append(f"Source: {url}")
 
