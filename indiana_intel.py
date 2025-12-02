@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import re
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -49,6 +49,7 @@ BASE_KEYWORDS = (
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
 
 def _lower(s: Any) -> str:
     return str(s or "").lower()
@@ -170,10 +171,55 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _google_cse_search(query: str) -> List[Dict[str, Any]]:
+def _score_relevance(user_q: str, title: str, snippet: str) -> int:
+    """
+    Crude relevance score based on overlapping non-stopword tokens between
+    the user question and the result's title+snippet.
+    """
+    cleaned_q = re.sub(r"[“”\"']", " ", user_q or "")
+    q_tokens = {
+        t.lower()
+        for t in re.findall(r"[A-Za-z0-9]+", cleaned_q)
+        if t.lower() not in _STOPWORDS
+    }
+
+    haystack = f"{title} {snippet}".lower()
+    score = 0
+    for tok in q_tokens:
+        if tok and tok in haystack:
+            score += 1
+    return score
+
+
+def _infer_project_type(title: str, snippet: str) -> str:
+    """
+    Tiny heuristic to guess project type from title/snippet.
+    Just used for UI/context – not mission critical.
+    """
+    text = f"{title} {snippet}".lower()
+
+    if "distribution center" in text or "fulfillment center" in text:
+        return "Distribution / fulfillment center"
+    if "warehouse" in text or "logistics park" in text or "logistics center" in text:
+        return "Warehouse / logistics"
+    if "manufacturing" in text or "factory" in text or "plant" in text:
+        return "Manufacturing / plant"
+    if "headquarters" in text or "hq" in text:
+        return "Headquarters / office"
+    if "business park" in text or "industrial park" in text:
+        return "Business / industrial park"
+    return "Industrial / commercial project"
+
+
+def _google_cse_search(
+    query: str,
+    max_items: int = 10,
+    days: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """
     Thin wrapper around Google Custom Search JSON API.
-    Returns a list of normalized raw results.
+    Returns a list of normalized raw results (up to max_items).
+    Uses pagination and optional dateRestrict (days).
     """
     if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
         log.warning(
@@ -182,45 +228,69 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
         )
         return []
 
-    params = {
-        "key": GOOGLE_CSE_KEY,
-        "cx": GOOGLE_CSE_CX,
-        "q": query,
-        "num": 10,
-    }
-
-    try:
-        resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        log.warning("Google CSE request failed: %s", e)
-        return []
-
-    items = data.get("items", []) or []
-    log.info("Google CSE returned %s items", len(items))
+    max_items = max(1, min(max_items, 30))  # hard safety cap
 
     out: List[Dict[str, Any]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
+    seen_urls: set[str] = set()
+    start = 1
 
-        title = it.get("title") or ""
-        snippet = it.get("snippet") or it.get("htmlSnippet") or ""
-        url = it.get("link") or ""
-        provider = it.get("displayLink") or ""
+    while len(out) < max_items and start <= 91:
+        remaining = max_items - len(out)
+        num = min(10, remaining)
 
-        dt_iso = _parse_date_from_pagemap(it)
+        params = {
+            "key": GOOGLE_CSE_KEY,
+            "cx": GOOGLE_CSE_CX,
+            "q": query,
+            "num": num,
+            "start": start,
+        }
+        if days and days > 0:
+            # "d90" = last 90 days
+            params["dateRestrict"] = f"d{days}"
 
-        out.append(
-            {
-                "title": title,
-                "snippet": snippet,
-                "url": url,
-                "provider": provider,
-                "date": dt_iso,  # may be None
-            }
-        )
+        try:
+            resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.warning("Google CSE request failed (start=%s): %s", start, e)
+            break
+
+        items = data.get("items", []) or []
+        log.info("Google CSE returned %s items for start=%s", len(items), start)
+        if not items:
+            break
+
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+
+            title = it.get("title") or ""
+            snippet = it.get("snippet") or it.get("htmlSnippet") or ""
+            url = it.get("link") or ""
+            provider = it.get("displayLink") or ""
+
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            dt_iso = _parse_date_from_pagemap(it)
+
+            out.append(
+                {
+                    "title": title,
+                    "snippet": snippet,
+                    "url": url,
+                    "provider": provider,
+                    "date": dt_iso,  # may be None
+                }
+            )
+
+        start += len(items)
+        # Conservative safety break to avoid looping forever if something weird happens
+        if len(items) < num:
+            break
 
     return out
 
@@ -229,16 +299,19 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def search_indiana_developments(
     user_q: str,
     days: int = 365,
+    max_items: int = 20,
 ) -> List[Dict[str, Any]]:
     """
     Main entrypoint.
 
     - Extracts simple city/county hints from the user question.
     - Builds a Google CSE query anchored on Indiana industrial/commercial projects.
-    - Returns ALL normalized dicts Google gives us (up to 10):
+    - Uses Google dateRestrict + local filtering to bias towards the last `days`.
+    - Returns up to `max_items` normalized dicts:
       {
         "title": str,
         "snippet": str,
@@ -247,23 +320,66 @@ def search_indiana_developments(
         "date": ISO string or None,
         "city_hint": Optional[str],
         "county_hint": Optional[str],
+        "score": int,                 # crude relevance score
+        "project_type": str,          # e.g. "Warehouse / logistics"
       }
-
-    NOTE: This version does NOT filter by relevance or recency.
-    If Google returns 10 items, you get up to 10 items.
     """
     city, county = _extract_geo_hint(user_q)
     query = _build_query(user_q, city, county)
 
-    raw_results = _google_cse_search(query)
+    raw_results = _google_cse_search(query, max_items=max_items, days=days)
     if not raw_results:
         return []
 
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(days=max(days, 1))
+
+    enriched: List[Dict[str, Any]] = []
     for r in raw_results:
+        title = r.get("title") or ""
+        snippet = r.get("snippet") or ""
+        dt_iso = r.get("date")
+
+        # Parse date, if present
+        parsed_dt: Optional[datetime] = None
+        if dt_iso:
+            try:
+                parsed_dt = datetime.fromisoformat(dt_iso.replace("Z", "+00:00"))
+                if parsed_dt.tzinfo is not None:
+                    parsed_dt = parsed_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                parsed_dt = None
+
+        # Soft filter by recency only if we actually got a date
+        if parsed_dt and parsed_dt < cutoff:
+            # Too old for requested window; skip
+            continue
+
+        score = _score_relevance(user_q, title, snippet)
+        proj_type = _infer_project_type(title, snippet)
+
         r["city_hint"] = city
         r["county_hint"] = county
+        r["score"] = score
+        r["project_type"] = proj_type
+        r["_parsed_dt"] = parsed_dt  # private helper key for sorting
 
-    return raw_results
+        enriched.append(r)
+
+    # Sort by (score desc, date desc, title)
+    def _sort_key(item: Dict[str, Any]) -> Tuple[int, datetime, str]:
+        score = int(item.get("score") or 0)
+        dt = item.get("_parsed_dt") or datetime.min
+        title = item.get("title") or ""
+        return (-score, dt, title.lower())
+
+    enriched.sort(key=_sort_key, reverse=False)  # because score is negated
+
+    # Strip internal helper key
+    for r in enriched:
+        r.pop("_parsed_dt", None)
+
+    return enriched
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
@@ -286,6 +402,11 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         url = item.get("url") or ""
         provider = item.get("provider") or ""
         date = item.get("date") or ""
+        proj_type = item.get("project_type") or ""
+        city_hint = item.get("city_hint") or ""
+        county_hint = item.get("county_hint") or ""
+
+        # Normalize date display
         if date:
             try:
                 dt = datetime.fromisoformat(date.replace("Z", "+00:00"))
@@ -296,13 +417,28 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
                 pass
 
         lines.append(f"{i}. {title}")
+
+        # Meta line: provider, date, type
         meta_bits = []
         if provider:
             meta_bits.append(provider)
         if date:
             meta_bits.append(date)
+        if proj_type:
+            meta_bits.append(proj_type)
         if meta_bits:
             lines.append("   " + " • ".join(meta_bits))
+
+        # Location hint, if any
+        loc_bits = []
+        if city_hint:
+            loc_bits.append(city_hint)
+        if county_hint:
+            loc_bits.append(county_hint)
+        if loc_bits:
+            lines.append("   Location focus: " + ", ".join(loc_bits))
+
+        # Snippet + URL
         if snippet:
             lines.append(f"   {snippet}")
         if url:
