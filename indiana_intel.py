@@ -8,7 +8,7 @@ Responsibilities:
 - Hit Google Custom Search JSON API (Programmable Search Engine) for
   Indiana industrial / logistics / manufacturing projects
 - Normalize results into simple dicts
-- Provide markdown rendering for the chat UI and AI prompt
+- Provide HTML/markdown rendering for the chat UI and AI prompt
 
 Environment variables required:
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -39,15 +39,14 @@ GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
-# Conceptual window; Google CSE doesn't strictly filter by date but we keep this
-DEFAULT_DAYS = 365
+# Default lookback window when caller doesn't specify (in days)
+DEFAULT_DAYS = 365  # aim for "last 12 months" style questions
 
 # Base industrial / logistics keywords for Indiana
 BASE_KEYWORDS = (
     'Indiana (warehouse OR "distribution center" OR logistics OR manufacturing '
-    'OR plant OR factory OR industrial OR fulfillment)'
+    'OR plant OR factory OR industrial OR "industrial park" OR "fulfillment center")'
 )
-
 
 # ---------------------------------------------------------------------------
 # Small helpers
@@ -68,13 +67,13 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     text = q.strip()
 
     # County: e.g. "in Boone County", "Boone County leads", etc.
-    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text)
+    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text, flags=re.I)
     county = None
     if m_county:
         county = f"{m_county.group(1).strip()} County"
 
     # City: look for "in Greenwood", "around Greenwood, IN", etc.
-    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text)
+    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text, flags=re.I)
     city = None
     if m_city:
         raw = m_city.group(1).strip()
@@ -90,14 +89,17 @@ _STOPWORDS = {
     "months", "recent", "recently", "project", "projects", "have", "has",
     "been", "announced", "announcement", "for", "about", "on", "of", "a",
     "an", "county", "indiana", "logistics", "warehouse", "distribution",
-    "center", "centers", "today", "current", "currently",
+    "center", "centers", "developments",
 }
 
 
-def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
+def _build_query(user_q: str, city: Optional[str], county: Optional[str], days: int) -> str:
     """
-    Build a Google CSE query that always anchors on Indiana industrial keywords,
-    with optional city / county bias, and a *small* extra keyword tail from the question.
+    Build a Google CSE query that:
+    - Anchors on Indiana industrial/warehouse keywords
+    - Biases toward a specific county/city if present
+    - Adds a soft 'after:' date tail when the user asks for recent activity
+    - Adds a few non-boring tokens from the question
     """
     parts: List[str] = [BASE_KEYWORDS]
 
@@ -118,12 +120,19 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
     if extra_tokens:
         parts.append(" ".join(extra_tokens[:8]))
 
+    # Try to bias Google toward recency using after: operator
+    try:
+        since = datetime.utcnow() - timedelta(days=max(30, days))  # minimum 30-day window
+        parts.append(f"after:{since.strftime('%Y-%m-%d')}")
+    except Exception:
+        pass
+
     query = " ".join(parts)
     log.info("Google CSE query: %s", query)
     return query
 
 
-def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
+def _google_cse_search(query: str, num: int = 10, start: int = 1) -> List[Dict[str, Any]]:
     """
     Thin wrapper around Google Custom Search JSON API.
     Returns a list of raw results.
@@ -139,7 +148,8 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         "key": GOOGLE_CSE_KEY,
         "cx": GOOGLE_CSE_CX,
         "q": query,
-        "num": 10,
+        "num": num,
+        "start": start,
     }
 
     try:
@@ -151,7 +161,7 @@ def _google_cse_search(query: str, days: int) -> List[Dict[str, Any]]:
         return []
 
     items = data.get("items", []) or []
-    log.info("Google CSE returned %s items", len(items))
+    log.info("Google CSE returned %s items (start=%s)", len(items), start)
 
     out: List[Dict[str, Any]] = []
     for it in items:
@@ -231,8 +241,6 @@ def _looks_relevant(item: Dict[str, Any]) -> bool:
         "expansion",
         "distribution hub",
         "cold storage",
-        "logistics facility",
-        "supply chain",
     ):
         if kw in text:
             hits += 1
@@ -240,14 +248,22 @@ def _looks_relevant(item: Dict[str, Any]) -> bool:
     return hits > 0
 
 
-def _sort_key_date(item: Dict[str, Any]) -> float:
+def _within_days(item: Dict[str, Any], days: int) -> bool:
+    """
+    True if item.date is within the last N days (when date is parseable).
+    If no date, we treat it as unknown (return True) so we don't accidentally
+    throw away possibly-good results just because they lack date metadata.
+    """
     d = item.get("date")
     if not d:
-        return 0.0
+        return True
     try:
-        return datetime.fromisoformat(d).timestamp()
+        dt = datetime.fromisoformat(d)
     except Exception:
-        return 0.0
+        return True
+
+    cutoff = datetime.utcnow() - timedelta(days=max(1, days))
+    return dt >= cutoff
 
 
 # ---------------------------------------------------------------------------
@@ -272,89 +288,79 @@ def search_indiana_developments(
         "city_hint": Optional[str],
         "county_hint": Optional[str],
       }
+
+    Recency & quantity strategy:
+    - Run a base query.
+    - If a county is present, run a second county-focused query.
+    - Pull up to ~20 results, de-duplicate by URL.
+    - Filter by industrial relevance.
+    - Prefer projects with dates within the requested window (days).
+      If that leaves you with zero, fall back to older/undated items
+      instead of returning nothing.
     """
     city, county = _extract_geo_hint(user_q)
+    main_query = _build_query(user_q, city, county, days)
 
-    # --- 1) Primary query (as before) ---
-    primary_query = _build_query(user_q, city, county)
-    all_raw: List[Dict[str, Any]] = _google_cse_search(primary_query, days=days)
+    all_raw: List[Dict[str, Any]] = []
 
-    # --- 2) Extra queries to pull in more candidates for that county ---
-    # We keep these pretty generic so Google can find:
-    # - press releases
-    # - town / county meeting notes
-    # - industrial park announcements, etc.
-    county_term = county or ""
-    city_term = city or ""
+    # 1) Main query (top 10)
+    all_raw.extend(_google_cse_search(main_query, num=10, start=1))
 
-    extra_queries: List[str] = []
-
-    if county_term:
-        extra_queries.append(
-            f'Indiana "{county_term}" (warehouse OR '
-            f'"distribution center" OR logistics OR "industrial park" OR '
-            f'"logistics park" OR "fulfillment center" OR "industrial development")'
+    # 2) If we have a county, add a second, more focused query to widen net
+    if county:
+        county_query = (
+            f'"{county}" Indiana '
+            '(warehouse OR "distribution center" OR logistics OR "industrial park" '
+            'OR "logistics park" OR "fulfillment center")'
         )
+        log.info("Google CSE county-focused query: %s", county_query)
+        all_raw.extend(_google_cse_search(county_query, num=10, start=1))
 
-    # If we have a city, bias another query to that city name.
-    if city_term:
-        extra_queries.append(
-            f'"{city_term}" Indiana (warehouse OR "distribution center" '
-            f'OR logistics OR "industrial park" OR "logistics park")'
-        )
-
-    # If user asked about 12 months / last year etc., add a generic
-    # "project" query too to catch things that don’t say “warehouse”
-    # in the snippet but are clearly developments.
-    q_lower = (user_q or "").lower()
-    if "12" in q_lower or "last year" in q_lower or "12 months" in q_lower:
-        extra_queries.append(
-            f'Indiana "{county_term or city_term}" '
-            f'(project OR development OR expansion) '
-            f'(industrial OR logistics OR warehouse OR distribution)'
-        )
-
-    # Run all extra queries and merge results
-    for q in extra_queries:
-        more = _google_cse_search(q, days=days)
-        if more:
-            all_raw.extend(more)
-
-    if not all_raw:
-        return []
-
-    # --- 3) De-duplicate by URL so the same article doesn’t show up 3 times ---
-    seen_urls: set[str] = set()
-    deduped: List[Dict[str, Any]] = []
+    # De-duplicate by URL
+    dedup: Dict[str, Dict[str, Any]] = {}
     for r in all_raw:
         url = (r.get("url") or "").strip()
         if not url:
             continue
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        deduped.append(r)
+        if url not in dedup:
+            dedup[url] = r
 
-    if not deduped:
+    raw_results = list(dedup.values())
+    if not raw_results:
         return []
 
-    # --- 4) Apply a *soft* relevance filter ---
-    filtered: List[Dict[str, Any]] = []
-    for r in deduped:
-        if _looks_relevant(r):
-            r["city_hint"] = city
-            r["county_hint"] = county
-            filtered.append(r)
+    # First pass: apply relevance filter
+    relevant: List[Dict[str, Any]] = [r for r in raw_results if _looks_relevant(r)]
+    if not relevant:
+        log.info("No items passed relevance filter; falling back to raw items.")
+        relevant = raw_results
 
-    # If our filter killed everything, fall back to the top few raw items
-    if not filtered:
-        log.info("No items passed relevance filter; falling back to raw top items.")
-        filtered = deduped[:8]
-        for r in filtered:
-            r["city_hint"] = city
-            r["county_hint"] = county
+    # Second pass: prefer projects within the requested date window
+    recent_only = [r for r in relevant if _within_days(r, days)]
+    if recent_only:
+        chosen = recent_only
+        log.info(
+            "Using %s recent items within %s days (out of %s relevant)",
+            len(recent_only),
+            days,
+            len(relevant),
+        )
+    else:
+        # Nothing clearly within the window; keep the most relevant ones,
+        # but caller can still see they might be older.
+        chosen = relevant
+        log.info(
+            "No items clearly within %s days; falling back to %s relevant items.",
+            days,
+            len(relevant),
+        )
 
-    # --- 5) Sort by date if we have it; otherwise keep Google’s order ---
+    # Attach city/county hints
+    for r in chosen:
+        r.setdefault("city_hint", city)
+        r.setdefault("county_hint", county)
+
+    # Sort by date desc (newest first) when we have dates; otherwise keep API order
     def _dt(item: Dict[str, Any]) -> float:
         d = item.get("date")
         if not d:
@@ -364,29 +370,37 @@ def search_indiana_developments(
         except Exception:
             return 0.0
 
-    filtered.sort(key=_dt, reverse=True)
-    return filtered
+    chosen.sort(key=_dt, reverse=True)
+    return chosen
 
 
-def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
+def render_developments_html(items: List[Dict[str, Any]]) -> str:
     """
-    Compact text summary for chat UI or as context into GPT.
-    This is NOT the final formatted answer to the user; it's just
-    structured context the AI will read.
+    Compact HTML summary for chat UI.
+
+    - Project names: bold + dark red for clear separation.
+    - Simple card-like layout using basic inline styles so it works
+      inside your existing chat bubble.
     """
     if not items:
-        return "NO_RESULTS"
+        return (
+            "<p>No clearly dated new warehouse or logistics project announcements were "
+            "found in the search results for the requested time window.</p>"
+        )
 
-    lines: List[str] = ["RAW_INDIANA_DEVELOPMENTS_RESULTS"]
-    for i, item in enumerate(items[:15], start=1):
-        title = item.get("title") or "Untitled"
+    parts: List[str] = []
+    parts.append('<div style="display:flex;flex-direction:column;gap:10px;">')
+
+    for item in items[:10]:
+        title = item.get("title") or "Untitled project"
         snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
         provider = item.get("provider") or ""
         date = item.get("date") or ""
-        county = item.get("county_hint") or ""
-        city = item.get("city_hint") or ""
+        city_hint = item.get("city_hint") or ""
+        county_hint = item.get("county_hint") or ""
 
+        # Format date if we have it
         if date:
             try:
                 dt = datetime.fromisoformat(date)
@@ -394,26 +408,104 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             except Exception:
                 pass
 
-        lines.append(f"ITEM {i}:")
-        lines.append(f"  TITLE: {title}")
-        if date:
-            lines.append(f"  DATE: {date}")
-        if city:
-            lines.append(f"  CITY_HINT: {city}")
-        if county:
-            lines.append(f"  COUNTY_HINT: {county}")
+        # Build location string
+        loc_bits: List[str] = []
+        if city_hint:
+            loc_bits.append(city_hint)
+        if county_hint and county_hint not in loc_bits:
+            loc_bits.append(county_hint)
+        location = ", ".join(loc_bits) if loc_bits else ""
+
+        parts.append(
+            '<div style="padding:8px 10px;border-radius:6px;'
+            'border:1px solid #444;background:#111;margin-bottom:4px;">'
+        )
+
+        # Project name: bold + dark red
+        parts.append(
+            f'<div style="font-weight:bold;color:#b30000;margin-bottom:2px;">'
+            f'{title}'
+            f'</div>'
+        )
+
+        if location:
+            parts.append(
+                f'<div style="font-size:0.9rem;color:#ddd;">'
+                f'<span style="font-weight:bold;">Location:</span> {location}'
+                f'</div>'
+            )
+
         if provider:
-            lines.append(f"  PROVIDER: {provider}")
+            parts.append(
+                f'<div style="font-size:0.85rem;color:#aaa;">'
+                f'<span style="font-weight:bold;">Source:</span> {provider}'
+                f'</div>'
+            )
+
         if snippet:
-            lines.append(f"  SNIPPET: {snippet}")
+            parts.append(
+                f'<div style="margin-top:4px;font-size:0.95rem;color:#eee;">'
+                f'{snippet}'
+                f'</div>'
+            )
+
+        if date:
+            parts.append(
+                f'<div style="margin-top:4px;font-size:0.85rem;color:#ccc;">'
+                f'<span style="font-weight:bold;">Timeline:</span> {date}'
+                f'</div>'
+            )
+
         if url:
-            lines.append(f"  URL: {url}")
-        lines.append("")  # blank line between items
+            parts.append(
+                f'<div style="margin-top:4px;font-size:0.85rem;">'
+                f'<a href="{url}" target="_blank" '
+                f'style="color:#66b3ff;text-decoration:none;">'
+                f'View source</a></div>'
+            )
+
+        parts.append("</div>")  # end card
+
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
+    """
+    Markdown fallback (no *** bold markers, just simple bullets).
+    """
+    if not items:
+        return (
+            "No clearly dated new warehouse or logistics project announcements were "
+            "found in the search results for the requested time window."
+        )
+
+    lines: List[str] = []
+    for item in items[:10]:
+        title = item.get("title") or "Untitled project"
+        snippet = (item.get("snippet") or "").strip()
+        url = item.get("url") or ""
+        date = item.get("date") or ""
+        if date:
+            try:
+                dt = datetime.fromisoformat(date)
+                date = dt.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+        lines.append(f"- {title}")
+        if date:
+            lines.append(f"  - Timeline: {date}")
+        if snippet:
+            lines.append(f"  - {snippet}")
+        if url:
+            lines.append(f"  - {url}")
 
     return "\n".join(lines)
 
 
 __all__ = [
     "search_indiana_developments",
+    "render_developments_html",
     "render_developments_markdown",
 ]
