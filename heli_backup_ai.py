@@ -15,7 +15,7 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from indiana_intel import search_indiana_developments, render_developments_markdown
+from indiana_intel import search_indiana_developments, _extract_geo_hint
 
 # (Optional) OpenAI client — leave imported but do not instantiate here
 try:
@@ -1297,18 +1297,16 @@ def chat():
 
         app.logger.info(f"/api/chat mode={mode} q='{user_q[:80]}'")
 
+        # ─────────────────────────────────────────────────────────────
         # Contact Finder (CSV lookup)
+        # ─────────────────────────────────────────────────────────────
         if mode == "contact_finder":
             try:
                 from contact_finder import chat_contact_finder as _cf_handler
                 page = int((data.get("page") or 1))
                 page_size = int((data.get("page_size") or 25))
                 with app.test_request_context(
-                    json={
-                        "message": user_q,
-                        "page": page,
-                        "page_size": page_size,
-                    }
+                    json={"message": user_q, "page": page, "page_size": page_size}
                 ):
                     resp = _cf_handler()
                 payload = resp.get_json() if hasattr(resp, "get_json") else (resp or {})
@@ -1318,24 +1316,34 @@ def chat():
                 app.logger.exception("Contact Finder error: %s", e)
                 return _ok_payload(f"❌ Contact Finder error: {e}"), 500
 
+        # ─────────────────────────────────────────────────────────────
         # Catalog (non-interactive list builder)
+        # ─────────────────────────────────────────────────────────────
         if mode == "catalog":
-            # Use the safe non-interactive combiner we wired earlier
             text = render_catalog_sections(user_q)
             return _ok_payload(text or "_No catalog items matched._")
 
+        # ─────────────────────────────────────────────────────────────
         # Sales Coach
+        # ─────────────────────────────────────────────────────────────
         if mode == "coach":
             ai_reply = run_sales_coach(user_q)
             return _ok_payload(ai_reply or "_No response produced._")
 
-        # Inquiry
+        # ─────────────────────────────────────────────────────────────
+        # Inquiry (billing / report analysis)
+        # ─────────────────────────────────────────────────────────────
         if mode == "inquiry":
             structured = try_structured_top_spend_answer(user_q)
             if structured:
                 return _ok_payload(structured)
 
-            from data_sources import build_inquiry_brief, make_inquiry_targets, _norm_name
+            from data_sources import (
+                build_inquiry_brief,
+                make_inquiry_targets,
+                _norm_name,
+            )
+
             qnorm = _norm_name(user_q)
             chosen_name = None
             try:
@@ -1418,74 +1426,91 @@ def chat():
 
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             return _ok_payload(
-                f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._"
+                f"{tag}\n{_strip_prompt_leak(ai_reply)}"
+                if ai_reply
+                else "_No response generated._"
             )
 
+        # ─────────────────────────────────────────────────────────────
         # Indiana Developments (web intel) — NO GPT, just real scraped projects
+        # ─────────────────────────────────────────────────────────────
         if mode == "indiana_developments":
 
-            def _format_indiana_projects_for_chat(items):
+            def _format_indiana_projects_for_chat(user_q_inner, items):
                 """
                 Format Indiana project results into the HTML-ish structure expected
                 for this mode, without calling GPT (prevents hallucinated projects).
                 """
+                # Nothing at all came back that looks like a project
                 if not items:
                     return (
-                        "Based on web search results, there do not appear to be clearly "
-                        "identified new warehouse, logistics, or manufacturing projects "
-                        "in this area for the specified timeframe. Most public results are "
-                        "generic statewide announcements, tourism, or public-service pages "
-                        "that do not represent specific new facilities."
+                        "I couldn’t find any clearly identified new warehouse, logistics, or manufacturing "
+                        "projects in Indiana that match the timeframe and criteria you asked about. "
+                        "Most of the available web results are tourism pages, general county marketing, "
+                        "government service information, or non-industrial facilities like parks, schools, "
+                        "and hospitals."
                     )
+
+                # Try to infer what area the user asked about from their question
+                try:
+                    city_hint, county_hint = _extract_geo_hint(user_q_inner)
+                except Exception:
+                    city_hint, county_hint = (None, None)
 
                 original_area = (
-                    items[0].get("original_area_label")
+                    county_hint
+                    or city_hint
+                    or items[0].get("original_area_label")
                     or items[0].get("location_label")
-                    or "Indiana"
+                    or "the requested area"
                 )
 
+                # Split projects into "local" vs "statewide"
                 local_items = [p for p in items if p.get("scope") == "local"]
-                statewide_items = [p for p in items if p.get("scope") == "statewide"]
+                statewide_items = [p for p in items if p.get("scope") != "local"]
 
-                lines = []
+                lines: list[str] = []
 
                 if local_items:
-                    area_label = local_items[0].get("location_label") or original_area
+                    # ✅ Best case: we actually have projects tied to the requested county/city.
                     lines.append(
-                        f"Here are some industrial and logistics related projects connected to {area_label} based on web search results.\n"
+                        f"Here are some industrial and logistics related projects connected to {original_area} based on web search results.\n"
                     )
-                    projects_to_show = local_items
+                    projects_to_show = local_items[:6]  # keep it focused and readable
                 elif statewide_items:
+                    # ⚠️ No clearly local projects; fall back to statewide context.
                     lines.append(
-                        f"I couldn’t find any clearly identified new warehouse, logistics, or manufacturing projects "
-                        f"in {original_area} for the timeframe you asked about.\n"
+                        f"I couldn’t find any clearly documented new warehouse, logistics, or manufacturing projects specifically in {original_area} based on web search results. "
+                        "Most local hits are general marketing, government, or tourism pages.\n\n"
+                        "However, here are some significant Indiana industrial and logistics projects from a similar period that may still be useful as prospecting targets and market context.\n"
                     )
-                    lines.append(
-                        "However, here are some notable Indiana-wide projects from a similar period that may still be relevant:\n"
-                    )
-                    projects_to_show = statewide_items
+                    projects_to_show = statewide_items[:6]
                 else:
+                    # This is very rare, but if everything is junk even statewide:
                     return (
-                        "Based on web search results, there do not appear to be clearly "
-                        "identified new facility projects matching that request."
+                        "I couldn’t find any clearly identified new warehouse, logistics, or manufacturing "
+                        "projects in Indiana that match the timeframe and criteria you asked about. "
+                        "Most of the available web results are generic announcements, tourism, or public-service pages."
                     )
 
-                for proj in projects_to_show[:15]:
-                    name = proj.get("project_name") or "Unnamed project"
+                for proj in projects_to_show:
+                    name = (proj.get("project_name") or "").strip() or "Untitled project"
                     company = proj.get("company") or "not specified in snippet"
                     ptype = proj.get("project_type") or "Industrial / commercial project"
                     sqft = proj.get("sqft")
                     jobs = proj.get("jobs")
                     invest = proj.get("investment")
-                    stage = proj.get("timeline_stage") or "not specified in snippet"
+                    stage = proj.get("timeline_stage") or ""
                     year = proj.get("timeline_year")
-                    url = proj.get("url") or ""
+                    url = (proj.get("url") or "").strip()
+                    snippet = (proj.get("snippet") or "").strip()
                     location_label = (
                         proj.get("location_label")
                         or proj.get("original_area_label")
                         or "Indiana"
                     )
 
+                    # Scope: only show what we actually parsed (no guessing)
                     scope_bits = []
                     if sqft:
                         scope_bits.append(f"~{sqft} sq ft")
@@ -1497,11 +1522,20 @@ def chat():
                         ", ".join(scope_bits) if scope_bits else "not specified in snippet"
                     )
 
-                    if year:
-                        timeline_str = f"{stage} ({year})"
+                    # Timeline text
+                    if year and stage:
+                        if stage == "outside requested timeframe":
+                            timeline_str = f"outside requested timeframe ({year})"
+                        else:
+                            timeline_str = f"{stage} ({year})"
+                    elif year:
+                        timeline_str = f"{year}"
+                    elif stage:
+                        timeline_str = stage
                     else:
-                        timeline_str = stage or "not specified in snippet"
+                        timeline_str = "not specified in snippet"
 
+                    # Project header line (red, bold label)
                     lines.append(
                         f'<span style="color:#990000; font-weight:bold">{name} – {location_label}</span>'
                     )
@@ -1510,21 +1544,29 @@ def chat():
                     lines.append(f"Scope: {scope_str}")
                     lines.append(f"Timeline: {timeline_str}")
                     lines.append(f"Source: {url or 'not specified in snippet'}")
+
+                    # Extra flavor from the search snippet
+                    if snippet:
+                        lines.append(f"Notes: {snippet}")
+
+                    # Blank line between projects
                     lines.append("")
 
                 return "\n".join(lines).rstrip()
 
             try:
-                # Look back up to ~10 years so we always have something to talk about
-                items = search_indiana_developments(user_q, days=365 * 10)
+                # Look back up to ~10 years so we almost always have something to talk about
+                items = search_indiana_developments(user_q, days=365 * 10, max_items=30)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
-            intel_text = _format_indiana_projects_for_chat(items)
+            intel_text = _format_indiana_projects_for_chat(user_q, items)
             return _ok_payload(intel_text)
 
-        # Recommendation (default)
+        # ─────────────────────────────────────────────────────────────
+        # Recommendation (default forklift model recommendation flow)
+        # ─────────────────────────────────────────────────────────────
         ai_reply = run_recommendation_flow(user_q)
 
         # Inject Current Promotions
