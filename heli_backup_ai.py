@@ -1413,77 +1413,52 @@ def chat():
             tag = f"Segmentation: {brief['size_letter']}{brief['relationship_code']}"
             return _ok_payload(f"{tag}\n{_strip_prompt_leak(ai_reply)}" if ai_reply else "_No response generated._")
 
-        # Indiana Developments (web intel)
+        # Indiana Developments (web intel – project details only, no sales advice)
         if mode == "indiana_developments":
             try:
-                # Look back up to a year so we don't miss projects
+                # pull roughly last 12 months of projects (we enforce recency inside indiana_intel)
                 items = search_indiana_developments(user_q, days=365)
             except Exception as e:
                 app.logger.exception("Indiana developments search error: %s", e)
                 return _ok_payload(f"❌ Error searching Indiana developments: {e}")
 
-            # If nothing came back at all, bail early with a clear message
-            if not items:
-                return _ok_payload(
-                    "No specific warehouse or logistics projects were clearly identified in these search results for the requested area and timeframe."
-                )
-
-            # Turn those into structured HTML snippets for the model to read
-            intel_html = render_developments_markdown(items)
+            intel_block = render_developments_markdown(items)
+            has_any = bool(items)
 
             system_prompt = {
                 "role": "system",
                 "content": (
-                    "You are an Indiana industrial project research assistant for a forklift dealership.\n"
-                    "You are given HTML that lists recent web search results about Indiana industrial, warehouse, "
-                    "distribution, logistics, and manufacturing activity.\n\n"
-                    "PRIMARY GOAL:\n"
-                    "- Identify concrete facility projects, such as:\n"
-                    "  - new warehouses\n"
-                    "  - distribution centers\n"
-                    "  - logistics hubs\n"
-                    "  - industrial parks\n"
-                    "  - manufacturing plants\n"
-                    "  - major warehouse / logistics expansions\n\n"
-                    "For EACH clear project, output one <li> with:\n"
-                    "- Project name\n"
-                    "- Location (city/county, Indiana) if mentioned\n"
-                    "- Facility type (warehouse, DC, logistics hub, industrial park, plant, etc.) if mentioned\n"
-                    "- Scope (size, number of buildings, tenants/uses, etc.) using ONLY what is clearly implied by the search snippets; "
-                    "if something is not mentioned, say \"Not specified in search snippet.\"\n"
-                    "- Timeline (announced / under construction / completed, with dates if present; otherwise \"Not specified in search snippet.\")\n"
-                    "- Source (URL)\n\n"
-                    "IMPORTANT RULES:\n"
-                    "- Base every detail strictly on the provided HTML intel; do NOT invent numbers, sizes, or tenants.\n"
-                    "- If a detail is not mentioned, explicitly say: \"Not specified in search snippet.\"\n"
-                    "- Do NOT give sales advice, outreach suggestions, or generic strategy.\n"
-                    "- Do NOT use asterisks or Markdown formatting. Output pure HTML only.\n\n"
-                    "IF NO CLEAR FACILITY PROJECTS ARE FOUND:\n"
-                    "- First sentence must be EXACTLY:\n"
-                    "  No clearly dated new warehouse or logistics project announcements were found in the search results for the requested time window.\n"
-                    "- After that sentence, still provide a short HTML overview of the county's industrial/logistics landscape using the SAME <ol>/<li> structure, "
-                    "treating named industrial parks, logistics corridors, or key logistics themes as \"items\".\n"
-                    "- Again, ONLY use what is present in the intel HTML; do not hallucinate specific projects.\n\n"
-                    "OUTPUT FORMAT (always use this structure):\n"
-                    "<div>\n"
-                    "  <ol>\n"
-                    "    <li>\n"
-                    "      <span style=\"color:#b00000;font-weight:bold;\">PROJECT OR ITEM NAME</span><br>\n"
-                    "      Location: ...<br>\n"
-                    "      Type: ...<br>\n"
-                    "      Scope: ...<br>\n"
-                    "      Timeline: ...<br>\n"
-                    "      Source: URL\n"
-                    "    </li>\n"
-                    "    <!-- one <li> per project or relevant industrial/logistics item -->\n"
-                    "  </ol>\n"
-                    "</div>\n"
-                ),
+                    "You are an assistant for Tynan Equipment Company, a forklift dealership in Indiana.\n"
+                    "You will be given search results about Indiana industrial, warehouse, manufacturing, or logistics developments. "
+                    "Each result includes at least a title, snippet, URL, and sometimes a date.\n\n"
+                    "Your job:\n"
+                    "1) From these results, identify ONLY entries that clearly describe a specific project:\n"
+                    "   - new warehouse, distribution center, logistics facility, industrial plant, factory, or major expansion\n"
+                    "   - ignore generic county profiles, tourism pages, gardening events, statistics pages, etc.\n"
+                    "2) For each real project you find, output a clean, detailed summary using ONLY information available in the snippets or obvious general knowledge "
+                    "   about the company (e.g., HarperCollins is a large book publisher). Do NOT invent project-specific numbers (square footage, job counts, dollar amounts) "
+                    "   if they are not present in the snippet.\n\n"
+                    "Formatting rules (VERY IMPORTANT):\n"
+                    "- Do NOT use markdown asterisks (** or *).\n"
+                    "- For each project, output a block like this:\n"
+                    "  <span style=\"color:#b00020; font-weight:bold;\">PROJECT NAME – City, County</span>\n"
+                    "  Type: (e.g. logistics distribution center, cold storage warehouse, manufacturing plant)\n"
+                    "  Company / Developer: (company building or operating it, if clear from snippet; otherwise 'Not specified in snippet.')\n"
+                    "  Scope: (what the project is for, approximate role/scale as described in the snippet; if size or jobs aren't mentioned, say 'Not specified in snippet.')\n"
+                    "  Timeline: (any dates such as announcement, groundbreaking, expected completion; if none, say 'Not specified in snippet.')\n"
+                    "  Source: URL\n\n"
+                    "Additional guidance:\n"
+                    "- Focus ONLY on describing the projects themselves. Do NOT give sales advice, outreach steps, or what Tynan should do.\n"
+                    "- If there are no entries that clearly look like a new build or expansion project, respond with exactly:\n"
+                    "  No clearly identified new warehouse or logistics projects were found in the search results for the requested area and timeframe.\n"
+                    "- If there IS at least one project, DO NOT include any sentence about 'no clearly dated projects'. Just list the project blocks.\n"
+                )
             }
 
             messages = [
                 system_prompt,
-                {"role": "system", "content": intel_html},
+                # raw intel as context
+                {"role": "system", "content": intel_block or "No search results found."},
                 {"role": "user", "content": user_q},
             ]
 
@@ -1492,19 +1467,14 @@ def chat():
                     model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
                     messages=messages,
                     max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
-                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.35")),
+                    temperature=float(os.getenv("OAI_TEMPERATURE", "0.2"))  # low temp for factual summarizing
                 )
                 ai_reply = (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 app.logger.exception("Indiana developments AI error: %s", e)
-                ai_reply = (
-                    f"❌ Internal error generating Indiana project intel: {e}"
-                )
+                ai_reply = f"❌ Internal error generating Indiana intel: {e}"
 
-            return _ok_payload(
-                ai_reply
-                or "No specific warehouse or logistics projects were clearly identified in these search results for the requested area and timeframe."
-            )
+            return _ok_payload(ai_reply or "_No response produced._")
 
         # Recommendation (default)
         ai_reply = run_recommendation_flow(user_q)
