@@ -7,8 +7,10 @@ import re
 import time
 import difflib
 from datetime import timedelta
-from functools import wraps
+from functools import wraps, lru_cache  # ⬅️ add lru_cache here
 import logging
+
+import pandas as pd  # ⬅️ NEW: for customer_report.csv handling
 
 from flask import (
     Flask, render_template, request, jsonify, redirect, url_for, session, Response
@@ -1155,18 +1157,60 @@ def _money_to_float(x: Union[pd.Series, str, float, int]) -> Union[pd.Series, fl
 
 @lru_cache(maxsize=1)
 def _load_report_df_cached():
+    """
+    Load customer_report.csv once and enrich it with helper columns.
+
+    Defensive version:
+    - If the file can't be read, returns None (so callers can bail).
+    - If expected columns like 'Zip Code' or 'County State' are missing,
+      it creates empty Series instead of crashing with 'str' has no attribute apply'.
+    """
     try:
         df = pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
-    except Exception:
+    except Exception as e:
+        # Keep your existing behavior (None) but also log what went wrong
+        try:
+            app.logger.warning(
+                "⚠️ customer_report.csv not available for enrichment: %s", e
+            )
+        except Exception:
+            # app may not be defined yet in some import orders; fail quietly
+            pass
         return None
-    df["_zip5"]   = df.get("Zip Code", "").apply(_zip5)
-    df["_county"] = df.get("County State", "").apply(_county_of)
-    df["_state"]  = df.get("County State", "").apply(_state_of)
-    df["_city"]   = df.get("City", "").str.strip().str.lower()
-    sold = df.get("Sold to Name", "")
-    ship = df.get("Ship to Name", "")
-    df["_company"] = sold.where(sold.astype(str).str.strip() != "", ship).fillna("")
+
+    # Make sure we really have a DataFrame
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame(df)
+
+    # Helper: always return a Series, never a bare string
+    def _safe_series(col_name: str) -> pd.Series:
+        if col_name in df.columns:
+            s = df[col_name]
+        else:
+            # Create an empty/blank series with same index
+            s = pd.Series([""] * len(df), index=df.index)
+        return s.astype(str)
+
+    # --- Enrichment columns, all using _safe_series ---
+
+    # Zip (5-digit)
+    df["_zip5"] = _safe_series("Zip Code").apply(_zip5)
+
+    # County / State from "County State"
+    county_state = _safe_series("County State")
+    df["_county"] = county_state.apply(_county_of)
+    df["_state"] = county_state.apply(_state_of)
+
+    # City
+    df["_city"] = _safe_series("City").str.strip().str.lower()
+
+    # Company name (Sold to Name, falling back to Ship to Name)
+    sold = _safe_series("Sold to Name")
+    ship = _safe_series("Ship to Name")
+    df["_company"] = sold.where(sold.str.strip() != "", ship).fillna("")
+
     return df
+
 
 def _pick_category_column(q: str) -> str | None:
     t = q.lower()
@@ -1175,12 +1219,16 @@ def _pick_category_column(q: str) -> str | None:
             return _CAT_MAP[key]
     return None
 
+
 def _parse_geo_filters(q: str):
     t = q.lower().strip()
 
+    # ZIP
     m = re.search(r"\b(\d{5})\b", t)
-    if m: return {"zip": m.group(1)}
+    if m:
+        return {"zip": m.group(1)}
 
+    # "<county> county" (optional state)
     m = re.search(r"\b([a-z][a-z\s]+?)\s+county(?:,?\s+([a-z]{2}|\w+))?\b", t)
     if m:
         county = re.sub(r"\s+", " ", m.group(1)).strip()
@@ -1188,6 +1236,7 @@ def _parse_geo_filters(q: str):
         st = st_raw.upper() if len(st_raw) == 2 else _STATES.get(st_raw, "").upper()
         return {"county": county, "state": st or None}
 
+    # "in <city>, <state>"
     m = re.search(r"\bin\s+([a-z][a-z\.\-\s]+?)(?:,?\s+([a-z]{2}|\w+))?\b", t)
     if m:
         city = re.sub(r"[^a-z\s\.-]", "", m.group(1)).replace(".", " ").strip()
@@ -1196,23 +1245,36 @@ def _parse_geo_filters(q: str):
         if city and st:
             return {"city": city, "state": st}
 
+    # "in <state>" or "of <state>"
     m = re.search(r"\b(in|of)\s+([a-z]{2}|\w+)\b", t)
     if m:
         st_raw = m.group(2).lower()
         st = st_raw.upper() if len(st_raw) == 2 else _STATES.get(st_raw, "").upper()
-        if st: return {"state": st}
+        if st:
+            return {"state": st}
+
     return {}
 
+
 def _parse_top_n(q: str, default_n: int = 5) -> int:
-    m = re.search(r"\b(top|biggest|largest)\s+(\d{1,3})\b", q.lower())
+    t = q.lower()
+
+    m = re.search(r"\b(top|biggest|largest)\s+(\d{1,3})\b", t)
     if m:
-        try: return max(1, min(100, int(m.group(2))))
-        except: pass
-    m = re.search(r"\b(\d{1,3})\s+(companies|accounts|customers)\b", q.lower())
+        try:
+            return max(1, min(100, int(m.group(2))))
+        except Exception:
+            pass
+
+    m = re.search(r"\b(\d{1,3})\s+(companies|accounts|customers)\b", t)
     if m:
-        try: return max(1, min(100, int(m.group(1))))
-        except: pass
+        try:
+            return max(1, min(100, int(m.group(1))))
+        except Exception:
+            pass
+
     return default_n
+
 
 def try_structured_top_spend_answer(question: str) -> str | None:
     df = _load_report_df_cached()
@@ -1265,9 +1327,10 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     rank = 1
     for company, amt in top.items():
         share = (amt / total_scope) * 100 if total_scope > 0 else 0.0
-        name = company.strip() or "(Unnamed)"
+        name = (company or "").strip() or "(Unnamed)"
         lines.append(f"{rank}. {name} — ${amt:,.0f} ({share:.1f}% of local total)")
         rank += 1
+
     lines.append(f"Local total {cat_col}: ${total_scope:,.0f}")
     return "\n".join(lines)
 
