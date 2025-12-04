@@ -42,7 +42,13 @@ logging.basicConfig(level=logging.INFO)
 # --- Paths for data files ----------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# Detailed billing / revenue data (Inquiry + AI map analysis)
 CUSTOMER_REPORT_PATH = os.path.join(DATA_DIR, "customer_report.csv")
+
+# Map pin data (lat/lon + light metadata)
+CUSTOMER_LOCATION_PATH = os.path.join(DATA_DIR, "customer_location.csv")
+
 
 def _ok_payload(msg: str):
     """Return with all legacy keys so any frontend can read it."""
@@ -1160,38 +1166,35 @@ def _load_report_df_cached():
     """
     Load customer_report.csv once and enrich it with helper columns.
 
-    Defensive version:
-    - If the file can't be read, returns None (so callers can bail).
-    - If expected columns like 'Zip Code' or 'County State' are missing,
-      it creates empty Series instead of crashing with 'str' has no attribute apply'.
+    Used by:
+      - Inquiry mode
+      - AI map analysis (per-customer financial insight)
+
+    If the file can't be read, returns None so callers can bail out cleanly.
     """
     try:
-        df = pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
+        df = pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str)
+        df = df.fillna("")
     except Exception as e:
-        # Keep your existing behavior (None) but also log what went wrong
         try:
             app.logger.warning(
                 "⚠️ customer_report.csv not available for enrichment: %s", e
             )
         except Exception:
-            # app may not be defined yet in some import orders; fail quietly
             pass
         return None
 
-    # Make sure we really have a DataFrame
+    # Ensure we really have a DataFrame
     if not isinstance(df, pd.DataFrame):
         df = pd.DataFrame(df)
 
-    # Helper: always return a Series, never a bare string
+    # Helper to always return a Series, never a bare string
     def _safe_series(col_name: str) -> pd.Series:
         if col_name in df.columns:
             s = df[col_name]
         else:
-            # Create an empty/blank series with same index
             s = pd.Series([""] * len(df), index=df.index)
         return s.astype(str)
-
-    # --- Enrichment columns, all using _safe_series ---
 
     # Zip (5-digit)
     df["_zip5"] = _safe_series("Zip Code").apply(_zip5)
@@ -1199,18 +1202,44 @@ def _load_report_df_cached():
     # County / State from "County State"
     county_state = _safe_series("County State")
     df["_county"] = county_state.apply(_county_of)
-    df["_state"] = county_state.apply(_state_of)
+    df["_state"]  = county_state.apply(_state_of)
 
-    # City
+    # City (lowercased)
     df["_city"] = _safe_series("City").str.strip().str.lower()
 
-    # Company name (Sold to Name, falling back to Ship to Name)
+    # Company name: Sold to Name, fallback to Ship to Name
     sold = _safe_series("Sold to Name")
     ship = _safe_series("Ship to Name")
     df["_company"] = sold.where(sold.str.strip() != "", ship).fillna("")
 
     return df
 
+@lru_cache(maxsize=1)
+def _load_locations_df_cached():
+    """
+    Load customer_location.csv (map pins only).
+    This should contain lat/lon and light customer metadata.
+
+    Map endpoints (/api/locations, /api/segments) should use this,
+    NOT customer_report.csv.
+    """
+    try:
+        df = pd.read_csv(CUSTOMER_LOCATION_PATH, dtype=str)
+        df = df.fillna("")
+    except Exception as e:
+        try:
+            app.logger.warning(
+                "⚠️ customer_location.csv not available for map: %s", e
+            )
+        except Exception:
+            pass
+        return None
+
+    # Make sure we have a DataFrame
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame(df)
+
+    return df
 
 def _pick_category_column(q: str) -> str | None:
     t = q.lower()
@@ -1685,13 +1714,18 @@ def map_page():
 @login_required
 def api_locations():
     """
-    Build map points from customer_location.csv and enrich with Sales Rep,
-    Segment, and Company by matching customer_report.csv via street+ZIP first,
-    then ZIP fallback. Also joins per-user 'visited' marks (boolean).
+    Build map points from customer_location.csv only.
+
+    - Uses customer_location.csv (CUSTOMER_LOCATION_PATH) for:
+      lat/lon, company name, address, county/state, segment, contact info.
+    - DOES NOT touch customer_report.csv (that file is only for inquiry + AI analysis).
+    - Still supports per-user 'visited' flags via place_key.
     """
-    import csv, json as _json, re as _re
+    import json as _json, re as _re
     import pandas as _pd
     from flask import Response as _Response
+
+    # ------------- tiny helpers -----------------
 
     def zip5(z):
         m = _re.search(r"\d{5}", str(z or ""))
@@ -1705,7 +1739,8 @@ def api_locations():
             return None
 
     def split_county_state(val: str):
-        if not val: return None, None
+        if not val:
+            return None, None
         parts = str(val).strip().split()
         if parts and len(parts[-1]) == 2:
             return (" ".join(parts[:-1]) or None), parts[-1].upper()
@@ -1713,11 +1748,16 @@ def api_locations():
 
     def norm_street(s: str) -> str:
         ABR = {
-            "ROAD":"RD","RD.":"RD","RD":"RD","STREET":"ST","ST.":"ST","ST":"ST",
-            "AVENUE":"AVE","AV.":"AVE","AVE":"AVE","BOULEVARD":"BLVD","BLVD.":"BLVD","BLVD":"BLVD",
-            "DRIVE":"DR","DR.":"DR","DR":"DR","COURT":"CT","CT.":"CT","CT":"CT",
-            "LANE":"LN","LN.":"LN","LN":"LN","HIGHWAY":"HWY","HWY.":"HWY","HWY":"HWY",
-            "SUITE":"STE","STE.":"STE","STE":"STE","UNIT":"UNIT"
+            "ROAD": "RD", "RD.": "RD", "RD": "RD",
+            "STREET": "ST", "ST.": "ST", "ST": "ST",
+            "AVENUE": "AVE", "AV.": "AVE", "AVE": "AVE",
+            "BOULEVARD": "BLVD", "BLVD.": "BLVD", "BLVD": "BLVD",
+            "DRIVE": "DR", "DR.": "DR", "DR": "DR",
+            "COURT": "CT", "CT.": "CT", "CT": "CT",
+            "LANE": "LN", "LN.": "LN", "LN": "LN",
+            "HIGHWAY": "HWY", "HWY.": "HWY", "HWY": "HWY",
+            "SUITE": "STE", "STE.": "STE", "STE": "STE",
+            "UNIT": "UNIT",
         }
         t = _re.sub(r"[\.,#]", " ", str(s or "").upper())
         t = _re.sub(r"\s+", " ", t).strip()
@@ -1737,58 +1777,7 @@ def api_locations():
             return f"ADDR|{a}"
         return ""
 
-    # Enrichment maps
-    rep_by_zip, seg_by_zip = {}, {}
-    addrzip_to_info = {}
-
-    try:
-        df = _pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
-        df["_zip5"] = df.get("Zip Code", "").apply(zip5)
-        df["_street_norm"] = df.get("Address", "").apply(norm_street)
-
-        if "Sales Rep Name" in df.columns:
-            gb_rep = (
-                df[df["_zip5"] != ""]
-                .groupby("_zip5")["Sales Rep Name"]
-                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "")
-                .to_dict()
-            )
-            rep_by_zip.update(gb_rep)
-
-        seg_col = (
-            "R12 Segment (Sold to ID)"
-            if "R12 Segment (Sold to ID)" in df.columns
-            else ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
-        )
-        if seg_col:
-            gb_seg = (
-                df[df["_zip5"] != ""]
-                .groupby("_zip5")[seg_col]
-                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "")
-                .to_dict()
-            )
-            seg_by_zip.update(gb_seg)
-
-        sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
-        ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
-
-        for _, r in df.iterrows():
-            z = r.get("_zip5", "")
-            stn = r.get("_street_norm", "")
-            if not (z and stn):
-                continue
-            company = (r.get(sold_col) or r.get(ship_col) or "").strip() if (sold_col or ship_col) else ""
-            city = (r.get("City") or "").strip()
-            seg  = (r.get(seg_col) or "").strip() if seg_col else ""
-            rep  = (r.get("Sales Rep Name") or "").strip()
-            addrzip_to_info[f"{stn}|{z}"] = (company, city, seg, rep)
-
-        print(f"ℹ️ customer_report.csv loaded: rows={len(df)}; addr keys={len(addrzip_to_info)}")
-
-    except Exception as e:
-        print("⚠️ customer_report.csv not available for enrichment:", e)
-
-    # Pull per-user visited map (bools)
+    # ------------- load visit map (unchanged) -----------------
     try:
         uid = get_current_user_id()
         visit_map = get_visit_map_for_user(uid) if uid else {}
@@ -1796,86 +1785,115 @@ def api_locations():
         print("⚠️ could not load visit map:", e)
         visit_map = {}
 
-    items = []
+    # ------------- load customer_location.csv -----------------
     try:
-        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            cols = reader.fieldnames or []
-            print(f"ℹ️ Reading locations from customer_location.csv with columns: {cols}")
-
-            for row in reader:
-                lat = parse_latlon(row.get("Min of Latitude"))
-                lon = parse_latlon(row.get("Min of Longitude"))
-                if lat is None or lon is None:
-                    continue
-                if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-                    continue
-
-                address = (row.get("Address") or "").strip()
-                cs_raw  = (row.get("County State") or "").strip()
-                county, state = split_county_state(cs_raw)
-                zipc = zip5(row.get("Zip Code"))
-
-                company = ""
-                city = ""
-                seg = ""
-                rep = ""
-
-                if address and zipc:
-                    key = f"{norm_street(address)}|{zipc}"
-                    if key in addrzip_to_info:
-                        company, city, seg, rep = addrzip_to_info[key]
-
-                if not rep:
-                    rep = (rep_by_zip.get(zipc) or "").strip() or "Unassigned"
-                if not seg:
-                    seg = (seg_by_zip.get(zipc) or "").strip()
-
-                first = (row.get("First Name") or "").strip()
-                last  = (row.get("Last Name") or "").strip()
-                title = (row.get("Job Title") or "").strip()
-                phone = (row.get("Phone") or "").strip()
-                mobile= (row.get("Mobile") or "").strip()
-                email = (row.get("Email") or "").strip()
-
-                label_candidates = [company, " ".join([first, last]).strip(), email, address]
-                label = next((c for c in label_candidates if c), "Unknown")
-
-                full_address = ", ".join([bit for bit in [address, city, state, zipc, "USA"] if bit])
-
-                pkey = make_place_key(address, zipc, company or label)
-                visited = bool(visit_map.get(pkey)) if pkey else False
-
-                items.append({
-                    "company": company,
-                    "label": label,
-                    "address": address,
-                    "full_address": full_address or (address or ""),
-                    "city": city or "",
-                    "state": state or "",
-                    "county": county or "",
-                    "zip": zipc,
-                    "lat": lat,
-                    "lon": lon,
-                    "sales_rep": rep or "Unassigned",
-                    "segment": seg,
-                    "County State": cs_raw,
-                    "contact": {
-                        "first_name": first, "last_name": last, "job_title": title,
-                        "phone": phone, "mobile": mobile, "email": email
-                    },
-                    # simple visit info for the frontend
-                    "place_key": pkey,
-                    "visited": visited,
-                })
-
-        print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
+        df = _pd.read_csv(CUSTOMER_LOCATION_PATH, dtype=str).fillna("")
     except FileNotFoundError:
-        return _Response(_json.dumps({"error": "customer_location.csv not found"}), status=500, mimetype="application/json")
+        return _Response(
+            _json.dumps({"error": "customer_location.csv not found"}),
+            status=500,
+            mimetype="application/json",
+        )
     except Exception as e:
-        print("❌ /api/locations error:", e)
-        return _Response(_json.dumps({"error": "Failed to read customer_location.csv"}), status=500, mimetype="application/json")
+        print("❌ /api/locations error reading customer_location.csv:", e)
+        return _Response(
+            _json.dumps({"error": "Failed to read customer_location.csv"}),
+            status=500,
+            mimetype="application/json",
+        )
 
+    items = []
+
+    for _, row in df.iterrows():
+        # Try your known lat/lon columns first, fall back to generic names if needed
+        lat = (
+            parse_latlon(row.get("Min of Latitude"))
+            or parse_latlon(row.get("Latitude"))
+        )
+        lon = (
+            parse_latlon(row.get("Min of Longitude"))
+            or parse_latlon(row.get("Longitude"))
+        )
+        if lat is None or lon is None:
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            continue
+
+        address = (row.get("Address") or "").strip()
+        cs_raw = (row.get("County State") or "").strip()
+        county, state = split_county_state(cs_raw)
+        zipc = zip5(row.get("Zip Code"))
+
+        # Company + segment + rep come from customer_location.csv now
+        company = (
+            row.get("Sold to Name")
+            or row.get("Customer")
+            or row.get("Company")
+            or ""
+        ).strip()
+        city = (row.get("City") or "").strip()
+        seg = (
+            row.get("R12 Segment (Ship to ID)")
+            or row.get("Segment")
+            or ""
+        ).strip()
+        rep = (
+            row.get("Sales Rep Name")
+            or row.get("Sales Rep")
+            or ""
+        ).strip() or "Unassigned"
+
+        first = (row.get("First Name") or "").strip()
+        last  = (row.get("Last Name") or "").strip()
+        title = (row.get("Job Title") or "").strip()
+        phone = (row.get("Phone") or "").strip()
+        mobile= (row.get("Mobile") or "").strip()
+        email = (row.get("Email") or "").strip()
+
+        label_candidates = [
+            company,
+            " ".join([first, last]).strip(),
+            email,
+            address,
+        ]
+        label = next((c for c in label_candidates if c), "Unknown")
+
+        full_address = ", ".join(
+            [bit for bit in [address, city, state, zipc, "USA"] if bit]
+        )
+
+        pkey = make_place_key(address, zipc, company or label)
+        visited = bool(visit_map.get(pkey)) if pkey else False
+
+        items.append(
+            {
+                "company": company,
+                "label": label,
+                "address": address,
+                "full_address": full_address or (address or ""),
+                "city": city or "",
+                "state": state or "",
+                "county": county or "",
+                "zip": zipc,
+                "lat": lat,
+                "lon": lon,
+                "sales_rep": rep or "Unassigned",
+                "segment": seg,
+                "County State": cs_raw,
+                "contact": {
+                    "first_name": first,
+                    "last_name": last,
+                    "job_title": title,
+                    "phone": phone,
+                    "mobile": mobile,
+                    "email": email,
+                },
+                "place_key": pkey,
+                "visited": visited,
+            }
+        )
+
+    print(f"✅ /api/locations built {len(items)} points from {CUSTOMER_LOCATION_PATH}")
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
 # ─────────────────────────────────────────────────────────────────────────
