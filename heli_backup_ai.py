@@ -1384,6 +1384,11 @@ def chat():
 
         mode = (data.get("mode") or "").strip() or "recommendation"
 
+        # 🔁 Backwards-compat: frontend still sends "options_attachments"
+        # for the Options & Attachments mode. Internally we use "catalog".
+        if mode == "options_attachments":
+            mode = "catalog"
+
         if not user_q:
             # Return 200 so strict front-ends don't drop the body on 400s
             return _ok_payload("Please enter a description of the customer’s needs.")
@@ -1691,7 +1696,6 @@ def chat():
     except Exception as e:
         app.logger.exception("Unhandled /api/chat error: %s", e)
         return _ok_payload(f"❌ Unhandled error in /api/chat: {e}"), 500
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Map routes
@@ -2304,6 +2308,47 @@ def api_segments():
         "by_norm_zip": by_norm_zip,
         "by_norm_city_state": by_norm_city_state
     })
+
+@app.route("/api/modes")
+@login_required
+def api_modes():
+    """Mode metadata for the dropdown button on the chat page."""
+    from flask import jsonify
+
+    modes = [
+        {
+            "id": "recommendation",
+            "label": "Forklift Recommendation",
+            "description": "Default model/attachment/tire recommendations.",
+        },
+        {
+            # Frontend still calls this; /api/chat maps it to 'catalog'
+            "id": "options_attachments",
+            "label": "Options & Attachments Catalog",
+            "description": "List tires, options, and attachments with benefits.",
+        },
+        {
+            "id": "inquiry",
+            "label": "Customer Inquiry (Billing)",
+            "description": "Use customer_report / billing data for a specific account.",
+        },
+        {
+            "id": "contact_finder",
+            "label": "Contact Finder",
+            "description": "Look up contacts in your lead files.",
+        },
+        {
+            "id": "indiana_developments",
+            "label": "Indiana Developments",
+            "description": "Industrial / logistics projects in Indiana.",
+        },
+        {
+            "id": "coach",
+            "label": "Sales Coach",
+            "description": "Help with emails, talk tracks, and objections.",
+        },
+    ]
+    return jsonify({"modes": modes})
 
 # ─────────────────────────────────────────────────────────────────────────
 # Visits API (per-user) — unified with visit_key
