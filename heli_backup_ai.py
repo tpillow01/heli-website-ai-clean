@@ -1689,20 +1689,6 @@ def chat():
         return _ok_payload(f"❌ Unhandled error in /api/chat: {e}"), 500
 
 # ─────────────────────────────────────────────────────────────────────────
-# Modes list
-# ─────────────────────────────────────────────────────────────────────────
-@app.route("/api/modes")
-def api_modes():
-    return jsonify([
-        {"id": "recommendation", "label": "Forklift Recommendation"},
-        {"id": "inquiry",        "label": "Customer Inquiry"},
-        {"id": "coach",          "label": "Sales Coach"},
-        {"id": "catalog",        "label": "Attachments/Options Catalog"},
-        {"id": "contact_finder", "label": "Contact Finder"},
-        {"id": "indiana_developments", "label": "Indiana Developments Intel"},
-    ])
-
-# ─────────────────────────────────────────────────────────────────────────
 # Map routes
 # ─────────────────────────────────────────────────────────────────────────
 @app.route("/map")
@@ -1710,22 +1696,22 @@ def api_modes():
 def map_page():
     return render_template("map.html")
 
+
 @app.route("/api/locations")
 @login_required
 def api_locations():
     """
-    Build map points from customer_location.csv only.
+    Build map points from customer_location.csv and enrich with Sales Rep,
+    Segment, and Company by matching customer_report.csv via street+ZIP first,
+    then ZIP fallback. Also joins per-user 'visited' marks (boolean).
 
-    - Uses customer_location.csv (CUSTOMER_LOCATION_PATH) for:
-      lat/lon, company name, address, county/state, segment, contact info.
-    - DOES NOT touch customer_report.csv (that file is only for inquiry + AI analysis).
-    - Still supports per-user 'visited' flags via place_key.
+    NOTE: Primary customer name now comes from customer_location.csv
+    column 'Account Name' and is sent as `company` so the map popup
+    can show the true customer name.
     """
-    import json as _json, re as _re
+    import csv, json as _json, re as _re
     import pandas as _pd
     from flask import Response as _Response
-
-    # ------------- tiny helpers -----------------
 
     def zip5(z):
         m = _re.search(r"\d{5}", str(z or ""))
@@ -1777,7 +1763,70 @@ def api_locations():
             return f"ADDR|{a}"
         return ""
 
-    # ------------- load visit map (unchanged) -----------------
+    # Enrichment maps from customer_report.csv
+    rep_by_zip, seg_by_zip = {}, {}
+    addrzip_to_info = {}
+
+    try:
+        df = _pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
+        df["_zip5"] = df.get("Zip Code", "").apply(zip5)
+        df["_street_norm"] = df.get("Address", "").apply(norm_street)
+
+        # ZIP -> Sales Rep
+        if "Sales Rep Name" in df.columns:
+            gb_rep = (
+                df[df["_zip5"] != ""]
+                .groupby("_zip5")["Sales Rep Name"]
+                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "")
+                .to_dict()
+            )
+            rep_by_zip.update(gb_rep)
+
+        # ZIP -> Segment
+        seg_col = (
+            "R12 Segment (Sold to ID)"
+            if "R12 Segment (Sold to ID)" in df.columns
+            else (
+                "R12 Segment (Ship to ID)"
+                if "R12 Segment (Ship to ID)" in df.columns
+                else None
+            )
+        )
+        if seg_col:
+            gb_seg = (
+                df[df["_zip5"] != ""]
+                .groupby("_zip5")[seg_col]
+                .agg(lambda s: s.mode().iat[0] if not s.mode().empty else "")
+                .to_dict()
+            )
+            seg_by_zip.update(gb_seg)
+
+        sold_col = "Sold to Name" if "Sold to Name" in df.columns else None
+        ship_col = "Ship to Name" if "Ship to Name" in df.columns else None
+
+        for _, r in df.iterrows():
+            z = r.get("_zip5", "")
+            stn = r.get("_street_norm", "")
+            if not (z and stn):
+                continue
+            company_r = (
+                (r.get(sold_col) if sold_col else "")
+                or (r.get(ship_col) if ship_col else "")
+                or ""
+            ).strip()
+            city_r = (r.get("City") or "").strip()
+            seg_r = (r.get(seg_col) or "").strip() if seg_col else ""
+            rep_r = (r.get("Sales Rep Name") or "").strip()
+            addrzip_to_info[f"{stn}|{z}"] = (company_r, city_r, seg_r, rep_r)
+
+        print(
+            f"ℹ️ customer_report.csv loaded: rows={len(df)}; addr keys={len(addrzip_to_info)}"
+        )
+
+    except Exception as e:
+        print("⚠️ customer_report.csv not available for enrichment:", e)
+
+    # Pull per-user visited map (bools)
     try:
         uid = get_current_user_id()
         visit_map = get_visit_map_for_user(uid) if uid else {}
@@ -1785,9 +1834,112 @@ def api_locations():
         print("⚠️ could not load visit map:", e)
         visit_map = {}
 
-    # ------------- load customer_location.csv -----------------
+    items = []
     try:
-        df = _pd.read_csv(CUSTOMER_LOCATION_PATH, dtype=str).fillna("")
+        # Use customer_location.csv for pin positions + base metadata
+        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            cols = reader.fieldnames or []
+            print(
+                f"ℹ️ Reading locations from customer_location.csv with columns: {cols}"
+            )
+
+            for row in reader:
+                lat = parse_latlon(row.get("Min of Latitude"))
+                lon = parse_latlon(row.get("Min of Longitude"))
+                if lat is None or lon is None:
+                    continue
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                    continue
+
+                # Primary name from customer_location.csv
+                account_name = (row.get("Account Name") or "").strip()
+
+                address = (row.get("Address") or "").strip()
+                city = (row.get("City") or "").strip()
+                cs_raw = (row.get("County State") or "").strip()
+                county, state = split_county_state(cs_raw)
+                zipc = zip5(row.get("Zip Code"))
+
+                company = account_name  # <- THIS is what map popup will show
+                seg = (row.get("R12 Segment") or "").strip()
+                rep = ""  # will be filled from report or ZIP aggregates
+
+                # Try fine-grained enrichment from customer_report.csv
+                if address and zipc:
+                    key = f"{norm_street(address)}|{zipc}"
+                    if key in addrzip_to_info:
+                        company_r, city_r, seg_r, rep_r = addrzip_to_info[key]
+                        # Only override blanks so Account Name stays as the primary label
+                        if not company:
+                            company = company_r
+                        if not city:
+                            city = city_r
+                        if not seg:
+                            seg = seg_r
+                        if not rep:
+                            rep = rep_r
+
+                # ZIP-level rep/segment fallback
+                if not rep:
+                    rep = (rep_by_zip.get(zipc) or "").strip() or "Unassigned"
+                if not seg:
+                    seg = (seg_by_zip.get(zipc) or "").strip()
+
+                # Contact info (if present in customer_location.csv)
+                first = (row.get("First Name") or "").strip()
+                last = (row.get("Last Name") or "").strip()
+                title = (row.get("Job Title") or "").strip()
+                phone = (row.get("Phone") or "").strip()
+                mobile = (row.get("Mobile") or "").strip()
+                email = (row.get("Email") or "").strip()
+
+                label_candidates = [
+                    company,
+                    " ".join([first, last]).strip(),
+                    email,
+                    address,
+                ]
+                label = next((c for c in label_candidates if c), "Unknown")
+
+                full_address = ", ".join(
+                    [bit for bit in [address, city, state, zipc, "USA"] if bit]
+                )
+
+                pkey = make_place_key(address, zipc, company or label)
+                visited = bool(visit_map.get(pkey)) if pkey else False
+
+                items.append(
+                    {
+                        "company": company,
+                        "label": label,
+                        "address": address,
+                        "full_address": full_address or (address or ""),
+                        "city": city or "",
+                        "state": state or "",
+                        "county": county or "",
+                        "zip": zipc,
+                        "lat": lat,
+                        "lon": lon,
+                        "sales_rep": rep or "Unassigned",
+                        "segment": seg,
+                        "County State": cs_raw,
+                        "contact": {
+                            "first_name": first,
+                            "last_name": last,
+                            "job_title": title,
+                            "phone": phone,
+                            "mobile": mobile,
+                            "email": email,
+                        },
+                        # visit info for the frontend
+                        "place_key": pkey,
+                        "visited": visited,
+                    }
+                )
+
+        print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
+
     except FileNotFoundError:
         return _Response(
             _json.dumps({"error": "customer_location.csv not found"}),
@@ -1795,105 +1947,13 @@ def api_locations():
             mimetype="application/json",
         )
     except Exception as e:
-        print("❌ /api/locations error reading customer_location.csv:", e)
+        print("❌ /api/locations error:", e)
         return _Response(
             _json.dumps({"error": "Failed to read customer_location.csv"}),
             status=500,
             mimetype="application/json",
         )
 
-    items = []
-
-    for _, row in df.iterrows():
-        # Try your known lat/lon columns first, fall back to generic names if needed
-        lat = (
-            parse_latlon(row.get("Min of Latitude"))
-            or parse_latlon(row.get("Latitude"))
-        )
-        lon = (
-            parse_latlon(row.get("Min of Longitude"))
-            or parse_latlon(row.get("Longitude"))
-        )
-        if lat is None or lon is None:
-            continue
-        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            continue
-
-        address = (row.get("Address") or "").strip()
-        cs_raw = (row.get("County State") or "").strip()
-        county, state = split_county_state(cs_raw)
-        zipc = zip5(row.get("Zip Code"))
-
-        # Company + segment + rep come from customer_location.csv now
-        company = (
-            row.get("Sold to Name")
-            or row.get("Customer")
-            or row.get("Company")
-            or ""
-        ).strip()
-        city = (row.get("City") or "").strip()
-        seg = (
-            row.get("R12 Segment (Ship to ID)")
-            or row.get("Segment")
-            or ""
-        ).strip()
-        rep = (
-            row.get("Sales Rep Name")
-            or row.get("Sales Rep")
-            or ""
-        ).strip() or "Unassigned"
-
-        first = (row.get("First Name") or "").strip()
-        last  = (row.get("Last Name") or "").strip()
-        title = (row.get("Job Title") or "").strip()
-        phone = (row.get("Phone") or "").strip()
-        mobile= (row.get("Mobile") or "").strip()
-        email = (row.get("Email") or "").strip()
-
-        label_candidates = [
-            company,
-            " ".join([first, last]).strip(),
-            email,
-            address,
-        ]
-        label = next((c for c in label_candidates if c), "Unknown")
-
-        full_address = ", ".join(
-            [bit for bit in [address, city, state, zipc, "USA"] if bit]
-        )
-
-        pkey = make_place_key(address, zipc, company or label)
-        visited = bool(visit_map.get(pkey)) if pkey else False
-
-        items.append(
-            {
-                "company": company,
-                "label": label,
-                "address": address,
-                "full_address": full_address or (address or ""),
-                "city": city or "",
-                "state": state or "",
-                "county": county or "",
-                "zip": zipc,
-                "lat": lat,
-                "lon": lon,
-                "sales_rep": rep or "Unassigned",
-                "segment": seg,
-                "County State": cs_raw,
-                "contact": {
-                    "first_name": first,
-                    "last_name": last,
-                    "job_title": title,
-                    "phone": phone,
-                    "mobile": mobile,
-                    "email": email,
-                },
-                "place_key": pkey,
-                "visited": visited,
-            }
-        )
-
-    print(f"✅ /api/locations built {len(items)} points from {CUSTOMER_LOCATION_PATH}")
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1945,14 +2005,27 @@ def ai_map_analysis():
         return re.sub(r"\s+", " ", " ".join(parts)).strip()
 
     def money_to_float(v) -> float:
-        s = str(v or "").strip().replace("$","").replace(",","")
+        s = str(v or "").strip()
         if not s:
             return 0.0
+
+        # Handle accounting-style negatives: (4,926.00)
+        is_negative = False
+        if s.startswith("(") and s.endswith(")"):
+            is_negative = True
+            s = s[1:-1].strip()
+
+        # Remove $ and commas
+        s = s.replace("$", "").replace(",", "")
+
+        # If still fails, fall back to regex
         try:
-            return float(s)
+            val = float(s)
         except Exception:
             m = re.search(r"-?\d+(\.\d+)?", s)
-            return float(m.group(0)) if m else 0.0
+            val = float(m.group(0)) if m else 0.0
+
+        return -val if is_negative and val > 0 else val
 
     payload = request.get_json(force=True) or {}
     customer_raw = (payload.get('customer') or '').strip()
