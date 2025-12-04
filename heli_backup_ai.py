@@ -1529,6 +1529,11 @@ Requirements:
 - Reference at least the three largest figures by name and amount.
 - 2–4 bullet points on what's driving results (with numbers inline).
 - 1–3 bullets for next actions (upsell forklifts, service, rentals, parts), referencing numbers where relevant.
+- DO NOT use markdown headings (#, ##, ###) or bold/italics (** or *).
+Just use plain text with short headings like:
+Analysis of <Customer>
+Key Drivers of Results:
+Next Actions:
 Keep it crisp and sales-focused."""
         resp = client.chat.completions.create(
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
@@ -1536,7 +1541,7 @@ Keep it crisp and sales-focused."""
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a forklift sales strategist. Be concise and analytical.",
+                    "content": "You are a forklift sales strategist. Be concise and analytical. Follow the user's formatting rules exactly.",
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -1546,7 +1551,18 @@ Keep it crisp and sales-focused."""
     except Exception as e:
         app.logger.warning("try_customer_name_answer OpenAI error: %s", e)
 
-    # Fallback if OpenAI fails
+    # --- CLEANUP: strip markdown junk just in case model ignores us ---
+    if narrative:
+        cleaned_lines: list[str] = []
+        for line in narrative.splitlines():
+            # Remove leading markdown heading markers like "### " or "#### "
+            line = re.sub(r"^\s*#+\s*", "", line)
+            # Remove markdown bold markers "**text**"
+            line = line.replace("**", "")
+            cleaned_lines.append(line.rstrip())
+        narrative = "\n".join(cleaned_lines).strip()
+
+    # Fallback if OpenAI fails completely or returns empty
     if not narrative:
         # Find top 3 non-zero metrics
         nonzero = [(k, v) for k, v in totals.items() if v and abs(v) > 0]
@@ -1578,7 +1594,7 @@ Keep it crisp and sales-focused."""
 
         narrative = "\n".join(
             [
-                f"Customer: {display_name}" + (f" (Segment {seg_val})" if seg_val else ""),
+                f"Analysis of {display_name}" + (f" (Segment {seg_val})" if seg_val else ""),
                 "Summary:",
                 *bullets,
             ]
