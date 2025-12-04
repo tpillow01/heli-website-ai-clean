@@ -2312,7 +2312,12 @@ def api_segments():
 @app.route("/api/modes")
 @login_required
 def api_modes():
-    """Mode metadata for the dropdown button on the chat page."""
+    """
+    Return the list of chat modes for the Mode dropdown.
+
+    This does NOT change any behavior in /api/chat – it only tells
+    the frontend what options to show and what mode IDs to send back.
+    """
     from flask import jsonify
 
     modes = [
@@ -2322,7 +2327,7 @@ def api_modes():
             "description": "Default model/attachment/tire recommendations.",
         },
         {
-            # Frontend still calls this; /api/chat maps it to 'catalog'
+            # Frontend still uses this ID; /api/chat maps it to the catalog flow
             "id": "options_attachments",
             "label": "Options & Attachments Catalog",
             "description": "List tires, options, and attachments with benefits.",
@@ -2340,7 +2345,7 @@ def api_modes():
         {
             "id": "indiana_developments",
             "label": "Indiana Developments",
-            "description": "Industrial / logistics projects in Indiana.",
+            "description": "Industrial & logistics projects in Indiana.",
         },
         {
             "id": "coach",
@@ -2348,6 +2353,7 @@ def api_modes():
             "description": "Help with emails, talk tracks, and objections.",
         },
     ]
+
     return jsonify({"modes": modes})
 
 # ─────────────────────────────────────────────────────────────────────────
