@@ -1169,6 +1169,8 @@ def _load_report_df_cached():
     Used by:
       - Inquiry mode
       - AI map analysis (per-customer financial insight)
+      - /api/segments
+      - any other report-based logic
 
     If the file can't be read, returns None so callers can bail out cleanly.
     """
@@ -1181,7 +1183,7 @@ def _load_report_df_cached():
                 "⚠️ customer_report.csv not available for enrichment: %s", e
             )
         except Exception:
-            pass
+            print("⚠️ customer_report.csv not available for enrichment:", e)
         return None
 
     # Ensure we really have a DataFrame
@@ -1196,7 +1198,7 @@ def _load_report_df_cached():
             s = pd.Series([""] * len(df), index=df.index)
         return s.astype(str)
 
-    # Zip (5-digit)
+    # Zip (5-digit) – uses existing _zip5 helper
     df["_zip5"] = _safe_series("Zip Code").apply(_zip5)
 
     # County / State from "County State"
@@ -1214,14 +1216,14 @@ def _load_report_df_cached():
 
     return df
 
+
 @lru_cache(maxsize=1)
 def _load_locations_df_cached():
     """
     Load customer_location.csv (map pins only).
     This should contain lat/lon and light customer metadata.
 
-    Map endpoints (/api/locations, /api/segments) should use this,
-    NOT customer_report.csv.
+    Map endpoints (/api/locations, /api/segments) can use this if desired.
     """
     try:
         df = pd.read_csv(CUSTOMER_LOCATION_PATH, dtype=str)
@@ -1232,7 +1234,7 @@ def _load_locations_df_cached():
                 "⚠️ customer_location.csv not available for map: %s", e
             )
         except Exception:
-            pass
+            print("⚠️ customer_location.csv not available for map:", e)
         return None
 
     # Make sure we have a DataFrame
@@ -1240,6 +1242,7 @@ def _load_locations_df_cached():
         df = pd.DataFrame(df)
 
     return df
+
 
 def _pick_category_column(q: str) -> str | None:
     t = q.lower()
@@ -1362,6 +1365,7 @@ def try_structured_top_spend_answer(question: str) -> str | None:
 
     lines.append(f"Local total {cat_col}: ${total_scope:,.0f}")
     return "\n".join(lines)
+
 
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -1688,6 +1692,7 @@ def chat():
         app.logger.exception("Unhandled /api/chat error: %s", e)
         return _ok_payload(f"❌ Unhandled error in /api/chat: {e}"), 500
 
+
 # ─────────────────────────────────────────────────────────────────────────
 # Map routes
 # ─────────────────────────────────────────────────────────────────────────
@@ -1707,7 +1712,7 @@ def api_locations():
 
     NOTE: Primary customer name now comes from customer_location.csv
     column 'Account Name' and is sent as `company` so the map popup
-    can show the true customer name.
+    shows that name.
     """
     import csv, json as _json, re as _re
     import pandas as _pd
@@ -1769,7 +1774,13 @@ def api_locations():
 
     try:
         df = _pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
-        df["_zip5"] = df.get("Zip Code", "").apply(zip5)
+
+        # Safe _zip5 column build (no .apply on bare string)
+        if "Zip Code" in df.columns:
+            df["_zip5"] = df["Zip Code"].apply(zip5)
+        else:
+            df["_zip5"] = ""
+
         df["_street_norm"] = df.get("Address", "").apply(norm_street)
 
         # ZIP -> Sales Rep
@@ -1836,13 +1847,17 @@ def api_locations():
 
     items = []
     try:
-        # Use customer_location.csv for pin positions + base metadata
-        with open("customer_location.csv", "r", encoding="utf-8-sig", newline="") as f:
+        # Decide which path to use for customer_location.csv
+        loc_path = None
+        try:
+            loc_path = CUSTOMER_LOCATION_PATH  # if constant is defined
+        except NameError:
+            loc_path = "customer_location.csv"
+
+        with open(loc_path, "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             cols = reader.fieldnames or []
-            print(
-                f"ℹ️ Reading locations from customer_location.csv with columns: {cols}"
-            )
+            print(f"ℹ️ Reading locations from {loc_path} with columns: {cols}")
 
             for row in reader:
                 lat = parse_latlon(row.get("Min of Latitude"))
@@ -1861,7 +1876,7 @@ def api_locations():
                 county, state = split_county_state(cs_raw)
                 zipc = zip5(row.get("Zip Code"))
 
-                company = account_name  # <- THIS is what map popup will show
+                company = account_name  # what map popup will show
                 seg = (row.get("R12 Segment") or "").strip()
                 rep = ""  # will be filled from report or ZIP aggregates
 
@@ -1938,7 +1953,7 @@ def api_locations():
                     }
                 )
 
-        print(f"✅ /api/locations built {len(items)} points from customer_location.csv")
+        print(f"✅ /api/locations built {len(items)} points from {loc_path}")
 
     except FileNotFoundError:
         return _Response(
@@ -1956,8 +1971,9 @@ def api_locations():
 
     return _Response(_json.dumps(items, allow_nan=False), mimetype="application/json")
 
+
 # ─────────────────────────────────────────────────────────────────────────
-# AI Map Analysis Endpoint (unchanged logic)
+# AI Map Analysis Endpoint
 # ─────────────────────────────────────────────────────────────────────────
 @app.route('/api/ai_map_analysis', methods=['POST'])
 def ai_map_analysis():
@@ -1969,8 +1985,12 @@ def ai_map_analysis():
         return m.group(0) if m else ""
 
     def strip_suffixes(s: str) -> str:
-        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
-                      "", str(s or ""), flags=re.IGNORECASE)
+        return re.sub(
+            r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+            "",
+            str(s or ""),
+            flags=re.IGNORECASE,
+        )
 
     def norm_name(s: str) -> str:
         s = strip_suffixes(s).lower()
@@ -2048,8 +2068,11 @@ def ai_map_analysis():
         if col not in df.columns:
             df[col] = ""
 
-    seg_col = "R12 Segment (Sold to ID)" if "R12 Segment (Sold to ID)" in df.columns \
-              else ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
+    seg_col = (
+        "R12 Segment (Sold to ID)"
+        if "R12 Segment (Sold to ID)" in df.columns
+        else ("R12 Segment (Ship to ID)" if "R12 Segment (Ship to ID)" in df.columns else None)
+    )
 
     df["_sold_norm"]   = df["Sold to Name"].apply(norm_name)
     df["_ship_norm"]   = df["Ship to Name"].apply(norm_name)
@@ -2195,6 +2218,7 @@ Keep it crisp and sales-focused."""
         "aggregated": aggregated_flag,
     })
 
+
 # Segment lookup for map popups
 @app.route("/api/segments")
 @login_required
@@ -2216,19 +2240,29 @@ def api_segments():
         return jsonify({"by_exact": {}, "by_norm": {}, "by_norm_zip": {}, "by_norm_city_state": {}}), 200
 
     def strip_suffixes(s: str) -> str:
-        return re.sub(r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b", "", s, flags=re.IGNORECASE)
+        return re.sub(
+            r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+            "",
+            s,
+            flags=re.IGNORECASE,
+        )
+
     def norm_name(s: str) -> str:
-        s = strip_suffixes(s or ""); s = s.lower()
+        s = strip_suffixes(s or "")
+        s = s.lower()
         s = re.sub(r"[^a-z0-9]+", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
+
     def norm_city(s: str) -> str:
         s = (s or "").lower()
         s = re.sub(r"[^a-z0-9]+", " ", s)
         return re.sub(r"\s+", " ", s).strip()
+
     def state_from_county_state(v: str) -> str:
         parts = re.sub(r"\s+", " ", (v or "").strip()).split(" ")
         return parts[-1] if len(parts) >= 2 else ""
+
     def zip5(z: str) -> str:
         m = re.search(r"\d{5}", (z or ""))
         return m.group(0) if m else ""
