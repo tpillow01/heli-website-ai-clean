@@ -1366,6 +1366,214 @@ def try_structured_top_spend_answer(question: str) -> str | None:
     lines.append(f"Local total {cat_col}: ${total_scope:,.0f}")
     return "\n".join(lines)
 
+def try_customer_name_answer(question: str) -> str | None:
+    """
+    Direct customer lookup using customer_report.csv.
+
+    Goal: handle questions like
+      - "what can you tell me about Knauf Insulation"
+      - "tell me about Honda of America"
+    by matching the text against Sold to Name / Ship to Name
+    and summarizing the key revenue fields.
+    """
+    import re
+    import pandas as pd
+
+    df = _load_report_df_cached()
+    if df is None or df.empty:
+        return None
+
+    # --- Normalization helpers ---
+    def norm_name(s: str) -> str:
+        s = str(s or "")
+        # Strip common suffixes: inc, llc, corp, etc.
+        s = re.sub(
+            r"\b(inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corporation|company|ltd|ltd\.|lp|plc)\b",
+            "",
+            s,
+            flags=re.IGNORECASE,
+        )
+        s = s.lower()
+        s = re.sub(r"[^a-z0-9]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def money_to_float(v) -> float:
+        s = str(v or "").strip()
+        if not s:
+            return 0.0
+
+        # Handle accounting-style negatives: (4,926.00)
+        is_negative = False
+        if s.startswith("(") and s.endswith(")"):
+            is_negative = True
+            s = s[1:-1].strip()
+
+        s = s.replace("$", "").replace(",", "")
+
+        try:
+            val = float(s)
+        except Exception:
+            m = re.search(r"-?\d+(\.\d+)?", s)
+            val = float(m.group(0)) if m else 0.0
+
+        return -val if is_negative and val > 0 else val
+
+    q_raw = question.strip()
+    if not q_raw:
+        return None
+
+    # Collapsed, lowercased version of the whole question.
+    q_norm = norm_name(q_raw)
+    if not q_norm:
+        return None
+
+    # Build normalized name columns on the report DF
+    sold = df.get("Sold to Name", pd.Series([""] * len(df), index=df.index))
+    ship = df.get("Ship to Name", pd.Series([""] * len(df), index=df.index))
+    df["_sold_norm"] = sold.astype(str).map(norm_name)
+    df["_ship_norm"] = ship.astype(str).map(norm_name)
+
+    # Match rule:
+    # - If the normalized company name is *contained in* the normalized question,
+    #   treat that as a hit. This handles "what can you tell me about knauf insulation".
+    mask = (df["_sold_norm"].apply(lambda s: bool(s) and s in q_norm)) | \
+           (df["_ship_norm"].apply(lambda s: bool(s) and s in q_norm))
+
+    if not mask.any():
+        # No direct match – bail out so the old inquiry flow can try.
+        return None
+
+    hit = df[mask].copy()
+
+    # If we have a Sold to ID, aggregate by that ID (group all ship-to's).
+    use_df = hit
+    aggregated_flag = False
+    if "Sold to ID" in df.columns:
+        st_ids = hit["Sold to ID"].astype(str).str.strip()
+        if (st_ids != "").any():
+            chosen_id = st_ids.mode().iat[0]
+            use_df = df[df["Sold to ID"].astype(str).str.strip() == chosen_id]
+            aggregated_flag = True
+
+    # Revenue columns we care about (same as map AI)
+    REV_COLS = [
+        "New Equip R36 Revenue",
+        "Used Equip R36 Revenue",
+        "Parts Revenue R12",
+        "Service Revenue R12 (Includes GM)",
+        "Parts & Service Revenue R12",
+        "Rental Revenue R12",
+        "Revenue Rolling 12 Months - Aftermarket",
+        "Revenue Rolling 13 - 24 Months - Aftermarket",
+    ]
+    totals: dict[str, float] = {}
+    for col in REV_COLS:
+        if col in use_df.columns:
+            totals[col] = use_df[col].map(money_to_float).sum()
+        else:
+            totals[col] = 0.0
+
+    # Pick a display name
+    display_name = (
+        (hit.get("Sold to Name") or pd.Series([""])).iloc[0]
+        or (hit.get("Ship to Name") or pd.Series([""])).iloc[0]
+        or q_raw
+    ).strip()
+
+    # Segment if available
+    seg_col = None
+    if "R12 Segment (Sold to ID)" in use_df.columns:
+        seg_col = "R12 Segment (Sold to ID)"
+    elif "R12 Segment (Ship to ID)" in use_df.columns:
+        seg_col = "R12 Segment (Ship to ID)"
+
+    seg_val = ""
+    if seg_col:
+        mode_series = (
+            use_df[seg_col].astype(str).str.strip().replace("", pd.NA).dropna().mode()
+        )
+        if not mode_series.empty:
+            seg_val = str(mode_series.iat[0])
+
+    # Build a metrics block similar to the map AI
+    lines = [f"Customer: {display_name}"]
+    if seg_val:
+        lines.append(f"Segment: {seg_val}")
+    if aggregated_flag:
+        lines.append("Note: Aggregated across Sold-to group.")
+    lines.append("Key financial metrics:")
+    for col in REV_COLS:
+        lines.append(f"- {col}: ${totals[col]:,.2f}")
+    metrics_block = "\n".join(lines)
+
+    # Try OpenAI narrative (reuse same client)
+    narrative = None
+    try:
+        prompt = f"""{metrics_block}
+
+Write a concise analysis that USES the dollar figures above in your sentences.
+Requirements:
+- Reference at least the three largest figures by name and amount.
+- 2–4 bullet points on what's driving results (with numbers inline).
+- 1–3 bullets for next actions (upsell forklifts, service, rentals, parts), referencing numbers where relevant.
+Keep it crisp and sales-focused."""
+        resp = client.chat.completions.create(
+            model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
+            temperature=0.3,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a forklift sales strategist. Be concise and analytical.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=400,
+        )
+        narrative = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        app.logger.warning("try_customer_name_answer OpenAI error: %s", e)
+
+    # Fallback if OpenAI fails
+    if not narrative:
+        # Find top 3 non-zero metrics
+        nonzero = [(k, v) for k, v in totals.items() if v and abs(v) > 0]
+        nonzero.sort(key=lambda kv: kv[1], reverse=True)
+        tops = nonzero[:3]
+
+        bullets = []
+        if tops:
+            top_str = ", ".join([f"{k} ${v:,.0f}" for k, v in tops])
+            bullets.append(f"- Biggest drivers: {top_str}.")
+        if totals.get("Parts & Service Revenue R12", 0) > 0:
+            bullets.append(
+                "- Aftermarket activity is strong; lead with a parts + service uptime conversation."
+            )
+        if totals.get("Rental Revenue R12", 0) == 0:
+            bullets.append(
+                "- No rental spend detected; propose peak season or coverage rentals."
+            )
+        if totals.get("New Equip R36 Revenue", 0) == 0 and totals.get(
+            "Used Equip R36 Revenue", 0
+        ) == 0:
+            bullets.append(
+                "- No recent equipment revenue; qualify fleet age and replacement cycle."
+            )
+        if not bullets:
+            bullets.append(
+                "- Qualify current fleet size, age, and service provider to find a wedge."
+            )
+
+        narrative = "\n".join(
+            [
+                f"Customer: {display_name}" + (f" (Segment {seg_val})" if seg_val else ""),
+                "Summary:",
+                *bullets,
+            ]
+        )
+
+    # Final text returned to /api/chat
+    return f"{metrics_block}\n\n{narrative}"
 
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -1435,70 +1643,26 @@ def chat():
         # Inquiry (billing / report analysis)
         # ─────────────────────────────────────────────────────────────
         if mode == "inquiry":
-            # 1) Try the structured top-spend shortcut first
+            # 1) Geo / top-spend style questions (e.g. "top 10 parts customers in Boone County")
             structured = try_structured_top_spend_answer(user_q)
             if structured:
                 return _ok_payload(structured)
 
+            # 2) NEW: direct customer-name lookup in customer_report.csv
+            #    e.g. "what can you tell me about Knauf Insulation"
+            name_answer = try_customer_name_answer(user_q)
+            if name_answer:
+                return _ok_payload(name_answer)
+
+            # 3) Legacy inquiry flow (data_sources + billing data)
             from data_sources import (
                 build_inquiry_brief,
                 make_inquiry_targets,
                 _norm_name,
             )
-            from difflib import get_close_matches
 
-            # ---------- helper: fallback name match from customer_report.csv ----------
-            def _fallback_inquiry_label(question: str) -> str | None:
-                """
-                If the user types something like 'Knauf', try to find a close
-                match in customer_report.csv (via _load_report_df_cached()) and
-                return the best full company name, e.g. 'KNAUF INSULATION'.
-                """
-                df = _load_report_df_cached()
-                if df is None or df.empty:
-                    return None
-
-                qn = _norm_name(question)
-                if not qn:
-                    return None
-
-                # Build mapping from normalized company name -> display name
-                try:
-                    companies = [
-                        str(x)
-                        for x in df.get("_company", df.get("Sold to Name", []))
-                        .astype(str)
-                        .unique()
-                        if str(x).strip()
-                    ]
-                except Exception:
-                    return None
-
-                norm_to_orig = {}
-                for name in companies:
-                    nn = _norm_name(name)
-                    if nn and nn not in norm_to_orig:
-                        norm_to_orig[nn] = name
-
-                # 1) Simple substring match (handles 'knauf' vs 'knauf insulation')
-                for nn, orig in norm_to_orig.items():
-                    if qn in nn or nn in qn:
-                        return orig
-
-                # 2) Fuzzy match (in case of typos)
-                keys = list(norm_to_orig.keys())
-                if not keys:
-                    return None
-                match = get_close_matches(qn, keys, n=1, cutoff=0.75)
-                if match:
-                    return norm_to_orig[match[0]]
-                return None
-
-            # ---------- normal inquiry flow ----------
             qnorm = _norm_name(user_q)
             chosen_name = None
-
-            # a) Try explicit inquiry targets first (your existing logic)
             try:
                 for it in make_inquiry_targets():
                     lbl_norm = _norm_name(it.get("label", ""))
@@ -1508,27 +1672,9 @@ def chat():
             except Exception as e:
                 app.logger.warning(f"scan targets failed: {e}")
 
-            # b) Fallback: search customer_report.csv for a close name
-            if not chosen_name:
-                try:
-                    alt = _fallback_inquiry_label(user_q)
-                    if alt:
-                        chosen_name = alt
-                        app.logger.info(f"inquiry fallback matched '{user_q}' -> '{chosen_name}'")
-                except Exception as e:
-                    app.logger.warning(f"inquiry fallback match failed: {e}")
-
             probe = chosen_name or user_q
             brief = build_inquiry_brief(probe)
-
             if not brief:
-                # If we tried a fallback, surface that to you in the message.
-                if chosen_name:
-                    return _ok_payload(
-                        f"I tried to match '{user_q}' to '{chosen_name}' "
-                        "but couldn’t locate that customer in the report/billing data. "
-                        "Please include the company name as it appears in your system."
-                    )
                 return _ok_payload(
                     "I couldn’t locate that customer in the report/billing data. "
                     "Please include the company name as it appears in your system."
