@@ -37,6 +37,11 @@ app.config.update(
 
 logging.basicConfig(level=logging.INFO)
 
+# --- Paths for data files ----------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+CUSTOMER_REPORT_PATH = os.path.join(DATA_DIR, "customer_report.csv")
+
 def _ok_payload(msg: str):
     """Return with all legacy keys so any frontend can read it."""
     safe = (msg or "").strip() or "_No response produced._"
@@ -1151,7 +1156,7 @@ def _money_to_float(x: Union[pd.Series, str, float, int]) -> Union[pd.Series, fl
 @lru_cache(maxsize=1)
 def _load_report_df_cached():
     try:
-        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        df = pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
     except Exception:
         return None
     df["_zip5"]   = df.get("Zip Code", "").apply(_zip5)
@@ -1674,7 +1679,7 @@ def api_locations():
     addrzip_to_info = {}
 
     try:
-        df = _pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        df = _pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
         df["_zip5"] = df.get("Zip Code", "").apply(zip5)
         df["_street_norm"] = df.get("Address", "").apply(norm_street)
 
@@ -1880,7 +1885,7 @@ def ai_map_analysis():
         return jsonify({"error": "Provide at least one of: customer name, street+zip"}), 400
 
     try:
-        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        df = pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
     except Exception as e:
         print("❌ ai_map_analysis read error:", e)
         return jsonify({"error": "Could not read customer_report.csv"}), 500
@@ -2051,7 +2056,7 @@ def api_segments():
     CST_COL   = "County State"
 
     try:
-        df = pd.read_csv("customer_report.csv", dtype=str).fillna("")
+        df = pd.read_csv(CUSTOMER_REPORT_PATH, dtype=str).fillna("")
     except Exception as e:
         print("❌ /api/segments read error:", e)
         return jsonify({"by_exact": {}, "by_norm": {}, "by_norm_zip": {}, "by_norm_city_state": {}}), 200
@@ -2933,45 +2938,32 @@ def run_sales_coach(user_q: str) -> str:
             "\n"
             "Rules for this sub-mode (do NOT echo):\n"
             "- No prices. Use variables (e.g., 'fuel_cost_per_hr', 'pm_cost_per_hr').\n"
-            "- 'Talk Track:' 4 bullets, outcomes > features.\n"
+            "- 'Talk Track:'..."
         )
-    else:  # coach_general
+    else:
         guide = (
             "Output ONLY these sections:\n"
-            "Quick Diagnosis:\n"
-            "Suggestions:\n"
+            "Focus:\n"
             "Talk Tracks:\n"
-            "Next Actions:\n"
             "Questions to Clarify:\n"
-            "\n"
-            "Rules for this sub-mode (do NOT echo):\n"
-            "- 4–6 bullets under 'Quick Diagnosis:' and 'Suggestions:'.\n"
-            "- 'Talk Tracks:' 3 bullets.\n"
-            "- 'Next Actions:' 3 bullets.\n"
+            "Next Actions:\n"
         )
 
-    system_prompt = {"role": "system", "content": base_rules + guide}
-    messages = [system_prompt, {"role": "user", "content": user_q}]
+    system_prompt = {"role": "system", "content": base_rules + "\n" + guide}
+    messages = [
+        system_prompt,
+        {"role": "user", "content": user_q},
+    ]
 
     try:
         resp = client.chat.completions.create(
             model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
             messages=messages,
-            max_tokens=700,
-            temperature=0.5
+            max_tokens=int(os.getenv("OAI_MAX_TOKENS", "900")),
+            temperature=float(os.getenv("OAI_TEMPERATURE", "0.35")),
         )
-        out = resp.choices[0].message.content.strip()
+        ai_reply = (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        out = f"❌ Internal error: {e}"
+        ai_reply = f"❌ Internal error: {e}"
 
-    # Optional: reuse your tidy helper if you have it
-    try:
-        out = _tidy_formatting(out)  # if defined elsewhere in your app
-    except Exception:
-        pass
-    return out
-
-
-# ─── Entrypoint ──────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    app.run(debug=True, port=int(os.getenv("PORT", 5000)))
+    return _strip_prompt_leak(_tidy_formatting(ai_reply))
