@@ -1377,6 +1377,7 @@ def try_customer_name_answer(question: str) -> str | None:
     and summarizing the key revenue fields.
     """
     import re
+    import os
     import pandas as pd
 
     df = _load_report_df_cached()
@@ -1429,8 +1430,8 @@ def try_customer_name_answer(question: str) -> str | None:
         return None
 
     # Build normalized name columns on the report DF
-    sold = df.get("Sold to Name", pd.Series([""] * len(df), index=df.index))
-    ship = df.get("Ship to Name", pd.Series([""] * len(df), index=df.index))
+    sold = df["Sold to Name"] if "Sold to Name" in df.columns else pd.Series([""] * len(df), index=df.index)
+    ship = df["Ship to Name"] if "Ship to Name" in df.columns else pd.Series([""] * len(df), index=df.index)
     df["_sold_norm"] = sold.astype(str).map(norm_name)
     df["_ship_norm"] = ship.astype(str).map(norm_name)
 
@@ -1451,8 +1452,9 @@ def try_customer_name_answer(question: str) -> str | None:
     aggregated_flag = False
     if "Sold to ID" in df.columns:
         st_ids = hit["Sold to ID"].astype(str).str.strip()
-        if (st_ids != "").any():
-            chosen_id = st_ids.mode().iat[0]
+        non_blank = st_ids[st_ids != ""]
+        if not non_blank.empty:
+            chosen_id = non_blank.mode().iat[0]
             use_df = df[df["Sold to ID"].astype(str).str.strip() == chosen_id]
             aggregated_flag = True
 
@@ -1474,12 +1476,22 @@ def try_customer_name_answer(question: str) -> str | None:
         else:
             totals[col] = 0.0
 
-    # Pick a display name
-    display_name = (
-        (hit.get("Sold to Name") or pd.Series([""])).iloc[0]
-        or (hit.get("Ship to Name") or pd.Series([""])).iloc[0]
-        or q_raw
-    ).strip()
+    # ---- SAFE display_name picking (no Series `or`!) ----
+    display_name = q_raw  # fallback
+
+    if "Sold to Name" in hit.columns:
+        sold_series = hit["Sold to Name"].astype(str).str.strip()
+        sold_series = sold_series[sold_series != ""]
+        if not sold_series.empty:
+            display_name = sold_series.iat[0]
+
+    if (not display_name or display_name.strip() == "") and "Ship to Name" in hit.columns:
+        ship_series = hit["Ship to Name"].astype(str).str.strip()
+        ship_series = ship_series[ship_series != ""]
+        if not ship_series.empty:
+            display_name = ship_series.iat[0]
+
+    display_name = (display_name or q_raw).strip()
 
     # Segment if available
     seg_col = None
