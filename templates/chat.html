@@ -44,9 +44,17 @@
       </nav>
 
       <div class="nav-actions">
+        <!-- Simple hard-coded mode dropdown -->
         <div class="mode-wrap">
           <span class="mode-label">Mode</span>
-          <select id="modeSelect" class="mode-select" aria-label="Chat Mode"></select>
+          <select id="modeSelect" class="mode-select" aria-label="Chat Mode">
+            <option value="recommendation">Forklift Recommendation</option>
+            <option value="options_attachments">Options &amp; Attachments</option>
+            <option value="inquiry">Customer Inquiry (Billing)</option>
+            <option value="contact_finder">Contact Finder</option>
+            <option value="indiana_developments">Indiana Developments</option>
+            <option value="coach">Sales Coach</option>
+          </select>
         </div>
       </div>
     </div>
@@ -81,18 +89,6 @@
     const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
     const modeSelect = document.getElementById('modeSelect');
     let animationInterval, isForward = true;
-
-    // ------- Load Modes -------
-    async function loadModes() {
-      try {
-        const res = await fetch('/api/modes');
-        const modes = await res.json();
-        modeSelect.innerHTML = modes.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
-      } catch (e) {
-        console.error('Failed to load modes', e);
-      }
-    }
-    document.addEventListener('DOMContentLoaded', loadModes);
 
     // ------- Formatting Helpers -------
     function formatLabels(text) {
@@ -140,7 +136,7 @@
 
     // ------- Mode Routing Helpers -------
     function isOptionsAttachmentsMode() {
-      // Robustly detect your Options/Attachments mode by id OR label
+      // Detect Options/Attachments mode by id OR label
       const opt = modeSelect.options[modeSelect.selectedIndex];
       const id = (opt?.value || '').toLowerCase();
       const label = (opt?.textContent || '').toLowerCase();
