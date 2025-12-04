@@ -1384,11 +1384,6 @@ def chat():
 
         mode = (data.get("mode") or "").strip() or "recommendation"
 
-        # 🔁 Backwards-compat: frontend still sends "options_attachments"
-        # for the Options & Attachments mode. Internally we use "catalog".
-        if mode == "options_attachments":
-            mode = "catalog"
-
         if not user_q:
             # Return 200 so strict front-ends don't drop the body on 400s
             return _ok_payload("Please enter a description of the customer’s needs.")
@@ -1440,6 +1435,7 @@ def chat():
         # Inquiry (billing / report analysis)
         # ─────────────────────────────────────────────────────────────
         if mode == "inquiry":
+            # 1) Try the structured top-spend shortcut first
             structured = try_structured_top_spend_answer(user_q)
             if structured:
                 return _ok_payload(structured)
@@ -1449,9 +1445,60 @@ def chat():
                 make_inquiry_targets,
                 _norm_name,
             )
+            from difflib import get_close_matches
 
+            # ---------- helper: fallback name match from customer_report.csv ----------
+            def _fallback_inquiry_label(question: str) -> str | None:
+                """
+                If the user types something like 'Knauf', try to find a close
+                match in customer_report.csv (via _load_report_df_cached()) and
+                return the best full company name, e.g. 'KNAUF INSULATION'.
+                """
+                df = _load_report_df_cached()
+                if df is None or df.empty:
+                    return None
+
+                qn = _norm_name(question)
+                if not qn:
+                    return None
+
+                # Build mapping from normalized company name -> display name
+                try:
+                    companies = [
+                        str(x)
+                        for x in df.get("_company", df.get("Sold to Name", []))
+                        .astype(str)
+                        .unique()
+                        if str(x).strip()
+                    ]
+                except Exception:
+                    return None
+
+                norm_to_orig = {}
+                for name in companies:
+                    nn = _norm_name(name)
+                    if nn and nn not in norm_to_orig:
+                        norm_to_orig[nn] = name
+
+                # 1) Simple substring match (handles 'knauf' vs 'knauf insulation')
+                for nn, orig in norm_to_orig.items():
+                    if qn in nn or nn in qn:
+                        return orig
+
+                # 2) Fuzzy match (in case of typos)
+                keys = list(norm_to_orig.keys())
+                if not keys:
+                    return None
+                match = get_close_matches(qn, keys, n=1, cutoff=0.75)
+                if match:
+                    return norm_to_orig[match[0]]
+                return None
+
+            # ---------- normal inquiry flow ----------
             qnorm = _norm_name(user_q)
             chosen_name = None
+
+            # a) Try explicit inquiry targets first (your existing logic)
             try:
                 for it in make_inquiry_targets():
                     lbl_norm = _norm_name(it.get("label", ""))
@@ -1461,9 +1508,27 @@ def chat():
             except Exception as e:
                 app.logger.warning(f"scan targets failed: {e}")
 
+            # b) Fallback: search customer_report.csv for a close name
+            if not chosen_name:
+                try:
+                    alt = _fallback_inquiry_label(user_q)
+                    if alt:
+                        chosen_name = alt
+                        app.logger.info(f"inquiry fallback matched '{user_q}' -> '{chosen_name}'")
+                except Exception as e:
+                    app.logger.warning(f"inquiry fallback match failed: {e}")
+
             probe = chosen_name or user_q
             brief = build_inquiry_brief(probe)
+
             if not brief:
+                # If we tried a fallback, surface that to you in the message.
+                if chosen_name:
+                    return _ok_payload(
+                        f"I tried to match '{user_q}' to '{chosen_name}' "
+                        "but couldn’t locate that customer in the report/billing data. "
+                        "Please include the company name as it appears in your system."
+                    )
                 return _ok_payload(
                     "I couldn’t locate that customer in the report/billing data. "
                     "Please include the company name as it appears in your system."
