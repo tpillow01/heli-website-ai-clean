@@ -218,8 +218,7 @@ def _google_cse_search(
     Returns a list of normalized raw results:
       { title, snippet, url, provider, date (datetime or None) }
 
-    Improvements vs. old version:
-    - Uses 'sort=date' so newest hits come back first.
+    - Uses 'sort=date' so newest hits come back first (if supported).
     - Uses 'dateRestrict' based on `days` (if provided) to bias toward recent projects.
     - Paginates through results up to `max_results` (Google returns 10 per page).
     """
@@ -296,7 +295,6 @@ def _google_cse_search(
 # Project heuristics (forklift-relevant vs. junk)
 # ---------------------------------------------------------------------------
 
-# Needs to look like the kind of site that would realistically use forklifts
 _FORKLIFT_POSITIVE = [
     "warehouse",
     "distribution center",
@@ -328,7 +326,6 @@ _FORKLIFT_POSITIVE = [
     "third-party logistics",
 ]
 
-# Needs to sound like an actual project / build, not a generic marketing page
 _PROJECT_VERBS = [
     "project",
     "development",
@@ -365,7 +362,6 @@ _PROJECT_VERBS = [
     "grand opening",
 ]
 
-# Phrases that usually mean "generic info / tourism / services / housing"
 _PROJECT_NEGATIVE_TEXT = [
     "official website",
     "faq",
@@ -419,7 +415,6 @@ _PROJECT_NEGATIVE_TEXT = [
     "key industries",  # knocks out generic "Key Industries - Hendricks County" pages
 ]
 
-# Domains that are almost never real development projects
 _PROJECT_NEGATIVE_URL = [
     "facebook.com",
     "instagram.com",
@@ -432,6 +427,62 @@ _PROJECT_NEGATIVE_URL = [
     "hcedp.org/key-industries",
 ]
 
+# ---------------------------------------------------------------------------
+# Indiana sanity check
+# ---------------------------------------------------------------------------
+
+STATE_ABBR_RE = re.compile(r",\s*([A-Z]{2})\b")
+
+
+def _is_indiana_hit(
+    title: str,
+    snippet: str,
+    city: Optional[str],
+    county: Optional[str],
+) -> bool:
+    """
+    Try to ensure this result is actually about an Indiana location
+    (and not Spokane Valley, WA, etc.).
+
+    Rules:
+    - If we see an explicit state abbreviation like ", WA" or ", OH"
+      that is NOT IN, we drop the hit.
+    - Otherwise:
+        • If 'Indiana' appears anywhere in the text, keep it.
+        • If the requested county/city name appears in the text, keep it.
+    - Everything else is considered too ambiguous and dropped.
+    """
+    text = f"{title} {snippet}"
+    text_l = _lower(text)
+
+    # If another state abbreviation is clearly in the text, and it's not IN, reject.
+    m = STATE_ABBR_RE.search(text)
+    if m:
+        abbr = m.group(1)
+        if abbr != "IN":
+            return False
+
+    # Strong positive: explicitly mentions Indiana
+    if "indiana" in text_l:
+        return True
+
+    # Positive: mentions the requested county or city name
+    if county:
+        base = county.split()[0].lower()
+        if base and base in text_l:
+            return True
+
+    if city:
+        c = city.lower()
+        if c and c in text_l:
+            return True
+
+    # Otherwise we treat it as not confidently Indiana
+    return False
+
+# ---------------------------------------------------------------------------
+# Heuristics
+# ---------------------------------------------------------------------------
 
 def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
     """
@@ -537,23 +588,27 @@ def _classify_scope_and_location(
     Very light classification into:
       - scope: "local" (explicitly mentions city/county) or "statewide"
       - location_label: human-readable label for display.
+
+    We only label as the specific county/city if the text actually mentions it.
+    Otherwise we keep it as "Indiana" with scope="statewide".
     """
     text = _lower(title) + " " + _lower(snippet)
-    loc_label = "Indiana"
 
     scope = "statewide"
+    loc_label = "Indiana"
+
     if county:
         base = county.split()[0].lower()
         if base and base in text:
             scope = "local"
-        loc_label = county
+            loc_label = county  # Only label as the county if it's actually mentioned
+
     if city:
         c = city.lower()
         if c and c in text:
             scope = "local"
-        # If no county, we can show the city as the label
-        if not county:
-            loc_label = city
+            if loc_label == "Indiana":
+                loc_label = city
 
     return scope, loc_label
 
@@ -588,10 +643,10 @@ def _normalize_projects(
     """
     Convert raw CSE results into the structured dicts used by the chat layer.
 
-    Improvements:
+    - Uses _is_indiana_hit to drop out-of-state junk.
     - Uses _estimate_forklift_relevance to attach a forklift_score (1–5) & label.
     - Drops items with forklift_score < 3 (too weak a forklift signal).
-    - Still keeps us from inventing sq ft / jobs / investment – those stay None.
+    - Does NOT invent sq ft / jobs / investment – those stay None.
     """
     inferred_year = _extract_year_from_question(user_q)
     original_area_label = county or city or "Indiana"
@@ -603,6 +658,10 @@ def _normalize_projects(
         url = it.get("url") or ""
         provider = it.get("provider") or ""
         dt = it.get("date")  # datetime or None
+
+        # Must actually look like an Indiana hit (not Spokane, WA, etc.)
+        if not _is_indiana_hit(title, snippet, city, county):
+            continue
 
         # Hard filter: must look like a forklift-relevant project at all
         if not _looks_like_project_hit(title, snippet, url):
@@ -657,7 +716,6 @@ def _normalize_projects(
 
     return projects
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -698,8 +756,8 @@ def search_indiana_developments(
       }
 
     NOTE:
-    - We now do use `days` in the CSE query via dateRestrict + sort=date.
-    - We STILL do a recency split afterward, capped at ~4 years, so if nothing
+    - We use `days` in the CSE query via dateRestrict + sort=date.
+    - We still do a recency split afterward, capped at ~4 years, so if nothing
       very recent exists you still see something meaningful.
     """
     city, county = _extract_geo_hint(user_q)
@@ -740,7 +798,7 @@ def search_indiana_developments(
     # -----------------------------------------------------------------------
     # Recency preference: split into "recent" vs "older"
     # -----------------------------------------------------------------------
-    max_recent_days = min(days or 365, 365 * 4)  # cap at ~4 years even if you pass 10
+    max_recent_days = min(days or 365, 365 * 4)  # cap at ~4 years
     now = datetime.utcnow()
 
     recent: List[Dict[str, Any]] = []
@@ -811,7 +869,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             else:
                 meta_bits.append(stage)
         if forklift_label:
-            meta_bits.append(forklift_label)
+            meta_bits.append(f"{forklift_label}")
 
         if meta_bits:
             lines.append("   " + " • ".join(meta_bits))
