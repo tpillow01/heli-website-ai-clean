@@ -186,11 +186,42 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
     return None
 
 
-def _google_cse_search(query: str) -> List[Dict[str, Any]]:
+def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
+    """
+    Map a days window into Google CSE dateRestrict syntax.
+    - dN = last N days (max 31 realistically useful)
+    - mN = last N months
+    """
+    if not days or days <= 0:
+        return None
+
+    # Up to about a month: use days
+    if days <= 31:
+        return f"d{days}"
+
+    # Up to 2 years: express in months
+    months = max(1, int(round(days / 30)))
+    if months <= 24:
+        return f"m{months}"
+
+    # Beyond that, don't restrict at the API level; we handle recency later
+    return None
+
+
+def _google_cse_search(
+    query: str,
+    max_results: int = 30,
+    days: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """
     Thin wrapper around Google Custom Search JSON API.
     Returns a list of normalized raw results:
       { title, snippet, url, provider, date (datetime or None) }
+
+    Improvements vs. old version:
+    - Uses 'sort=date' so newest hits come back first.
+    - Uses 'dateRestrict' based on `days` (if provided) to bias toward recent projects.
+    - Paginates through results up to `max_results` (Google returns 10 per page).
     """
     if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
         log.warning(
@@ -199,45 +230,65 @@ def _google_cse_search(query: str) -> List[Dict[str, Any]]:
         )
         return []
 
-    params = {
+    date_restrict = _days_to_date_restrict(days)
+
+    base_params = {
         "key": GOOGLE_CSE_KEY,
         "cx": GOOGLE_CSE_CX,
         "q": query,
-        "num": 10,
+        "num": 10,           # Google max per page
+        "sort": "date",      # newest first if supported for this CSE
     }
-
-    try:
-        resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        log.warning("Google CSE request failed: %s", e)
-        return []
-
-    items = data.get("items", []) or []
-    log.info("Google CSE returned %s items", len(items))
+    if date_restrict:
+        base_params["dateRestrict"] = date_restrict
 
     out: List[Dict[str, Any]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
+    start = 1
 
-        title = it.get("title") or ""
-        snippet = it.get("snippet") or it.get("htmlSnippet") or ""
-        url = it.get("link") or ""
-        provider = it.get("displayLink") or ""
+    while len(out) < max_results and start <= 91:  # up to ~9 pages max
+        params = dict(base_params)
+        params["start"] = start
 
-        dt = _parse_date_from_pagemap(it)
+        try:
+            resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.warning("Google CSE request failed (start=%s): %s", start, e)
+            break
 
-        out.append(
-            {
-                "title": title,
-                "snippet": snippet,
-                "url": url,
-                "provider": provider,
-                "date": dt,  # datetime or None
-            }
-        )
+        items = data.get("items", []) or []
+        log.info("Google CSE returned %s items at start=%s", len(items), start)
+        if not items:
+            break
+
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+
+            title = it.get("title") or ""
+            snippet = it.get("snippet") or it.get("htmlSnippet") or ""
+            url = it.get("link") or ""
+            provider = it.get("displayLink") or ""
+            dt = _parse_date_from_pagemap(it)
+
+            out.append(
+                {
+                    "title": title,
+                    "snippet": snippet,
+                    "url": url,
+                    "provider": provider,
+                    "date": dt,  # datetime or None
+                }
+            )
+
+            if len(out) >= max_results:
+                break
+
+        if len(out) >= max_results:
+            break
+
+        start += 10
 
     return out
 
@@ -252,6 +303,9 @@ _FORKLIFT_POSITIVE = [
     "distribution facility",
     "distribution hub",
     "fulfillment center",
+    "fulfillment facility",
+    "sortation center",
+    "sorting center",
     "logistics center",
     "logistics facility",
     "logistics hub",
@@ -260,14 +314,18 @@ _FORKLIFT_POSITIVE = [
     "cross-dock",
     "cross dock",
     "cold storage",
+    "cold-chain",
     "industrial park",
     "business park",
     "industrial complex",
     "manufacturing plant",
     "production plant",
-    "factory",
     "assembly plant",
     "equipment plant",
+    "manufacturing facility",
+    "industrial facility",
+    "3pl",
+    "third-party logistics",
 ]
 
 # Needs to sound like an actual project / build, not a generic marketing page
@@ -285,9 +343,12 @@ _PROJECT_VERBS = [
     "expand",
     "adding jobs",
     "add jobs",
+    "creating jobs",
+    "create jobs",
     "will invest",
     "investment",
     "investing",
+    "invests",
     "broke ground",
     "groundbreaking",
     "opens",
@@ -300,6 +361,8 @@ _PROJECT_VERBS = [
     "new plant",
     "new warehouse",
     "new distribution center",
+    "new manufacturing plant",
+    "grand opening",
 ]
 
 # Phrases that usually mean "generic info / tourism / services / housing"
@@ -353,7 +416,7 @@ _PROJECT_NEGATIVE_TEXT = [
     "condominiums",
     "senior living",
     "assisted living",
-    "key industries",  # this knocks out those generic "Key Industries - Hendricks County" pages
+    "key industries",  # knocks out generic "Key Industries - Hendricks County" pages
 ]
 
 # Domains that are almost never real development projects
@@ -401,6 +464,69 @@ def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
     return True
 
 
+def _estimate_forklift_relevance(title: str, snippet: str, url: str) -> Tuple[int, str]:
+    """
+    Assign a forklift relevance score 1–5 for a project:
+      5 = huge / clearly industrial, strong signals
+      4 = solid warehouse / manufacturing project
+      3 = likely industrial, but less detail
+      2 = might use forklifts, but weak signals
+      1 = very weak / unlikely
+
+    Returns (score, label).
+    """
+    text = _lower(f"{title} {snippet}")
+    url_l = _lower(url or "")
+    score = 0
+
+    # Base positive hits: facility type keywords
+    for pos in _FORKLIFT_POSITIVE:
+        if pos in text:
+            score += 3
+
+    # Strong verbs / project language
+    if any(pv in text for pv in _PROJECT_VERBS):
+        score += 2
+
+    # Square footage hints (e.g., 300,000-square-foot warehouse)
+    if re.search(r"\b\d{2,4}[,\d]{0,4}\s*(square[-\s]?feet|sq\.?\s*ft|sf)\b", text):
+        score += 2
+
+    # Jobs hints
+    if re.search(r"\b\d{2,5}\s+(new\s+)?jobs\b", text):
+        score += 1
+
+    # Extra bump for explicit warehouse/logistics language
+    if any(w in text for w in ("warehouse", "distribution center", "fulfillment center", "logistics hub", "logistics center")):
+        score += 1
+
+    # Generic negative content (tourism, housing, etc.) should practically zero it out
+    if any(neg in text for neg in _PROJECT_NEGATIVE_TEXT):
+        score -= 5
+    if any(bad in url_l for bad in _PROJECT_NEGATIVE_URL):
+        score -= 5
+
+    if score <= 0:
+        numeric = 1
+    elif score <= 3:
+        numeric = 2
+    elif score <= 5:
+        numeric = 3
+    elif score <= 7:
+        numeric = 4
+    else:
+        numeric = 5
+
+    label_map = {
+        1: "Very weak forklift signal",
+        2: "Possible but weak forklift use",
+        3: "Likely forklift-using facility",
+        4: "Strong forklift-using facility",
+        5: "Very strong forklift-using facility",
+    }
+    return numeric, label_map.get(numeric, "Likely forklift-using facility")
+
+
 def _classify_scope_and_location(
     title: str,
     snippet: str,
@@ -443,7 +569,7 @@ def _infer_project_type(title: str, snippet: str) -> str:
         return "warehouse / logistics facility"
     if any(w in text for w in ("logistics hub", "logistics park", "logistics center", "logistics facility")):
         return "warehouse / logistics facility"
-    if any(w in text for w in ("manufacturing plant", "factory", "plant expansion", "production plant", "assembly plant", "equipment plant")):
+    if any(w in text for w in ("manufacturing plant", "factory", "plant expansion", "production plant", "assembly plant", "equipment plant", "manufacturing facility")):
         return "manufacturing plant"
     if any(w in text for w in ("industrial park", "business park", "industrial complex")):
         return "business / industrial park"
@@ -461,8 +587,11 @@ def _normalize_projects(
 ) -> List[Dict[str, Any]]:
     """
     Convert raw CSE results into the structured dicts used by the chat layer.
-    We do NOT invent square footage, job counts, or dollars – those stay None
-    unless we explicitly parse them (currently we don't).
+
+    Improvements:
+    - Uses _estimate_forklift_relevance to attach a forklift_score (1–5) & label.
+    - Drops items with forklift_score < 3 (too weak a forklift signal).
+    - Still keeps us from inventing sq ft / jobs / investment – those stay None.
     """
     inferred_year = _extract_year_from_question(user_q)
     original_area_label = county or city or "Indiana"
@@ -475,8 +604,13 @@ def _normalize_projects(
         provider = it.get("provider") or ""
         dt = it.get("date")  # datetime or None
 
-        # Hard filter: must look like a forklift-relevant project
+        # Hard filter: must look like a forklift-relevant project at all
         if not _looks_like_project_hit(title, snippet, url):
+            continue
+
+        forklift_score, forklift_label = _estimate_forklift_relevance(title, snippet, url)
+        # Drop the weakest hits so the chat layer sees better opportunities
+        if forklift_score < 3:
             continue
 
         scope, location_label = _classify_scope_and_location(title, snippet, city, county)
@@ -499,6 +633,10 @@ def _normalize_projects(
                 "scope": scope,  # "local" or "statewide"
                 "location_label": location_label,
                 "original_area_label": original_area_label,
+
+                # Forklift relevance
+                "forklift_score": forklift_score,  # 1–5
+                "forklift_label": forklift_label,
 
                 # Scale / economics (left as None – no guessing)
                 "sqft": None,
@@ -547,6 +685,8 @@ def search_indiana_developments(
         "scope": "local" | "statewide",
         "location_label": str,
         "original_area_label": str,
+        "forklift_score": int,          # 1–5
+        "forklift_label": str,
         "sqft": Optional[str],
         "jobs": Optional[str],
         "investment": Optional[str],
@@ -557,9 +697,10 @@ def search_indiana_developments(
         "snippet": str,
       }
 
-    NOTE: We do not hard-filter by `days` – instead we sort by recency and use
-    a "recent vs older" split capped at ~4 years, so you still get something
-    even if nothing super-fresh exists.
+    NOTE:
+    - We now do use `days` in the CSE query via dateRestrict + sort=date.
+    - We STILL do a recency split afterward, capped at ~4 years, so if nothing
+      very recent exists you still see something meaningful.
     """
     city, county = _extract_geo_hint(user_q)
     original_area_label = county or city or "Indiana"
@@ -567,7 +708,7 @@ def search_indiana_developments(
 
     # 1) County/city-biased search
     query_local = _build_query(user_q, city, county)
-    raw_local = _google_cse_search(query_local)
+    raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
 
     projects: List[Dict[str, Any]] = []
 
@@ -579,7 +720,7 @@ def search_indiana_developments(
         if not projects:
             log.info("No forklift-relevant local projects; trying statewide fallback after filtering")
             query_statewide = _build_query(user_q, city=None, county=None)
-            raw_statewide = _google_cse_search(query_statewide)
+            raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
             if not raw_statewide:
                 return []
             projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
@@ -587,7 +728,7 @@ def search_indiana_developments(
         # 2) No local CSE hits at all – go straight to statewide search
         log.info("No local CSE results; trying statewide fallback query")
         query_statewide = _build_query(user_q, city=None, county=None)
-        raw_statewide = _google_cse_search(query_statewide)
+        raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
         if not raw_statewide:
             return []
         projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
@@ -599,7 +740,7 @@ def search_indiana_developments(
     # -----------------------------------------------------------------------
     # Recency preference: split into "recent" vs "older"
     # -----------------------------------------------------------------------
-    max_recent_days = min(days, 365 * 4)  # cap at ~4 years even if you pass 10
+    max_recent_days = min(days or 365, 365 * 4)  # cap at ~4 years even if you pass 10
     now = datetime.utcnow()
 
     recent: List[Dict[str, Any]] = []
@@ -619,15 +760,17 @@ def search_indiana_developments(
 
     candidates = recent if recent else older
 
-    # Sort newest → oldest
-    def _sort_key(p: Dict[str, Any]) -> datetime:
+    # Sort by forklift relevance first (desc), then newest date
+    def _sort_key(p: Dict[str, Any]) -> Tuple[int, datetime]:
+        forklift_score = p.get("forklift_score") or 3
         dt = p.get("raw_date")
         if isinstance(dt, datetime):
-            return dt
-        return datetime(1900, 1, 1)
+            return (forklift_score, dt)
+        return (forklift_score, datetime(1900, 1, 1))
 
     candidates.sort(key=_sort_key, reverse=True)
     return candidates[:max_items]
+
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     """
@@ -652,17 +795,24 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         stage = item.get("timeline_stage") or ""
         loc = item.get("location_label") or item.get("original_area_label") or "Indiana"
         ptype = item.get("project_type") or "Industrial / commercial project"
+        forklift_score = item.get("forklift_score")
+        forklift_label = item.get("forklift_label") or ""
 
         lines.append(f"{i}. {title} — {loc}")
 
         meta_bits = [ptype]
         if provider:
             meta_bits.append(provider)
+        if forklift_score:
+            meta_bits.append(f"Forklift relevance {forklift_score}/5")
         if stage:
             if year:
                 meta_bits.append(f"{stage} ({year})")
             else:
                 meta_bits.append(stage)
+        if forklift_label:
+            meta_bits.append(forklift_label)
+
         if meta_bits:
             lines.append("   " + " • ".join(meta_bits))
         if snippet:
