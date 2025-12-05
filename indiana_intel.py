@@ -639,13 +639,14 @@ def _normalize_projects(
     city: Optional[str],
     county: Optional[str],
     user_q: str,
+    min_forklift_score: int = 3,
 ) -> List[Dict[str, Any]]:
     """
     Convert raw CSE results into the structured dicts used by the chat layer.
 
     - Uses _is_indiana_hit to drop out-of-state junk.
     - Uses _estimate_forklift_relevance to attach a forklift_score (1–5) & label.
-    - Drops items with forklift_score < 3 (too weak a forklift signal).
+    - Drops items with forklift_score < min_forklift_score.
     - Does NOT invent sq ft / jobs / investment – those stay None.
     """
     inferred_year = _extract_year_from_question(user_q)
@@ -668,8 +669,7 @@ def _normalize_projects(
             continue
 
         forklift_score, forklift_label = _estimate_forklift_relevance(title, snippet, url)
-        # Drop the weakest hits so the chat layer sees better opportunities
-        if forklift_score < 3:
+        if forklift_score < min_forklift_score:
             continue
 
         scope, location_label = _classify_scope_and_location(title, snippet, city, county)
@@ -728,13 +728,14 @@ def search_indiana_developments(
     """
     Main entrypoint.
 
-    - Extracts simple city/county hints from the user question.
-    - Builds a Google CSE query anchored on Indiana industrial/commercial projects.
-    - First attempts a county/city-biased search.
-    - If no results at all, OR if all local results are filtered out as non-projects,
-      falls back to a statewide search (no city/county constraints) so the chat layer
-      can still talk about major Indiana projects.
-    - Returns a list of normalized project dicts:
+    Strategy (so you don't get "nothing found" unless the web is truly empty):
+
+    1) Try local (city/county) with requested `days`, forklift_score >= 3.
+    2) If empty, try statewide with requested `days`, forklift_score >= 3.
+    3) If still empty, widen statewide days to ~4 years, forklift_score >= 3.
+    4) If still empty, statewide up to ~4 years with forklift_score >= 2.
+
+    Returns a list of normalized project dicts:
 
       {
         "project_name": str,
@@ -754,49 +755,81 @@ def search_indiana_developments(
         "provider": str,
         "snippet": str,
       }
-
-    NOTE:
-    - We use `days` in the CSE query via dateRestrict + sort=date.
-    - We still do a recency split afterward, capped at ~4 years, so if nothing
-      very recent exists you still see something meaningful.
     """
     city, county = _extract_geo_hint(user_q)
     original_area_label = county or city or "Indiana"
     _ = original_area_label  # reserved if needed later
 
-    # 1) County/city-biased search
-    query_local = _build_query(user_q, city, county)
-    raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
-
     projects: List[Dict[str, Any]] = []
 
+    # -----------------------------
+    # Tier 1: local, strict, as requested
+    # -----------------------------
+    query_local = _build_query(user_q, city, county)
+    raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
     if raw_local:
-        # We have local-biased hits – normalize & filter them
-        projects = _normalize_projects(raw_local, city=city, county=county, user_q=user_q)
+        projects = _normalize_projects(
+            raw_local,
+            city=city,
+            county=county,
+            user_q=user_q,
+            min_forklift_score=3,
+        )
 
-        # If everything was filtered out as non-projects, try statewide instead
-        if not projects:
-            log.info("No forklift-relevant local projects; trying statewide fallback after filtering")
-            query_statewide = _build_query(user_q, city=None, county=None)
-            raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
-            if not raw_statewide:
-                return []
-            projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
-    else:
-        # 2) No local CSE hits at all – go straight to statewide search
-        log.info("No local CSE results; trying statewide fallback query")
-        query_statewide = _build_query(user_q, city=None, county=None)
-        raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
-        if not raw_statewide:
-            return []
-        projects = _normalize_projects(raw_statewide, city=None, county=None, user_q=user_q)
+    # -----------------------------
+    # Tier 2: statewide, strict, as requested
+    # -----------------------------
+    query_statewide = _build_query(user_q, city=None, county=None)
+    if not projects:
+        log.info("No forklift-relevant local projects; trying statewide strict search")
+        raw_state = _google_cse_search(query_statewide, max_results=max_items, days=days)
+        if raw_state:
+            projects = _normalize_projects(
+                raw_state,
+                city=None,
+                county=None,
+                user_q=user_q,
+                min_forklift_score=3,
+            )
+
+    # -----------------------------
+    # Tier 3: statewide, strict, wider timeframe (~4 years)
+    # -----------------------------
+    wider_days = 365 * 4
+    if not projects:
+        log.info("No statewide strict results in requested days; widening statewide timeframe")
+        raw_state_wide = _google_cse_search(query_statewide, max_results=max_items, days=wider_days)
+        if raw_state_wide:
+            projects = _normalize_projects(
+                raw_state_wide,
+                city=None,
+                county=None,
+                user_q=user_q,
+                min_forklift_score=3,
+            )
+
+    # -----------------------------
+    # Tier 4: statewide, slightly looser forklift filter, wider timeframe
+    # -----------------------------
+    if not projects:
+        log.info("Still no results; loosening forklift relevance threshold to 2/5")
+        raw_state_loose = _google_cse_search(query_statewide, max_results=max_items, days=wider_days)
+        if raw_state_loose:
+            projects = _normalize_projects(
+                raw_state_loose,
+                city=None,
+                county=None,
+                user_q=user_q,
+                min_forklift_score=2,
+            )
 
     if not projects:
-        # Even statewide had nothing that looked like a forklift-relevant project
+        # Even after all fallbacks, nothing looked like an Indiana industrial project
         return []
 
     # -----------------------------------------------------------------------
     # Recency preference: split into "recent" vs "older"
+    # (based on *actual* raw_date when available)
     # -----------------------------------------------------------------------
     max_recent_days = min(days or 365, 365 * 4)  # cap at ~4 years
     now = datetime.utcnow()
@@ -869,7 +902,7 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             else:
                 meta_bits.append(stage)
         if forklift_label:
-            meta_bits.append(f"{forklift_label}")
+            meta_bits.append(forklift_label)
 
         if meta_bits:
             lines.append("   " + " • ".join(meta_bits))
