@@ -1,18 +1,18 @@
 """
 indiana_intel.py
 
-Indiana developments lead-finder for Tynan / Heli AI site.
+Indiana developments / lead finder for Tynan / Heli AI.
 
 Responsibilities:
 - Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
-- Hit Google Custom Search JSON API (Programmable Search Engine) for
-  industrial / logistics / manufacturing / commercial projects (Indiana-biased via CSE config)
-- Normalize results into simple dicts that the chat layer can format
-- Provide a plain-text summary (mostly for debugging or backup use)
+- Hit Google Custom Search JSON API (Programmable Search Engine) that is Indiana-biased
+- Pull back industrial / logistics / manufacturing / commercial facilities
+- Normalize results into simple dicts the chat layer can format
+- Provide a plain-text summary for debugging
 
 Environment variables required:
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
-- GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured to search the web
+- GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured for Indiana
 """
 
 from __future__ import annotations
@@ -25,16 +25,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
 log = logging.getLogger("indiana_intel")
 if not log.handlers:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(levelname)s:%(name)s:%(message)s"
+        format="%(levelname)s:%(name)s:%(message)s",
     )
 
 # ---------------------------------------------------------------------------
 # Config: Google CSE
 # ---------------------------------------------------------------------------
+
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
@@ -62,7 +67,7 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Very light-weight extractor:
     - Finds 'X County' → county='X County'
-    - Tries to grab a city name after 'in ' if it looks like 'Plainfield' or 'Plainfield, IN'
+    - Tries to grab a city name after 'in ' / 'near ' / 'around ' if it looks like 'Plainfield' or 'Plainfield, IN'
     Returns (city, county).
     """
     if not q:
@@ -88,30 +93,57 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     return (city, county)
 
 
-def _extract_year_from_question(q: str) -> Optional[int]:
-    """
-    Try to find a 4-digit year like 2024, 2025, 2026 in the user's question.
-    Used only as a soft hint for timeline interpretation / filtering.
-    """
-    if not q:
-        return None
-    for m in re.finditer(r"\b(20[2-4][0-9])\b", q):
-        try:
-            year = int(m.group(1))
-            if 2000 <= year <= 2100:
-                return year
-        except Exception:
-            continue
-    return None
-
-
 _STOPWORDS = {
-    "what", "are", "there", "any", "new", "or", "in", "the", "last", "month",
-    "months", "recent", "recently", "project", "projects", "have", "has",
-    "been", "announced", "announcement", "for", "about", "on", "of", "a",
-    "an", "county", "indiana", "logistics", "warehouse", "distribution",
-    "center", "centers", "companies", "coming", "to", "area", "city",
-    "kind", "sort", "type", "planned", "plan", "announce", "announced",
+    "what",
+    "are",
+    "there",
+    "any",
+    "new",
+    "or",
+    "in",
+    "the",
+    "last",
+    "month",
+    "months",
+    "recent",
+    "recently",
+    "project",
+    "projects",
+    "have",
+    "has",
+    "been",
+    "announced",
+    "announcement",
+    "for",
+    "about",
+    "on",
+    "of",
+    "a",
+    "an",
+    "county",
+    "indiana",
+    "logistics",
+    "warehouse",
+    "warehouses",
+    "distribution",
+    "center",
+    "centers",
+    "companies",
+    "coming",
+    "to",
+    "area",
+    "city",
+    "kind",
+    "sort",
+    "type",
+    "planned",
+    "plan",
+    "announce",
+    "announced",
+    "expanded",
+    "expansion",
+    "hiring",
+    "jobs",
 }
 
 
@@ -119,7 +151,7 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
     """
     Build a Google CSE query anchored on industrial/commercial keywords,
     with optional city / county bias, plus a small keyword tail from the question.
-    We always include 'Indiana' to bias the search.
+    Always includes 'Indiana' to bias the search.
     """
     parts: List[str] = ["Indiana", BASE_KEYWORDS]
 
@@ -307,39 +339,57 @@ _FORKLIFT_POSITIVE = [
     "cold storage",
     "3pl",
     "third-party logistics",
+    "third party logistics",
 ]
 
 # Obvious non-prospect noise
 _PROJECT_NEGATIVE_TEXT = [
     "visit hendricks county",
-    "visit plainfield",
+    "visit indiana",
+    "visit our town",
     "tourism",
-    "events, shopping & family fun",
+    "visitors bureau",
+    "shopping center",
+    "outlet mall",
+    "premium outlets",
+    "outlets",
+    "mall",
     "hotel",
     "resort",
+    "casino",
     "water park",
     "amusement park",
     "museum",
+    "library",
     "stadium",
     "arena",
     "sports complex",
     "golf",
+    "park and recreation",
+    "parks and recreation",
+    "trailhead",
     "apartments",
     "apartment complex",
     "housing development",
     "subdivision",
     "condominiums",
+    "condo",
     "senior living",
     "assisted living",
+    "retirement community",
     "elementary school",
     "middle school",
     "high school",
     "university",
     "college",
+    "campus",
     "hospital",
     "medical center",
     "clinic",
     "behavioral health",
+    "mental health",
+    "church",
+    "ministry",
 ]
 
 # Obvious junk domains
@@ -353,7 +403,7 @@ _PROJECT_NEGATIVE_URL = [
 ]
 
 
-def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
+def _looks_like_facility_hit(title: str, snippet: str, url: str) -> bool:
     """
     Decide whether a search hit is an industrial / forklift-relevant facility
     vs pure junk.
@@ -384,15 +434,14 @@ def _looks_like_project_hit(title: str, snippet: str, url: str) -> bool:
     return True
 
 
-def _estimate_forklift_relevance(title: str, snippet: str, url: str) -> Tuple[int, str]:
+def _compute_forklift_score(title: str, snippet: str, url: str) -> Tuple[int, str]:
     """
     Rough forklift relevance score 1–5, used for ranking only.
-    We DO NOT drop items based on this; we just sort by it.
     """
     text = _lower(f"{title} {snippet}")
     score = 0
 
-    # Count positive keywords
+    # Count positive facility keywords
     for pos in _FORKLIFT_POSITIVE:
         if pos in text:
             score += 2
@@ -423,34 +472,42 @@ def _estimate_forklift_relevance(title: str, snippet: str, url: str) -> Tuple[in
     return numeric, label_map.get(numeric, "Likely forklift-using facility")
 
 
-def _classify_scope_and_location(
+def _geo_match_scores(
     title: str,
     snippet: str,
     city: Optional[str],
     county: Optional[str],
-) -> Tuple[str, str]:
+) -> Tuple[int, bool, bool]:
     """
-    Simple scope + label:
-      - "local" if city/county is mentioned
-      - "statewide" otherwise
+    Compute a simple geographic match score:
+      - geo_match_score: 0..2
+      - match_city: bool
+      - match_county: bool
     """
-    text = _lower(title) + " " + _lower(snippet)
-    scope = "statewide"
-    loc_label = "Indiana"
+    text = _lower(title + " " + snippet)
+    match_city = False
+    match_county = False
 
     if county:
         base = county.split()[0].lower()
         if base and base in text:
-            scope = "local"
-            loc_label = county
+            match_county = True
+        elif county.lower() in text:
+            match_county = True
+
     if city:
         c = city.lower()
         if c and c in text:
-            scope = "local"
-            if loc_label == "Indiana":
-                loc_label = city
+            match_city = True
 
-    return scope, loc_label
+    if match_city and match_county:
+        geo_score = 2
+    elif match_city or match_county:
+        geo_score = 1
+    else:
+        geo_score = 0
+
+    return geo_score, match_city, match_county
 
 
 def _infer_project_type(title: str, snippet: str) -> str:
@@ -471,6 +528,7 @@ def _normalize_projects(
     city: Optional[str],
     county: Optional[str],
     user_q: str,
+    source_tier: str,
 ) -> List[Dict[str, Any]]:
     """
     Convert raw CSE results into the structured dicts used by the chat layer.
@@ -478,9 +536,8 @@ def _normalize_projects(
     We try to be loose enough to not come back totally empty:
     - Reject obvious tourism/housing/hospitals/social junk
     - Require at least one industrial / warehouse keyword
-    - Keep everything that passes that, but rank by forklift_score
+    - Keep everything that passes that, but rank by forklift_score + geo match + recency
     """
-    inferred_year = _extract_year_from_question(user_q)
     original_area_label = county or city or "Indiana"
 
     projects: List[Dict[str, Any]] = []
@@ -491,30 +548,36 @@ def _normalize_projects(
         provider = it.get("provider") or ""
         dt = it.get("date")
 
-        # basic facility filter
-        if not _looks_like_project_hit(title, snippet, url):
+        if not _looks_like_facility_hit(title, snippet, url):
             continue
 
-        forklift_score, forklift_label = _estimate_forklift_relevance(title, snippet, url)
-        scope, location_label = _classify_scope_and_location(title, snippet, city, county)
+        forklift_score, forklift_label = _compute_forklift_score(title, snippet, url)
+        geo_score, match_city, match_county = _geo_match_scores(title, snippet, city, county)
         project_type = _infer_project_type(title, snippet)
 
-        timeline_year: Optional[int] = dt.year if isinstance(dt, datetime) else None
-        if inferred_year and (timeline_year is not None) and (timeline_year != inferred_year):
-            timeline_stage = "outside requested timeframe"
+        if match_county:
+            location_label = county or "Indiana"
+        elif match_city:
+            location_label = city or "Indiana"
         else:
-            timeline_stage = "announcement" if timeline_year else "not specified in snippet"
+            location_label = "Indiana"
+
+        timeline_year: Optional[int] = dt.year if isinstance(dt, datetime) else None
+        timeline_stage = "announcement" if timeline_year else "not specified in snippet"
 
         projects.append(
             {
                 "project_name": title or "Untitled project",
                 "company": None,
                 "project_type": project_type,
-                "scope": scope,
+                "scope": "local" if geo_score > 0 else "statewide",
                 "location_label": location_label,
                 "original_area_label": original_area_label,
                 "forklift_score": forklift_score,
                 "forklift_label": forklift_label,
+                "geo_match_score": geo_score,
+                "match_city": match_city,
+                "match_county": match_county,
                 "sqft": None,
                 "jobs": None,
                 "investment": None,
@@ -524,6 +587,7 @@ def _normalize_projects(
                 "url": url,
                 "provider": provider,
                 "snippet": snippet,
+                "source_tier": source_tier,  # "local", "statewide", "fallback"
             }
         )
 
@@ -542,61 +606,70 @@ def search_indiana_developments(
     """
     Main entrypoint.
 
-    Strategy:
-      1) Try local (city/county) query based on the user's question.
-      2) If that returns nothing after filtering, try statewide with the user's question.
-      3) If that still returns nothing, run a generic statewide industrial search
-         so the caller usually gets *something* about forklift-relevant projects
-         in or around Indiana.
+    Strategy (tiers):
+      1) "local":  city/county-aware query based on the user's question.
+      2) "statewide": same question, but without city/county constraint.
+      3) "fallback": county-aware generic search like
+         "new warehouses / DCs / plants in and around Boone County, Indiana".
 
     Returns a list of normalized project dicts.
     """
     city, county = _extract_geo_hint(user_q)
 
-    # ── Tier 1: local (city/county) tied to the user's question ─────────────────
+    projects: List[Dict[str, Any]] = []
+
+    # ── Tier 1: local ─────────────────────────────────────────────────────────
     query_local = _build_query(user_q, city, county)
     raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
-
-    projects: List[Dict[str, Any]] = []
     if raw_local:
-        projects = _normalize_projects(raw_local, city, county, user_q)
+        projects = _normalize_projects(raw_local, city, county, user_q, source_tier="local")
 
-    # ── Tier 2: statewide, still tied to the user's question ───────────────────
+    # ── Tier 2: statewide ─────────────────────────────────────────────────────
     if not projects:
-        log.info("No forklift-relevant local projects; trying statewide fallback")
+        log.info("No forklift-relevant local projects; trying statewide tier")
         query_statewide = _build_query(user_q, city=None, county=None)
         raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
         if raw_statewide:
-            projects = _normalize_projects(raw_statewide, None, None, user_q)
+            projects = _normalize_projects(raw_statewide, None, None, user_q, source_tier="statewide")
 
-    # ── Tier 3: generic statewide industrial catch-all (last resort) ───────────
+    # ── Tier 3: county-aware fallback ─────────────────────────────────────────
     if not projects:
-        log.info("No forklift-relevant hits for user query; running generic Indiana industrial search fallback")
-        generic_q = (
-            "new or expanded warehouses, distribution centers, manufacturing plants, "
-            "industrial parks, and logistics facilities in Indiana"
-        )
-        query_generic = _build_query(generic_q, city=None, county=None)
-        raw_generic = _google_cse_search(query_generic, max_results=max_items, days=max(days, 730))
-        if raw_generic:
-            projects = _normalize_projects(raw_generic, None, None, generic_q)
+        log.info("No forklift-relevant hits for user query; running county-aware fallback")
+        if county:
+            generic_q = (
+                f"new or expanded warehouses, distribution centers, logistics facilities, "
+                f"manufacturing plants, and industrial parks in and around {county}, Indiana "
+                f"in the last few years"
+            )
+            query_fallback = _build_query(generic_q, city=None, county=county)
+        else:
+            generic_q = (
+                "new or expanded warehouses, distribution centers, logistics facilities, "
+                "manufacturing plants, and industrial parks in Indiana in the last few years"
+            )
+            query_fallback = _build_query(generic_q, city=None, county=None)
+
+        raw_fallback = _google_cse_search(query_fallback, max_results=max_items, days=max(days, 730))
+        if raw_fallback:
+            projects = _normalize_projects(raw_fallback, None, county, generic_q, source_tier="fallback")
 
     if not projects:
         return []
 
-    # ── Rank by forklift relevance and recency ──────────────────────────────────
+    # ── Rank by geo match, forklift relevance, and recency ────────────────────
     now = datetime.utcnow()
 
-    def _sort_key(p: Dict[str, Any]) -> Tuple[int, int]:
-        score = p.get("forklift_score") or 3
+    def _sort_key(p: Dict[str, Any]) -> Tuple[int, int, int]:
+        geo = p.get("geo_match_score") or 0
+        score = p.get("forklift_score") or 0
         dt = p.get("raw_date")
         age_days = 9999
         if isinstance(dt, datetime):
             age_days = (now - dt).days
-        # Higher forklift_score first, then newer (smaller age_days)
-        return (score, -age_days)
+        # Sort: higher geo, higher forklift_score, newer (smaller age_days)
+        return (-geo, -score, age_days)
 
-    projects.sort(key=_sort_key, reverse=True)
+    projects.sort(key=_sort_key)
     return projects[:max_items]
 
 
@@ -624,6 +697,8 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         ptype = item.get("project_type") or "Industrial / commercial project"
         forklift_score = item.get("forklift_score")
         forklift_label = item.get("forklift_label") or ""
+        geo_score = item.get("geo_match_score") or 0
+        tier = item.get("source_tier") or "unknown"
 
         lines.append(f"{i}. {title} — {loc}")
 
@@ -632,6 +707,10 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             meta_bits.append(provider)
         if forklift_score:
             meta_bits.append(f"Forklift relevance {forklift_score}/5")
+        if geo_score:
+            meta_bits.append(f"Geo match {geo_score}/2")
+        if tier:
+            meta_bits.append(f"Source: {tier}")
         if stage:
             if year:
                 meta_bits.append(f"{stage} ({year})")
