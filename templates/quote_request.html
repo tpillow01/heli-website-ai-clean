@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+
+{% block title %}Quote Request | Heli AI{% endblock %}
+
+{% block content %}
+<div class="quote-request-page">
+  <h1 class="page-title">HELI Quote Request</h1>
+  <p class="page-intro">
+    Fill out every field below. Use <strong>"None"</strong> or <strong>"N/A"</strong> where something truly doesn’t apply.
+    When you submit, a formatted PDF will download automatically.
+  </p>
+
+  {# Flash error messages, if any #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-messages">
+        {% for category, message in messages %}
+          <div class="flash-message flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('quote_request') }}" class="quote-form">
+    <div class="quote-form-grid">
+
+      <!-- ── Customer Info ───────────────────────── -->
+      <div class="quote-form-section">
+        <h2>Customer Information</h2>
+
+        <div class="form-field">
+          <label for="customer_name">Customer Name</label>
+          <div class="field-hint">Company Name</div>
+          <input type="text" id="customer_name" name="customer_name" required>
+        </div>
+
+        <div class="form-field">
+          <label for="address">Address</label>
+          <div class="field-hint">Companies Address</div>
+          <input type="text" id="address" name="address" required>
+        </div>
+
+        <div class="form-field">
+          <label for="city_state_zip">City / State / Zip</label>
+          <input type="text" id="city_state_zip" name="city_state_zip" required>
+        </div>
+
+        <div class="form-field">
+          <label for="contact_name">Contact Name</label>
+          <input type="text" id="contact_name" name="contact_name" required>
+        </div>
+      </div>
+
+      <!-- ── Truck Spec ───────────────────────────── -->
+      <div class="quote-form-section">
+        <h2>Truck Specification</h2>
+
+        <div class="form-field">
+          <label for="model">Model</label>
+          <div class="field-hint">Please check stock list first</div>
+          <input type="text" id="model" name="model" required>
+        </div>
+
+        <div class="form-field">
+          <label for="fuel_type">Fuel</label>
+          <select id="fuel_type" name="fuel_type" required>
+            <option value="" disabled selected>Select fuel type</option>
+            {% for opt in fuel_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field" id="battery-voltage-group" style="display:none;">
+          <label for="battery_voltage">Battery Voltage</label>
+          <div class="field-hint">Enter voltage (e.g. 36V, 48V, 80V)</div>
+          <input type="text" id="battery_voltage" name="battery_voltage">
+        </div>
+
+        <div class="form-field">
+          <label for="mast_ohl_mfh">Mast OHL / MFH</label>
+          <div class="field-hint">Enter Maximum Fork Height</div>
+          <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh" required>
+        </div>
+
+        <div class="form-field">
+          <label for="mast_type">Mast Type</label>
+          <select id="mast_type" name="mast_type" required>
+            <option value="" disabled selected>Select mast type</option>
+            {% for opt in mast_type_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="attachment">Attachment</label>
+          <div class="field-hint">SS, SSFP, Bale Clamp etc... (type "None" if no attachment)</div>
+          <input type="text" id="attachment" name="attachment" required>
+        </div>
+
+        <div class="form-field">
+          <label for="aux_valve">Auxiliary Control Valve</label>
+          <div class="field-hint">Always at least 2. SS = 3, SSFP = 4. Adjust if needed.</div>
+          <input type="number" id="aux_valve" name="aux_valve" min="2" step="1" required>
+        </div>
+
+        <div class="form-field">
+          <label for="aux_hose">Auxiliary Hose Take Up</label>
+          <div class="field-hint">Matches the number from the Auxiliary Control Valve</div>
+          <input type="number" id="aux_hose" name="aux_hose" min="2" step="1" required>
+        </div>
+      </div>
+
+      <!-- ── Forks & Tires ────────────────────────── -->
+      <div class="quote-form-section">
+        <h2>Forks & Tires</h2>
+
+        <div class="form-field">
+          <label for="fork_type">Fork Type</label>
+          <div class="field-hint">Standard, Hinged Fork etc</div>
+          <input type="text" id="fork_type" name="fork_type" required>
+        </div>
+
+        <div class="form-field">
+          <label for="fork_length">Fork Length</label>
+          <div class="field-hint">42 in, 48 in etc</div>
+          <input type="text" id="fork_length" name="fork_length" required>
+        </div>
+
+        <div class="form-field">
+          <label for="tires">Tire</label>
+          <select id="tires" name="tires" required>
+            <option value="" disabled selected>Select tire type</option>
+            {% for opt in tire_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="tire_compound">Tire Compound</label>
+          <select id="tire_compound" name="tire_compound" required>
+            {% for opt in tire_compound_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- ── Options & Safety ──────────────────────── -->
+      <div class="quote-form-section">
+        <h2>Options & Safety</h2>
+
+        <div class="form-field">
+          <label for="seat_suspension">Seat Suspension</label>
+          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+          <input type="text" id="seat_suspension" name="seat_suspension" required>
+        </div>
+
+        <div class="form-field">
+          <label for="headlights">Headlights</label>
+          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+          <input type="text" id="headlights" name="headlights" required>
+        </div>
+
+        <div class="form-field">
+          <label for="back_up_alarm">Back Up Alarm</label>
+          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+          <input type="text" id="back_up_alarm" name="back_up_alarm" required>
+        </div>
+
+        <div class="form-field">
+          <label for="strobe">Strobe</label>
+          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+          <input type="text" id="strobe" name="strobe" required>
+        </div>
+
+        <div class="form-field">
+          <label for="rear_work_light">Rear Work Light</label>
+          <div class="field-hint">Additional charge if yes</div>
+          <select id="rear_work_light" name="rear_work_light" required>
+            {% for opt in yes_no_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="blue_light_front">Blue Light Front</label>
+          <div class="field-hint">Additional charge if yes</div>
+          <select id="blue_light_front" name="blue_light_front" required>
+            {% for opt in yes_no_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="blue_light_rear">Blue Light Rear</label>
+          <div class="field-hint">Additional charge if yes</div>
+          <select id="blue_light_rear" name="blue_light_rear" required>
+            {% for opt in yes_no_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="red_curtain_lights">Red Curtain Lights</label>
+          <div class="field-hint">Additional charge if yes</div>
+          <select id="red_curtain_lights" name="red_curtain_lights" required>
+            {% for opt in yes_no_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- ── Power & Local Options ──────────────────── -->
+      <div class="quote-form-section">
+        <h2>Power & Local Options</h2>
+
+        <div class="form-field" id="battery-group" style="display:none;">
+          <label for="battery">Battery</label>
+          <select id="battery" name="battery">
+            <option value="" disabled selected>Select battery type</option>
+            {% for opt in battery_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="charger">Charger</label>
+          <div class="field-hint">Standard if the truck is electric; "None" if not</div>
+          <input type="text" id="charger" name="charger" readonly required>
+        </div>
+
+        <div class="form-field">
+          <label for="local_options">Local Options</label>
+          <div class="field-hint">Paint, Fan, Computer Holder, Cup Holder etc (type "None" if no local options)</div>
+          <input type="text" id="local_options" name="local_options" required>
+        </div>
+
+        <div class="form-field">
+          <label for="expected_delivery">Expected Delivery</label>
+          <div class="field-hint">Use "-" if unknown</div>
+          <input type="text" id="expected_delivery" name="expected_delivery" value="-" required>
+        </div>
+      </div>
+
+      <!-- ── Lease & Notes ──────────────────────────── -->
+      <div class="quote-form-section">
+        <h2>Lease Details & Notes</h2>
+
+        <div class="form-field">
+          <label for="lease_type">Lease Type</label>
+          <select id="lease_type" name="lease_type" required>
+            <option value="" disabled selected>Select lease type</option>
+            {% for opt in lease_type_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="annual_hours">Annual Hours</label>
+          <div class="field-hint">Ask Customer how many hours they use a year</div>
+          <input type="text" id="annual_hours" name="annual_hours" required>
+        </div>
+
+        <div class="form-field">
+          <label for="lease_term">Lease Term (Months)</label>
+          <div class="field-hint">Ask customer how many months they would like to lease</div>
+          <input type="text" id="lease_term" name="lease_term" required>
+        </div>
+
+        <div class="form-field">
+          <label for="notes">Notes</label>
+          <div class="field-hint">Customer Special Requirements</div>
+          <textarea id="notes" name="notes" rows="4" required></textarea>
+        </div>
+
+        <div class="form-field">
+          <label for="salesperson_name">Salesperson Name</label>
+          <div class="field-hint">Your Name</div>
+          <input type="text" id="salesperson_name" name="salesperson_name" required>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Generate PDF Quote Request</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  (function () {
+    const fuelSelect = document.getElementById('fuel_type');
+    const batteryGroup = document.getElementById('battery-group');
+    const batteryVoltageGroup = document.getElementById('battery-voltage-group');
+    const batterySelect = document.getElementById('battery');
+    const batteryVoltageInput = document.getElementById('battery_voltage');
+    const chargerInput = document.getElementById('charger');
+    const attachmentInput = document.getElementById('attachment');
+    const auxValveInput = document.getElementById('aux_valve');
+    const auxHoseInput = document.getElementById('aux_hose');
+
+    function updateFuelDependentFields() {
+      const fuel = fuelSelect.value;
+
+      if (fuel === 'Electric') {
+        batteryGroup.style.display = 'block';
+        batteryVoltageGroup.style.display = 'block';
+        batterySelect.required = true;
+        batteryVoltageInput.required = true;
+        chargerInput.value = 'Standard';
+      } else if (fuel === 'LPG' || fuel === 'Diesel') {
+        batteryGroup.style.display = 'none';
+        batteryVoltageGroup.style.display = 'none';
+        batterySelect.required = false;
+        batteryVoltageInput.required = false;
+        batterySelect.value = '';
+        batteryVoltageInput.value = '';
+        chargerInput.value = 'None';
+      } else {
+        chargerInput.value = '';
+      }
+    }
+
+    function updateAuxFromAttachment() {
+      const text = (attachmentInput.value || '').toLowerCase();
+      let valves = 2;
+
+      if (text.includes('ssfp')) {
+        valves = 4;
+      } else if (text.includes('ss')) {
+        valves = 3;
+      }
+
+      // If we see "clamp" and no SS/SSFP, assume one extra function
+      if (text.includes('clamp') && valves === 2) {
+        valves = 3;
+      }
+
+      auxValveInput.value = valves;
+      auxHoseInput.value = valves;
+    }
+
+    function keepHoseInSync() {
+      auxHoseInput.value = auxValveInput.value;
+    }
+
+    fuelSelect.addEventListener('change', updateFuelDependentFields);
+    attachmentInput.addEventListener('blur', updateAuxFromAttachment);
+    attachmentInput.addEventListener('change', updateAuxFromAttachment);
+    auxValveInput.addEventListener('input', keepHoseInSync);
+
+    // Initialize defaults on page load
+    updateFuelDependentFields();
+  })();
+</script>
+
+<style>
+  .quote-request-page {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .page-title {
+    margin-bottom: 0.25rem;
+  }
+  .page-intro {
+    margin-bottom: 1.5rem;
+    opacity: 0.9;
+  }
+
+  .flash-messages {
+    margin-bottom: 1rem;
+  }
+  .flash-message {
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
+  }
+  .flash-error {
+    background: #5b1111;
+    color: #fff;
+  }
+
+  .quote-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .quote-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.5rem;
+  }
+  .quote-form-section h2 {
+    margin-bottom: 0.75rem;
+    font-size: 1.05rem;
+  }
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0.75rem;
+  }
+  .form-field label {
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+  }
+  .field-hint {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    margin-bottom: 0.3rem;
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #555;
+    background: #111;
+    color: #eee;
+  }
+  .form-field textarea {
+    resize: vertical;
+  }
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .btn-primary {
+    padding: 0.6rem 1.4rem;
+    border-radius: 4px;
+    border: none;
+    background: #cc0000;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-primary:hover {
+    filter: brightness(1.1);
+  }
+
+  @media (max-width: 768px) {
+    .quote-request-page {
+      padding: 0 0.5rem;
+    }
+  }
+</style>
+{% endblock %}
