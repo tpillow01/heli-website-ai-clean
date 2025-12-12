@@ -1,457 +1,661 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>HELI Quote Request</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+        /* Form-specific layout that sits inside your existing theme */
 
-{% block title %}Quote Request | Heli AI{% endblock %}
+        .qr-page {
+            min-height: 100vh;
+            background: var(--app-bg, #f5ebdb);
+            display: flex;
+            flex-direction: column;
+        }
 
-{% block content %}
-<div class="quote-request-page">
-  <h1 class="page-title">HELI Quote Request</h1>
-  <p class="page-intro">
-    Fill out every field below. Use <strong>"None"</strong> or <strong>"N/A"</strong> where something truly doesn’t apply.
-    When you submit, a formatted PDF will download automatically.
-  </p>
+        .qr-main {
+            max-width: 1100px;
+            margin: 32px auto 40px;
+            padding: 24px;
+            background: rgba(0, 0, 0, 0.72);
+            border-radius: 16px;
+            box-shadow: 0 0 32px rgba(0,0,0,0.5);
+        }
 
-  {# Flash error messages, if any #}
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      <div class="flash-messages">
-        {% for category, message in messages %}
-          <div class="flash-message flash-{{ category }}">{{ message }}</div>
-        {% endfor %}
-      </div>
-    {% endif %}
-  {% endwith %}
+        .qr-title {
+            font-size: 1.8rem;
+            margin-bottom: 6px;
+            color: #ffffff;
+            text-align: center;
+        }
 
-  <form method="post" action="{{ url_for('quote_request') }}" class="quote-form">
-    <div class="quote-form-grid">
+        .qr-subtitle {
+            font-size: 0.95rem;
+            color: #dddddd;
+            margin-bottom: 20px;
+            text-align: center;
+        }
 
-      <!-- ── Customer Info ───────────────────────── -->
-      <div class="quote-form-section">
-        <h2>Customer Information</h2>
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px 24px;
+        }
 
-        <div class="form-field">
-          <label for="customer_name">Customer Name</label>
-          <div class="field-hint">Company Name</div>
-          <input type="text" id="customer_name" name="customer_name" required>
+        .qr-field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .qr-label {
+            font-size: 0.85rem;
+            color: #f5f0e8;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .qr-hint {
+            font-size: 0.75rem;
+            color: #aaa093;
+            margin-bottom: 4px;
+        }
+
+        .qr-input,
+        .qr-select,
+        .qr-textarea {
+            background: #1c1511;
+            border: 1px solid #4b4035;
+            border-radius: 8px;
+            padding: 8px 10px;
+            color: #f5f0e8;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+
+        .qr-input::placeholder,
+        .qr-textarea::placeholder {
+            color: #8e8072;
+        }
+
+        .qr-input:focus,
+        .qr-select:focus,
+        .qr-textarea:focus {
+            outline: none;
+            border-color: #b02a27;
+            box-shadow: 0 0 0 1px #b02a27;
+        }
+
+        .qr-textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .qr-section-title {
+            margin-top: 24px;
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+            color: #fff7ec;
+            border-bottom: 1px solid #3a3027;
+            padding-bottom: 4px;
+        }
+
+        .qr-actions {
+            margin-top: 28px;
+            text-align: center;
+        }
+
+        .qr-submit-btn {
+            background: #b02a27;
+            border: none;
+            border-radius: 999px;
+            color: #ffffff;
+            font-size: 1rem;
+            padding: 10px 32px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .qr-submit-btn:hover {
+            background: #d33430;
+        }
+
+        .qr-errors {
+            margin-bottom: 16px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: #4b1414;
+            color: #ffe2e2;
+            font-size: 0.9rem;
+        }
+
+        .qr-errors ul {
+            margin: 4px 0 0;
+            padding-left: 18px;
+        }
+
+        @media (max-width: 600px) {
+            .qr-main {
+                margin: 16px;
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body class="qr-page">
+
+    <!-- Top nav bar – mirror your Chat / Map / Battle Cards bar -->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <button class="menu-button" id="menuToggle">
+                &#9776;
+            </button>
+            <nav class="top-nav">
+                <a href="{{ url_for('home') }}" class="nav-link">Chat</a>
+                <a href="{{ url_for('map') }}" class="nav-link">Map</a>
+                <a href="{{ url_for('battlecards') }}" class="nav-link">Battle Cards</a>
+                <a href="{{ url_for('quote_request') }}" class="nav-link active">Quote Request</a>
+                <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+            </nav>
         </div>
-
-        <div class="form-field">
-          <label for="address">Address</label>
-          <div class="field-hint">Companies Address</div>
-          <input type="text" id="address" name="address" required>
+        <div class="top-bar-right">
+            <div class="mode-toggle">
+                <span class="mode-label">Mode</span>
+                <button class="mode-pill" type="button">
+                    Quote Request
+                </button>
+            </div>
         </div>
+    </header>
 
-        <div class="form-field">
-          <label for="city_state_zip">City / State / Zip</label>
-          <input type="text" id="city_state_zip" name="city_state_zip" required>
-        </div>
+    <main class="qr-main">
+        <h1 class="qr-title">HELI Quote Request</h1>
+        <p class="qr-subtitle">
+            Please complete all fields. When submitted, this form will generate a clean PDF for your sales request.
+        </p>
 
-        <div class="form-field">
-          <label for="contact_name">Contact Name</label>
-          <input type="text" id="contact_name" name="contact_name" required>
-        </div>
-      </div>
+        {# Flash error messages from server-side validation #}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="qr-errors">
+              <strong>There were some issues with your submission:</strong>
+              <ul>
+              {% for category, msg in messages %}
+                {% if category == "error" %}
+                  <li>{{ msg }}</li>
+                {% endif %}
+              {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        {% endwith %}
 
-      <!-- ── Truck Spec ───────────────────────────── -->
-      <div class="quote-form-section">
-        <h2>Truck Specification</h2>
+        <form method="POST" action="{{ url_for('quote_request') }}">
+            <!-- Customer Info -->
+            <div class="qr-section-title">Customer Information</div>
+            <div class="qr-grid">
+                <div class="qr-field">
+                    <label class="qr-label" for="customer_name">Customer Name</label>
+                    <div class="qr-hint">Company Name</div>
+                    <input
+                        id="customer_name"
+                        name="customer_name"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Company Name"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="model">Model</label>
-          <div class="field-hint">Please check stock list first</div>
-          <input type="text" id="model" name="model" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="address">Address</label>
+                    <div class="qr-hint">Companies Address</div>
+                    <input
+                        id="address"
+                        name="address"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Street address"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="fuel_type">Fuel</label>
-          <select id="fuel_type" name="fuel_type" required>
-            <option value="" disabled selected>Select fuel type</option>
-            {% for opt in fuel_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="city_state_zip">City / State / Zip</label>
+                    <div class="qr-hint">City, State, Zip</div>
+                    <input
+                        id="city_state_zip"
+                        name="city_state_zip"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Indianapolis, IN 46204"
+                        required
+                    />
+                </div>
 
-        <div class="form-field" id="battery-voltage-group" style="display:none;">
-          <label for="battery_voltage">Battery Voltage</label>
-          <div class="field-hint">Enter voltage (e.g. 36V, 48V, 80V)</div>
-          <input type="text" id="battery_voltage" name="battery_voltage">
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="contact_name">Contact Name</label>
+                    <div class="qr-hint">Customer contact person</div>
+                    <input
+                        id="contact_name"
+                        name="contact_name"
+                        type="text"
+                        class="qr-input"
+                        placeholder="John Smith"
+                        required
+                    />
+                </div>
+            </div>
 
-        <div class="form-field">
-          <label for="mast_ohl_mfh">Mast OHL / MFH</label>
-          <div class="field-hint">Enter Maximum Fork Height</div>
-          <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh" required>
-        </div>
+            <!-- Truck Spec -->
+            <div class="qr-section-title">Truck Specification</div>
+            <div class="qr-grid">
+                <div class="qr-field">
+                    <label class="qr-label" for="model">Model</label>
+                    <div class="qr-hint">Please check stock list first</div>
+                    <input
+                        id="model"
+                        name="model"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Please check stock list first"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="mast_type">Mast Type</label>
-          <select id="mast_type" name="mast_type" required>
-            <option value="" disabled selected>Select mast type</option>
-            {% for opt in mast_type_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="fuel_type">Fuel</label>
+                    <div class="qr-hint">LPG, Diesel, Electric</div>
+                    <select id="fuel_type" name="fuel_type" class="qr-select" required>
+                        <option value="" disabled selected>Select fuel type</option>
+                        {% for option in fuel_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <div class="form-field">
-          <label for="attachment">Attachment</label>
-          <div class="field-hint">SS, SSFP, Bale Clamp etc... (type "None" if no attachment)</div>
-          <input type="text" id="attachment" name="attachment" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="battery_voltage">Battery Voltage</label>
+                    <div class="qr-hint">Required if Electric</div>
+                    <input
+                        id="battery_voltage"
+                        name="battery_voltage"
+                        type="text"
+                        class="qr-input"
+                        placeholder="e.g. 36V, 48V"
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="aux_valve">Auxiliary Control Valve</label>
-          <div class="field-hint">Always at least 2. SS = 3, SSFP = 4. Adjust if needed.</div>
-          <input type="number" id="aux_valve" name="aux_valve" min="2" step="1" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="mast_ohl_mfh">Mast OHL / MFH</label>
+                    <div class="qr-hint">Enter Maximum Fork Height</div>
+                    <input
+                        id="mast_ohl_mfh"
+                        name="mast_ohl_mfh"
+                        type="text"
+                        class="qr-input"
+                        placeholder="e.g. 188&quot; MFH"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="aux_hose">Auxiliary Hose Take Up</label>
-          <div class="field-hint">Matches the number from the Auxiliary Control Valve</div>
-          <input type="number" id="aux_hose" name="aux_hose" min="2" step="1" required>
-        </div>
-      </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="mast_type">Mast Type</label>
+                    <div class="qr-hint">Simplex, Duplex, Three Stage, Quad Stage</div>
+                    <select id="mast_type" name="mast_type" class="qr-select" required>
+                        <option value="" disabled selected>Select mast type</option>
+                        {% for option in mast_type_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-      <!-- ── Forks & Tires ────────────────────────── -->
-      <div class="quote-form-section">
-        <h2>Forks & Tires</h2>
+                <div class="qr-field">
+                    <label class="qr-label" for="attachment">Attachment</label>
+                    <div class="qr-hint">SS, SSFP, Bale Clamp etc... (type "None" if not needed)</div>
+                    <input
+                        id="attachment"
+                        name="attachment"
+                        type="text"
+                        class="qr-input"
+                        placeholder="SS, SSFP, Bale Clamp etc..."
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="fork_type">Fork Type</label>
-          <div class="field-hint">Standard, Hinged Fork etc</div>
-          <input type="text" id="fork_type" name="fork_type" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="aux_valve">Auxiliary Control Valve</label>
+                    <div class="qr-hint">
+                        There will always be 2. For every attachment added, this bumps up (e.g. SS = 3, SSFP = 4).
+                    </div>
+                    <input
+                        id="aux_valve"
+                        name="aux_valve"
+                        type="text"
+                        class="qr-input"
+                        placeholder="e.g. 2, 3, 4"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="fork_length">Fork Length</label>
-          <div class="field-hint">42 in, 48 in etc</div>
-          <input type="text" id="fork_length" name="fork_length" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="aux_hose">Auxiliary Hose Take Up</label>
+                    <div class="qr-hint">Matches the number from the auxiliary control valve</div>
+                    <input
+                        id="aux_hose"
+                        name="aux_hose"
+                        type="text"
+                        class="qr-input"
+                        placeholder="e.g. 2, 3, 4"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="tires">Tire</label>
-          <select id="tires" name="tires" required>
-            <option value="" disabled selected>Select tire type</option>
-            {% for opt in tire_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="fork_type">Fork Type</label>
+                    <div class="qr-hint">Standard, Hinged Fork etc.</div>
+                    <input
+                        id="fork_type"
+                        name="fork_type"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Standard, Hinged Fork etc."
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="tire_compound">Tire Compound</label>
-          <select id="tire_compound" name="tire_compound" required>
-            {% for opt in tire_compound_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="fork_length">Fork Length</label>
+                    <div class="qr-hint">42 in, 48 in etc.</div>
+                    <input
+                        id="fork_length"
+                        name="fork_length"
+                        type="text"
+                        class="qr-input"
+                        placeholder="42 in, 48 in etc."
+                        required
+                    />
+                </div>
 
-      <!-- ── Options & Safety ──────────────────────── -->
-      <div class="quote-form-section">
-        <h2>Options & Safety</h2>
+                <div class="qr-field">
+                    <label class="qr-label" for="tires">Tire</label>
+                    <div class="qr-hint">Select tire style</div>
+                    <select id="tires" name="tires" class="qr-select" required>
+                        <option value="" disabled selected>Select tire</option>
+                        {% for option in tire_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <div class="form-field">
-          <label for="seat_suspension">Seat Suspension</label>
-          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-          <input type="text" id="seat_suspension" name="seat_suspension" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="tire_compound">Tire Compound</label>
+                    <div class="qr-hint">Non-marking or Standard</div>
+                    <select id="tire_compound" name="tire_compound" class="qr-select" required>
+                        <option value="" disabled selected>Select tire compound</option>
+                        {% for option in tire_compound_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
 
-        <div class="form-field">
-          <label for="headlights">Headlights</label>
-          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-          <input type="text" id="headlights" name="headlights" required>
-        </div>
+            <!-- Standard Options -->
+            <div class="qr-section-title">Standard Equipment</div>
+            <div class="qr-grid">
+                <div class="qr-field">
+                    <label class="qr-label" for="seat_suspension">Seat Suspension</label>
+                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+                    <input
+                        id="seat_suspension"
+                        name="seat_suspension"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Yes / No"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="back_up_alarm">Back Up Alarm</label>
-          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-          <input type="text" id="back_up_alarm" name="back_up_alarm" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="headlights">Headlights</label>
+                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+                    <input
+                        id="headlights"
+                        name="headlights"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Yes / No"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="strobe">Strobe</label>
-          <div class="field-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-          <input type="text" id="strobe" name="strobe" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="back_up_alarm">Backup Alarm</label>
+                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+                    <input
+                        id="back_up_alarm"
+                        name="back_up_alarm"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Yes / No"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="rear_work_light">Rear Work Light</label>
-          <div class="field-hint">Additional charge if yes</div>
-          <select id="rear_work_light" name="rear_work_light" required>
-            {% for opt in yes_no_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="strobe">Strobe</label>
+                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+                    <input
+                        id="strobe"
+                        name="strobe"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Yes / No"
+                        required
+                    />
+                </div>
+            </div>
 
-        <div class="form-field">
-          <label for="blue_light_front">Blue Light Front</label>
-          <div class="field-hint">Additional charge if yes</div>
-          <select id="blue_light_front" name="blue_light_front" required>
-            {% for opt in yes_no_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+            <!-- Lighting / Safety Options -->
+            <div class="qr-section-title">Lighting & Safety Options</div>
+            <div class="qr-grid">
+                <div class="qr-field">
+                    <label class="qr-label" for="rear_work_light">Rear Work Light</label>
+                    <div class="qr-hint">Additional charge if yes</div>
+                    <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
+                        <option value="" disabled selected>Select</option>
+                        {% for option in yes_no_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <div class="form-field">
-          <label for="blue_light_rear">Blue Light Rear</label>
-          <div class="field-hint">Additional charge if yes</div>
-          <select id="blue_light_rear" name="blue_light_rear" required>
-            {% for opt in yes_no_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="blue_light_front">Blue Light Front</label>
+                    <div class="qr-hint">Additional charge if yes</div>
+                    <select id="blue_light_front" name="blue_light_front" class="qr-select" required>
+                        <option value="" disabled selected>Select</option>
+                        {% for option in yes_no_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <div class="form-field">
-          <label for="red_curtain_lights">Red Curtain Lights</label>
-          <div class="field-hint">Additional charge if yes</div>
-          <select id="red_curtain_lights" name="red_curtain_lights" required>
-            {% for opt in yes_no_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="blue_light_rear">Blue Light Rear</label>
+                    <div class="qr-hint">Additional charge if yes</div>
+                    <select id="blue_light_rear" name="blue_light_rear" class="qr-select" required>
+                        <option value="" disabled selected>Select</option>
+                        {% for option in yes_no_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-      <!-- ── Power & Local Options ──────────────────── -->
-      <div class="quote-form-section">
-        <h2>Power & Local Options</h2>
+                <div class="qr-field">
+                    <label class="qr-label" for="red_curtain_lights">Red Curtain Lights</label>
+                    <div class="qr-hint">Additional charge if yes</div>
+                    <select id="red_curtain_lights" name="red_curtain_lights" class="qr-select" required>
+                        <option value="" disabled selected>Select</option>
+                        {% for option in yes_no_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
 
-        <div class="form-field" id="battery-group" style="display:none;">
-          <label for="battery">Battery</label>
-          <select id="battery" name="battery">
-            <option value="" disabled selected>Select battery type</option>
-            {% for opt in battery_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+            <!-- Battery / Charger / Local options -->
+            <div class="qr-section-title">Power & Local Options</div>
+            <div class="qr-grid">
+                <div class="qr-field">
+                    <label class="qr-label" for="battery">Battery</label>
+                    <div class="qr-hint">Lithium or Lead Acid</div>
+                    <select id="battery" name="battery" class="qr-select">
+                        <option value="" disabled selected>Select battery</option>
+                        {% for option in battery_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <div class="form-field">
-          <label for="charger">Charger</label>
-          <div class="field-hint">Standard if the truck is electric; "None" if not</div>
-          <input type="text" id="charger" name="charger" readonly required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="charger">Charger</label>
+                    <div class="qr-hint">
+                        Standard if the truck is electric; if not, set to "None".
+                    </div>
+                    <input
+                        id="charger"
+                        name="charger"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Standard / None"
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="local_options">Local Options</label>
-          <div class="field-hint">Paint, Fan, Computer Holder, Cup Holder etc (type "None" if no local options)</div>
-          <input type="text" id="local_options" name="local_options" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="local_options">Location Options</label>
+                    <div class="qr-hint">Paint, Fan, Computer Holder, Cup Holder etc. (type "None" if not needed)</div>
+                    <input
+                        id="local_options"
+                        name="local_options"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Paint, Fan, Computer Holder, Cup Holder etc."
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="expected_delivery">Expected Delivery</label>
-          <div class="field-hint">Use "-" if unknown</div>
-          <input type="text" id="expected_delivery" name="expected_delivery" value="-" required>
-        </div>
-      </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="expected_delivery">Expected Delivery</label>
+                    <div class="qr-hint">Use a "-" if unknown</div>
+                    <input
+                        id="expected_delivery"
+                        name="expected_delivery"
+                        type="text"
+                        class="qr-input"
+                        placeholder="-"
+                        value="-"
+                    />
+                </div>
+            </div>
 
-      <!-- ── Lease & Notes ──────────────────────────── -->
-      <div class="quote-form-section">
-        <h2>Lease Details & Notes</h2>
+            <!-- Lease & Notes -->
+            <div class="qr-section-title">Lease Details & Notes</div>
+            <div class="qr-grid">
+                <div class="qr-field">
+                    <label class="qr-label" for="lease_type">Lease Type</label>
+                    <div class="qr-hint">FMV or FPO</div>
+                    <select id="lease_type" name="lease_type" class="qr-select" required>
+                        <option value="" disabled selected>Select lease type</option>
+                        {% for option in lease_type_options %}
+                            <option value="{{ option }}">{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <div class="form-field">
-          <label for="lease_type">Lease Type</label>
-          <select id="lease_type" name="lease_type" required>
-            <option value="" disabled selected>Select lease type</option>
-            {% for opt in lease_type_options %}
-              <option value="{{ opt }}">{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="annual_hours">Annual Hours</label>
+                    <div class="qr-hint">Ask customer how many hours they use a year</div>
+                    <input
+                        id="annual_hours"
+                        name="annual_hours"
+                        type="text"
+                        class="qr-input"
+                        placeholder="e.g. 2,000"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="annual_hours">Annual Hours</label>
-          <div class="field-hint">Ask Customer how many hours they use a year</div>
-          <input type="text" id="annual_hours" name="annual_hours" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="lease_term">Lease Term (Months)</label>
+                    <div class="qr-hint">Ask customer how many months they would like to lease</div>
+                    <input
+                        id="lease_term"
+                        name="lease_term"
+                        type="text"
+                        class="qr-input"
+                        placeholder="e.g. 36, 48, 60"
+                        required
+                    />
+                </div>
 
-        <div class="form-field">
-          <label for="lease_term">Lease Term (Months)</label>
-          <div class="field-hint">Ask customer how many months they would like to lease</div>
-          <input type="text" id="lease_term" name="lease_term" required>
-        </div>
+                <div class="qr-field">
+                    <label class="qr-label" for="salesperson_name">Salesperson Name</label>
+                    <div class="qr-hint">Your Name</div>
+                    <input
+                        id="salesperson_name"
+                        name="salesperson_name"
+                        type="text"
+                        class="qr-input"
+                        placeholder="Your Name"
+                        required
+                    />
+                </div>
+            </div>
 
-        <div class="form-field">
-          <label for="notes">Notes</label>
-          <div class="field-hint">Customer Special Requirements</div>
-          <textarea id="notes" name="notes" rows="4" required></textarea>
-        </div>
+            <div class="qr-field" style="margin-top:16px;">
+                <label class="qr-label" for="notes">Notes</label>
+                <div class="qr-hint">Customer Special Requirements</div>
+                <textarea
+                    id="notes"
+                    name="notes"
+                    class="qr-textarea"
+                    placeholder="Customer Special Requirements"
+                    required
+                ></textarea>
+            </div>
 
-        <div class="form-field">
-          <label for="salesperson_name">Salesperson Name</label>
-          <div class="field-hint">Your Name</div>
-          <input type="text" id="salesperson_name" name="salesperson_name" required>
-        </div>
-      </div>
+            <div class="qr-actions">
+                <button type="submit" class="qr-submit-btn">
+                    Generate Quote Request PDF
+                </button>
+            </div>
+        </form>
+    </main>
 
-    </div>
+    <script>
+        // Require battery voltage & battery type when Electric is chosen
+        const fuelSelect = document.getElementById('fuel_type');
+        const battVoltageInput = document.getElementById('battery_voltage');
+        const batterySelect = document.getElementById('battery');
 
-    <div class="form-actions">
-      <button type="submit" class="btn-primary">Generate PDF Quote Request</button>
-    </div>
-  </form>
-</div>
+        function handleFuelChange() {
+            if (!fuelSelect) return;
+            const val = fuelSelect.value;
+            if (val === 'Electric') {
+                if (battVoltageInput) battVoltageInput.required = true;
+                if (batterySelect) batterySelect.required = true;
+            } else {
+                if (battVoltageInput) battVoltageInput.required = false;
+                if (batterySelect) batterySelect.required = false;
+            }
+        }
 
-<script>
-  (function () {
-    const fuelSelect = document.getElementById('fuel_type');
-    const batteryGroup = document.getElementById('battery-group');
-    const batteryVoltageGroup = document.getElementById('battery-voltage-group');
-    const batterySelect = document.getElementById('battery');
-    const batteryVoltageInput = document.getElementById('battery_voltage');
-    const chargerInput = document.getElementById('charger');
-    const attachmentInput = document.getElementById('attachment');
-    const auxValveInput = document.getElementById('aux_valve');
-    const auxHoseInput = document.getElementById('aux_hose');
+        if (fuelSelect) {
+            fuelSelect.addEventListener('change', handleFuelChange);
+            handleFuelChange();
+        }
+    </script>
 
-    function updateFuelDependentFields() {
-      const fuel = fuelSelect.value;
-
-      if (fuel === 'Electric') {
-        batteryGroup.style.display = 'block';
-        batteryVoltageGroup.style.display = 'block';
-        batterySelect.required = true;
-        batteryVoltageInput.required = true;
-        chargerInput.value = 'Standard';
-      } else if (fuel === 'LPG' || fuel === 'Diesel') {
-        batteryGroup.style.display = 'none';
-        batteryVoltageGroup.style.display = 'none';
-        batterySelect.required = false;
-        batteryVoltageInput.required = false;
-        batterySelect.value = '';
-        batteryVoltageInput.value = '';
-        chargerInput.value = 'None';
-      } else {
-        chargerInput.value = '';
-      }
-    }
-
-    function updateAuxFromAttachment() {
-      const text = (attachmentInput.value || '').toLowerCase();
-      let valves = 2;
-
-      if (text.includes('ssfp')) {
-        valves = 4;
-      } else if (text.includes('ss')) {
-        valves = 3;
-      }
-
-      // If we see "clamp" and no SS/SSFP, assume one extra function
-      if (text.includes('clamp') && valves === 2) {
-        valves = 3;
-      }
-
-      auxValveInput.value = valves;
-      auxHoseInput.value = valves;
-    }
-
-    function keepHoseInSync() {
-      auxHoseInput.value = auxValveInput.value;
-    }
-
-    fuelSelect.addEventListener('change', updateFuelDependentFields);
-    attachmentInput.addEventListener('blur', updateAuxFromAttachment);
-    attachmentInput.addEventListener('change', updateAuxFromAttachment);
-    auxValveInput.addEventListener('input', keepHoseInSync);
-
-    // Initialize defaults on page load
-    updateFuelDependentFields();
-  })();
-</script>
-
-<style>
-  .quote-request-page {
-    max-width: 1100px;
-    margin: 0 auto;
-  }
-  .page-title {
-    margin-bottom: 0.25rem;
-  }
-  .page-intro {
-    margin-bottom: 1.5rem;
-    opacity: 0.9;
-  }
-
-  .flash-messages {
-    margin-bottom: 1rem;
-  }
-  .flash-message {
-    padding: 0.5rem 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 0.25rem;
-    font-size: 0.9rem;
-  }
-  .flash-error {
-    background: #5b1111;
-    color: #fff;
-  }
-
-  .quote-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-  }
-  .quote-form-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 1.5rem;
-  }
-  .quote-form-section h2 {
-    margin-bottom: 0.75rem;
-    font-size: 1.05rem;
-  }
-  .form-field {
-    display: flex;
-    flex-direction: column;
-    margin-bottom: 0.75rem;
-  }
-  .form-field label {
-    font-weight: 600;
-    margin-bottom: 0.15rem;
-  }
-  .field-hint {
-    font-size: 0.8rem;
-    opacity: 0.7;
-    margin-bottom: 0.3rem;
-  }
-  .form-field input,
-  .form-field select,
-  .form-field textarea {
-    padding: 0.4rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid #555;
-    background: #111;
-    color: #eee;
-  }
-  .form-field textarea {
-    resize: vertical;
-  }
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-  .btn-primary {
-    padding: 0.6rem 1.4rem;
-    border-radius: 4px;
-    border: none;
-    background: #cc0000;
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .btn-primary:hover {
-    filter: brightness(1.1);
-  }
-
-  @media (max-width: 768px) {
-    .quote-request-page {
-      padding: 0 0.5rem;
-    }
-  }
-</style>
-{% endblock %}
+</body>
+</html>
