@@ -151,13 +151,13 @@
         <button class="menu-button" id="menuToggle">
             &#9776;
         </button>
-        <nav class="top-nav">
-            <a href="{{ url_for('home') }}" class="nav-link">Chat</a>
-            <a href="{{ url_for('map_page') }}" class="nav-link">Map</a>
-            <a href="{{ url_for('battlecards') }}" class="nav-link">Battle Cards</a>
-            <a href="{{ url_for('quote_request') }}" class="nav-link active">Quote Request</a>
-            <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
-        </nav>
+<nav class="top-nav">
+    <a href="{{ url_for('home') }}" class="nav-link">Chat</a>
+    <a href="{{ url_for('map_page') }}" class="nav-link">Map</a>
+    <a href="{{ url_for('battlecards_index') }}" class="nav-link">Battle Cards</a>
+    <a href="{{ url_for('quote_request') }}" class="nav-link active">Quote Request</a>
+    <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+</nav>
     </div>
     <div class="top-bar-right">
         <div class="mode-toggle">
