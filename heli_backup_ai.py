@@ -3349,23 +3349,18 @@ def quote_request():
             if not value:
                 errors.append(f"{label} is required.")
 
-              # Electric-specific rules
+        # Electric-specific rules (with "None" support for other fuels)
         if fuel_type == "Electric":
-            # Battery must NOT be "None" for electric
             if not battery or battery == "None":
                 errors.append("A battery (Lithium or Lead Acid) is required for Electric trucks.")
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
-            # Force charger logic for electric
             charger = "Standard"
         else:
-            # Non-electric: charger should default to None
             if not charger:
                 charger = "None"
-            # For LPG/Diesel, battery is optional; default to "None"
             if not battery:
                 battery = "None"
-            # Voltage is irrelevant; just clean it up for the PDF
             if not battery_voltage:
                 battery_voltage = "-"
 
@@ -3380,7 +3375,7 @@ def quote_request():
 
         # Combine fuel + voltage for the PDF row
         fuel_voltage = fuel_type
-        if battery_voltage and battery_voltage != "N/A":
+        if battery_voltage and battery_voltage != "-":
             fuel_voltage = f"{fuel_type} / {battery_voltage}"
 
         # ── Build data for the PDF ───────────────────────
@@ -3419,11 +3414,24 @@ def quote_request():
             "salesperson_name": salesperson_name,
         }
 
+        # Build the PDF bytes
         pdf_bytes = build_quote_request_pdf(form_data)
 
+        # Nice readable filename
         safe_customer = customer_name.replace(" ", "_") or "customer"
         filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
+        # OPTIONAL: also save a copy on the server
+        # (comment this block out if you don’t want server copies)
+        try:
+            save_dir = os.path.join("quote_requests")
+            os.makedirs(save_dir, exist_ok=True)
+            with open(os.path.join(save_dir, filename), "wb") as f:
+                f.write(pdf_bytes)
+        except Exception as e:
+            app.logger.error(f"Failed to save quote request PDF: {e}")
+
+        # Return PDF to the browser as a download
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",

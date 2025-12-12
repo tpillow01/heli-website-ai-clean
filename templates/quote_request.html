@@ -12,7 +12,7 @@
 <body class="quote-request-page">
 <div class="app-shell">
 
-    <!-- Top header + nav (matches other tabs) -->
+    <!-- Top header (uses same structure as other pages so style stays consistent) -->
     <header class="top-header">
         <div class="header-left">
             <div class="app-title">Tynan Equipment AI</div>
@@ -47,6 +47,18 @@
                 <!-- Scrollable container so entire form is reachable -->
                 <div class="quote-request-scroll"
                      style="max-height: calc(100vh - 140px); overflow-y: auto; padding-right: 8px;">
+
+                    <!-- LOCAL NAV: gives you return options right on this page -->
+                    <nav class="tabs" style="margin-bottom: 1.5rem;">
+                        <a href="{{ url_for('home') }}" class="tab">Chat</a>
+                        <a href="{{ url_for('map_page') }}" class="tab">Map</a>
+                        <a href="/battlecards"
+                           class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
+                            Battle Cards
+                        </a>
+                        <a href="{{ url_for('quote_request') }}" class="tab active">Quote Request</a>
+                        <a href="{{ url_for('logout') }}" class="tab">Logout</a>
+                    </nav>
 
                     <h1 class="quote-request-title">HELI Quote Request</h1>
                     <p class="quote-request-subtitle">
