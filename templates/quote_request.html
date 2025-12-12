@@ -48,6 +48,17 @@
                     Fill out every field below to generate a clean PDF for the quoting team.
                 </p>
 
+                <!-- Flash messages for validation errors (if any) -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                  {% if messages %}
+                    <div class="flash-container">
+                      {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                {% endwith %}
+
                 <form method="post" action="{{ url_for('quote_request') }}" class="quote-request-form" novalidate>
                     <div class="quote-request-grid">
 
@@ -75,7 +86,7 @@
 
                         <div class="qr-group">
                             <label for="contact_name">Contact Name</label>
-                            <div class="qr-hint">First and Last Name</div>
+                            <div class="qr-hint">First &amp; Last Name of primary contact</div>
                             <input type="text" id="contact_name" name="contact_name"
                                    class="qr-input" required />
                         </div>
@@ -115,7 +126,7 @@
 
                         <div class="qr-group">
                             <label for="mast_type">Mast Type</label>
-                            <div class="qr-hint">Simplex, Duplex, Three Stage, or Quad Stage</div>
+                            <div class="qr-hint">Simplex, Duplex, Triplex, or Quad</div>
                             <select id="mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
                                 {% for option in mast_type_options %}
@@ -133,23 +144,21 @@
 
                         <div class="qr-group">
                             <label for="aux_valve">Auxiliary Control Valve</label>
-                            <div class="qr-hint">Base is 2; bump up by attachment (SS = 3, SSFP = 4, etc.)</div>
                             <select id="aux_valve" name="aux_valve" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
+                                {% for option in aux_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
                             </select>
                         </div>
 
                         <div class="qr-group">
                             <label for="aux_hose">Auxiliary Hose Take Up</label>
-                            <div class="qr-hint">Matches number from Auxiliary Control Valve</div>
                             <select id="aux_hose" name="aux_hose" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
+                                {% for option in aux_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
                             </select>
                         </div>
 
@@ -178,10 +187,9 @@
                             </select>
                         </div>
 
-                        <!-- Seat / lights (now Yes/No dropdowns) -->
+                        <!-- Seat / lights -->
                         <div class="qr-group">
                             <label for="seat_suspension">Seat Suspension</label>
-                            <div class="qr-hint">Additional charge may apply for higher capacities</div>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -191,8 +199,7 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="headlights">Work Lights</label>
-                            <div class="qr-hint">Stock up to 10,000 lbs; may be extra above that</div>
+                            <label for="headlights">Front Work Lights</label>
                             <select id="headlights" name="headlights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -203,7 +210,6 @@
 
                         <div class="qr-group">
                             <label for="back_up_alarm">Backup Alarm</label>
-                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="back_up_alarm" name="back_up_alarm" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -213,8 +219,7 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="strobe">Strobe Light</label>
-                            <div class="qr-hint">Additional charge if yes</div>
+                            <label for="strobe">Strobe</label>
                             <select id="strobe" name="strobe" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -223,10 +228,9 @@
                             </select>
                         </div>
 
-                        <!-- Yes/No lights -->
+                        <!-- Yes/No safety lights -->
                         <div class="qr-group">
                             <label for="rear_work_light">Rear Work Light</label>
-                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -237,7 +241,6 @@
 
                         <div class="qr-group">
                             <label for="blue_light_front">Blue Light Front</label>
-                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_front" name="blue_light_front" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -248,7 +251,6 @@
 
                         <div class="qr-group">
                             <label for="blue_light_rear">Blue Light Rear</label>
-                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_rear" name="blue_light_rear" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -259,7 +261,6 @@
 
                         <div class="qr-group">
                             <label for="red_curtain_lights">Red Curtain Lights</label>
-                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="red_curtain_lights" name="red_curtain_lights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -271,7 +272,7 @@
                         <!-- Battery / charger -->
                         <div class="qr-group">
                             <label for="battery">Battery</label>
-                            <div class="qr-hint">Lithium, Lead Acid, or None</div>
+                            <div class="qr-hint">Lithium, Lead Acid, or None for IC</div>
                             <select id="battery" name="battery" class="qr-select" required>
                                 <option value="" disabled selected>Select battery</option>
                                 {% for option in battery_options %}
@@ -290,14 +291,14 @@
                         <!-- Local options / lease info -->
                         <div class="qr-group qr-group-full">
                             <label for="local_options">Local Options</label>
-                            <div class="qr-hint">Paint, fan, computer holder, cup holder etc. (type "None" if no local options)</div>
+                            <div class="qr-hint">Paint, Fan, Computer Holder, Cup Holder etc (type "None" if no local options)</div>
                             <input type="text" id="local_options" name="local_options"
                                    class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="expected_delivery">Customer Requested Delivery</label>
-                            <div class="qr-hint">Use "-" if unknown</div>
+                            <div class="qr-hint">Enter customer requested delivery date or "-"</div>
                             <input type="text" id="expected_delivery" name="expected_delivery"
                                    class="qr-input" value="-" required />
                         </div>
@@ -321,7 +322,7 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="lease_term">Lease Term (Months)</label>
+                            <label for="lease_term">Lease Terms (Months)</label>
                             <div class="qr-hint">Ask customer how many months they would like to lease</div>
                             <input type="number" id="lease_term" name="lease_term"
                                    class="qr-input" required />
@@ -329,13 +330,13 @@
 
                         <div class="qr-group qr-group-full">
                             <label for="notes">Notes</label>
-                            <div class="qr-hint">Customer special requirements</div>
+                            <div class="qr-hint">Customer Special Requirements</div>
                             <textarea id="notes" name="notes" class="qr-textarea" required></textarea>
                         </div>
 
                         <div class="qr-group qr-group-full">
                             <label for="salesperson_name">Salesperson Name</label>
-                            <div class="qr-hint">Your name</div>
+                            <div class="qr-hint">Your Name</div>
                             <input type="text" id="salesperson_name" name="salesperson_name"
                                    class="qr-input" required />
                         </div>

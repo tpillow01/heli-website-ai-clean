@@ -305,7 +305,8 @@ def api_echo():
 
 # ── Quote Request dropdown options ─────────────────────────────
 
-FUEL_OPTIONS = ["LPG", "Diesel", "Dual Fuel", "Electric"]
+# ── Quote Request dropdown options ─────────────────────────────
+FUEL_OPTIONS = ["LPG", "Diesel", "Electric", "Dual Fuel"]
 
 MAST_TYPE_OPTIONS = ["Simplex", "Duplex", "Three Stage", "Quad Stage"]
 
@@ -318,7 +319,11 @@ TIRE_OPTIONS = [
     "Pneumatic",
 ]
 
+# no tire compound anymore
 YES_NO_OPTIONS = ["Yes", "No"]
+
+# Aux valve / hose options
+AUX_OPTIONS = ["2", "3", "4"]
 
 BATTERY_OPTIONS = ["None", "Lithium", "Lead Acid"]
 
@@ -3270,7 +3275,6 @@ def quote_request():
 
         model = request.form.get("model", "").strip()
 
-        # NOTE: HTML uses name="fuel_type" and name="battery_voltage"
         fuel_type = request.form.get("fuel_type", "").strip()
         battery_voltage = request.form.get("battery_voltage", "").strip()
 
@@ -3286,9 +3290,8 @@ def quote_request():
 
         tires = request.form.get("tires", "").strip()
 
-        # These are now Yes/No dropdowns:
         seat_suspension = request.form.get("seat_suspension", "").strip()
-        headlights = request.form.get("headlights", "").strip()  # label = Work Lights
+        headlights = request.form.get("headlights", "").strip()
         back_up_alarm = request.form.get("back_up_alarm", "").strip()
         strobe = request.form.get("strobe", "").strip()
 
@@ -3301,7 +3304,6 @@ def quote_request():
         charger = request.form.get("charger", "").strip()
         local_options = request.form.get("local_options", "").strip()
 
-        # Field text changed to "Customer Requested Delivery", but keep the same name
         expected_delivery = request.form.get("expected_delivery", "-").strip() or "-"
 
         lease_type = request.form.get("lease_type", "").strip()
@@ -3329,9 +3331,8 @@ def quote_request():
             ("Fork Type", fork_type),
             ("Fork Length", fork_length),
             ("Tire", tires),
-            # Tire Compound field removed
             ("Seat Suspension", seat_suspension),
-            ("Work Lights", headlights),
+            ("Front Work Lights", headlights),
             ("Back Up Alarm", back_up_alarm),
             ("Strobe", strobe),
             ("Rear Work Light", rear_work_light),
@@ -3353,7 +3354,7 @@ def quote_request():
         if fuel_type == "Electric":
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
-            if not battery:
+            if not battery or battery == "None":
                 errors.append("Battery type is required for Electric trucks.")
             # Force charger logic for electric
             charger = "Standard"
@@ -3362,7 +3363,7 @@ def quote_request():
             if not charger:
                 charger = "None"
             if not battery:
-                battery = "N/A"
+                battery = "None"
             if not battery_voltage:
                 battery_voltage = "N/A"
 
@@ -3396,9 +3397,8 @@ def quote_request():
             "fork_type": fork_type,
             "fork_length": fork_length,
             "tires": tires,
-            # "tire_compound" removed
             "seat_suspension": seat_suspension,
-            "headlights": headlights,  # label = Work Lights in PDF
+            "headlights": headlights,
             "back_up_alarm": back_up_alarm,
             "strobe": strobe,
             "rear_work_light": rear_work_light,
@@ -3428,17 +3428,16 @@ def quote_request():
             download_name=filename,
         )
 
-    # ── GET: show the form ──────────────────────────────
     return render_template(
-        "quote_request.html",
-        fuel_options=FUEL_OPTIONS,
-        mast_type_options=MAST_TYPE_OPTIONS,
-        tire_options=TIRE_OPTIONS,
-        # tire_compound_options removed
-        yes_no_options=YES_NO_OPTIONS,
-        battery_options=BATTERY_OPTIONS,
-        lease_type_options=LEASE_TYPE_OPTIONS,
-    )
+    "quote_request.html",
+    fuel_options=FUEL_OPTIONS,
+    mast_type_options=MAST_TYPE_OPTIONS,
+    tire_options=TIRE_OPTIONS,
+    yes_no_options=YES_NO_OPTIONS,
+    battery_options=BATTERY_OPTIONS,
+    lease_type_options=LEASE_TYPE_OPTIONS,
+    aux_options=AUX_OPTIONS,
+)
 
 @app.get("/api/competitor_peers")
 def api_competitor_peers():
