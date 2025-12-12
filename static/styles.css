@@ -542,3 +542,107 @@ body{
 .primary-button:hover {
   filter: brightness(1.05);
 }
+
+/* ================================
+   Quote Request page overrides
+   ================================ */
+
+/* Allow the page itself to scroll */
+body.quote-request-page {
+  overflow-y: auto !important;
+}
+
+/* Let the shell grow with content instead of locking to 100vh */
+body.quote-request-page .app-shell {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+/* Main quote section: full-height, scrollable if needed */
+.quote-request-main {
+  max-width: 1200px;
+  margin: 0 auto 40px;
+  padding: 100px 20px 40px; /* extra top padding so header never covers form */
+}
+
+/* Card styling (in case it wasn't appended last time) */
+.quote-request-card {
+  background: #2a2520;
+  color: #f7f2ea;
+  border-radius: 18px;
+  padding: 24px 28px 32px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Grid & fields (if not already present) */
+.quote-request-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px 22px;
+}
+
+.qr-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.qr-group-full {
+  grid-column: 1 / -1;
+}
+
+.qr-group label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.qr-hint {
+  font-size: 0.75rem;
+  color: #d0c0aa;
+  margin-bottom: 4px;
+}
+
+.qr-input,
+.qr-select,
+.qr-textarea {
+  background: #1d1814;
+  border-radius: 8px;
+  border: 1px solid #463a30;
+  padding: 8px 10px;
+  color: #f7f2ea;
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+.qr-input:focus,
+.qr-select:focus,
+.qr-textarea:focus {
+  outline: none;
+  border-color: #cc0000;
+}
+
+.qr-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.qr-actions {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.primary-button {
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: none;
+  background: #cc0000;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-button:hover {
+  filter: brightness(1.05);
+}

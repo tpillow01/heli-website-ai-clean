@@ -12,31 +12,31 @@
 <body class="quote-request-page">
   <div class="app-shell">
     <!-- Top Header / Nav (matches other pages) -->
-    <header class="top-header">
-      <div class="header-left">
-        <div class="app-title">Tynan Equipment AI</div>
-      </div>
+<header class="top-header">
+  <div class="header-left">
+    <div class="app-title">Tynan Equipment AI</div>
+  </div>
 
-      <div class="header-center">
-        <nav class="tabs">
-          <a href="{{ url_for('home') }}" class="tab">Chat</a>
-          <a href="{{ url_for('map_page') }}" class="tab">Map</a>
-          <a href="/battlecards"
-             class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
-            Battle Cards
-          </a>
-          <a href="{{ url_for('quote_request') }}" class="tab active">Quote Request</a>
-          <a href="{{ url_for('logout') }}" class="tab">Logout</a>
-        </nav>
-      </div>
+  <div class="header-center">
+    <nav class="tabs">
+      <a href="{{ url_for('home') }}" class="tab">Chat</a>
+      <a href="{{ url_for('map_page') }}" class="tab">Map</a>
+      <a href="/battlecards"
+         class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
+        Battle Cards
+      </a>
+      <a href="{{ url_for('quote_request') }}" class="tab active">Quote Request</a>
+      <a href="{{ url_for('logout') }}" class="tab">Logout</a>
+    </nav>
+  </div>
 
-      <div class="header-right">
-        <div class="mode-toggle">
-          <span class="mode-label">Mode</span>
-          <span class="mode-pill">Forklift Recommendation</span>
-        </div>
-      </div>
-    </header>
+  <div class="header-right">
+    <div class="mode-toggle">
+      <span class="mode-label">Mode</span>
+      <span class="mode-pill">Forklift Recommendation</span>
+    </div>
+  </div>
+</header>
 
     <!-- Main content -->
     <main class="quote-request-main">
