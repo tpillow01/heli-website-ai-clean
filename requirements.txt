@@ -9,3 +9,4 @@ tiktoken
 gunicorn>=21.2
 requests>=2.31.0
 beautifulsoup4
+reportlab
