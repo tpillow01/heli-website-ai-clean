@@ -543,3 +543,58 @@ body.quote-request-page .quote-request-card {
   transform: translateY(-1px);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
 }
+
+/* ─────────────────────────────────────────────
+   Quote Request – local nav styling
+   Big pill buttons inside the dark card
+   ───────────────────────────────────────────── */
+
+.quote-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1.75rem;
+    padding: 0.5rem 0.75rem;
+    background: #171310;
+    border-radius: 999px;
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 12px 30px rgba(0, 0, 0, 0.7);
+}
+
+.quote-tab {
+    flex: 1;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    color: #f7eee3;
+    text-decoration: none;
+    transition:
+        background 0.18s ease,
+        color 0.18s ease,
+        border-color 0.18s ease,
+        transform 0.12s ease;
+}
+
+.quote-tab:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+}
+
+.quote-tab.active {
+    background: #cc0000;
+    border-color: #cc0000;
+    color: #ffffff;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.8);
+}
+
+/* Keep active underline from global .tabs from looking odd inside card */
+.quote-nav .tab::after {
+    display: none;
+}
