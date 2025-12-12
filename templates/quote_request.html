@@ -196,9 +196,6 @@
                         <!-- Seat / lights -->
                         <div class="qr-group">
                             <label for="seat_suspension">Seat Suspension</label>
-                            <div class="qr-hint">
-                                Stock up to 10,000 lbs, above that capacity is an extra charge
-                            </div>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -209,9 +206,6 @@
 
                         <div class="qr-group">
                             <label for="headlights">Front Work Lights</label>
-                            <div class="qr-hint">
-                                Stock up to 10,000 lbs, above that capacity is an extra charge
-                            </div>
                             <select id="headlights" name="headlights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -232,9 +226,6 @@
 
                         <div class="qr-group">
                             <label for="strobe">Strobe</label>
-                            <div class="qr-hint">
-                                Stock up to 10,000 lbs, above that capacity is an extra charge
-                            </div>
                             <select id="strobe" name="strobe" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -243,10 +234,10 @@
                             </select>
                         </div>
 
+
                         <!-- Yes/No lights -->
                         <div class="qr-group">
                             <label for="rear_work_light">Rear Work Light</label>
-                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
