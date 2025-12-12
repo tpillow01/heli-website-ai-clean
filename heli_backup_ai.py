@@ -305,20 +305,18 @@ def api_echo():
 
 # ── Quote Request dropdown options ─────────────────────────────
 
-FUEL_OPTIONS = ["LPG", "Diesel", "Electric"]
+FUEL_OPTIONS = ["LPG", "Diesel", "Dual Fuel", "Electric"]
 
 MAST_TYPE_OPTIONS = ["Simplex", "Duplex", "Three Stage", "Quad Stage"]
 
 TIRE_OPTIONS = [
-    "Standard",
-    "Non-Marking Smooth",
-    "Non-Marking Traction",
+    "Cushion Standard",
+    "Cushion Non-Marking",
+    "Cushion Non-Marking Traction",
+    "Smooth",
     "Solid Pneumatic",
     "Pneumatic",
-    "Foam Filled",
 ]
-
-TIRE_COMPOUND_OPTIONS = ["Standard", "Non-Marking"]
 
 YES_NO_OPTIONS = ["Yes", "No"]
 
@@ -3272,6 +3270,7 @@ def quote_request():
 
         model = request.form.get("model", "").strip()
 
+        # NOTE: HTML uses name="fuel_type" and name="battery_voltage"
         fuel_type = request.form.get("fuel_type", "").strip()
         battery_voltage = request.form.get("battery_voltage", "").strip()
 
@@ -3286,10 +3285,10 @@ def quote_request():
         fork_length = request.form.get("fork_length", "").strip()
 
         tires = request.form.get("tires", "").strip()
-        tire_compound = request.form.get("tire_compound", "").strip()
 
+        # These are now Yes/No dropdowns:
         seat_suspension = request.form.get("seat_suspension", "").strip()
-        headlights = request.form.get("headlights", "").strip()
+        headlights = request.form.get("headlights", "").strip()  # label = Work Lights
         back_up_alarm = request.form.get("back_up_alarm", "").strip()
         strobe = request.form.get("strobe", "").strip()
 
@@ -3302,6 +3301,7 @@ def quote_request():
         charger = request.form.get("charger", "").strip()
         local_options = request.form.get("local_options", "").strip()
 
+        # Field text changed to "Customer Requested Delivery", but keep the same name
         expected_delivery = request.form.get("expected_delivery", "-").strip() or "-"
 
         lease_type = request.form.get("lease_type", "").strip()
@@ -3329,9 +3329,9 @@ def quote_request():
             ("Fork Type", fork_type),
             ("Fork Length", fork_length),
             ("Tire", tires),
-            ("Tire Compound", tire_compound),
+            # Tire Compound field removed
             ("Seat Suspension", seat_suspension),
-            ("Headlights", headlights),
+            ("Work Lights", headlights),
             ("Back Up Alarm", back_up_alarm),
             ("Strobe", strobe),
             ("Rear Work Light", rear_work_light),
@@ -3349,20 +3349,22 @@ def quote_request():
             if not value:
                 errors.append(f"{label} is required.")
 
-        # Electric-specific rules (with "None" support for other fuels)
+        # Electric-specific rules
         if fuel_type == "Electric":
-            if not battery or battery == "None":
-                errors.append("A battery (Lithium or Lead Acid) is required for Electric trucks.")
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
+            if not battery:
+                errors.append("Battery type is required for Electric trucks.")
+            # Force charger logic for electric
             charger = "Standard"
         else:
+            # Non-electric: we don't really care about battery fields
             if not charger:
                 charger = "None"
             if not battery:
-                battery = "None"
+                battery = "N/A"
             if not battery_voltage:
-                battery_voltage = "-"
+                battery_voltage = "N/A"
 
         # Keep aux hose in sync with aux valve as a final guard
         if aux_valve and not aux_hose:
@@ -3375,7 +3377,7 @@ def quote_request():
 
         # Combine fuel + voltage for the PDF row
         fuel_voltage = fuel_type
-        if battery_voltage and battery_voltage != "-":
+        if battery_voltage and battery_voltage != "N/A":
             fuel_voltage = f"{fuel_type} / {battery_voltage}"
 
         # ── Build data for the PDF ───────────────────────
@@ -3394,9 +3396,9 @@ def quote_request():
             "fork_type": fork_type,
             "fork_length": fork_length,
             "tires": tires,
-            "tire_compound": tire_compound,
+            # "tire_compound" removed
             "seat_suspension": seat_suspension,
-            "headlights": headlights,
+            "headlights": headlights,  # label = Work Lights in PDF
             "back_up_alarm": back_up_alarm,
             "strobe": strobe,
             "rear_work_light": rear_work_light,
@@ -3414,24 +3416,11 @@ def quote_request():
             "salesperson_name": salesperson_name,
         }
 
-        # Build the PDF bytes
         pdf_bytes = build_quote_request_pdf(form_data)
 
-        # Nice readable filename
         safe_customer = customer_name.replace(" ", "_") or "customer"
         filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
-        # OPTIONAL: also save a copy on the server
-        # (comment this block out if you don’t want server copies)
-        try:
-            save_dir = os.path.join("quote_requests")
-            os.makedirs(save_dir, exist_ok=True)
-            with open(os.path.join(save_dir, filename), "wb") as f:
-                f.write(pdf_bytes)
-        except Exception as e:
-            app.logger.error(f"Failed to save quote request PDF: {e}")
-
-        # Return PDF to the browser as a download
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",
@@ -3445,7 +3434,7 @@ def quote_request():
         fuel_options=FUEL_OPTIONS,
         mast_type_options=MAST_TYPE_OPTIONS,
         tire_options=TIRE_OPTIONS,
-        tire_compound_options=TIRE_COMPOUND_OPTIONS,
+        # tire_compound_options removed
         yes_no_options=YES_NO_OPTIONS,
         battery_options=BATTERY_OPTIONS,
         lease_type_options=LEASE_TYPE_OPTIONS,

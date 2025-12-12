@@ -14,7 +14,7 @@ FIELD_LABELS = [
     ("customer_name", "Customer Name"),
     ("address", "Address"),
     ("city_state_zip", "City / State / Zip"),
-    ("contact_name", "Contact Name"),
+    ("contact_name", "Contact Name (First & Last)"),
     ("model", "Model"),
     ("fuel_voltage", "Fuel / Voltage"),
     ("mast_ohl_mfh", "Mast OHL / MFH"),
@@ -25,11 +25,11 @@ FIELD_LABELS = [
     ("fork_type", "Fork Type"),
     ("fork_length", "Fork Length"),
     ("tires", "Tires"),
-    ("tire_compound", "Tire Compound"),
+    # tire_compound removed
     ("seat_suspension", "Seat Suspension"),
-    ("headlights", "Headlights"),
+    ("headlights", "Work Lights"),
     ("back_up_alarm", "Back Up Alarm"),
-    ("strobe", "Strobe"),
+    ("strobe", "Strobe Light"),
     ("rear_work_light", "Rear Work Light"),
     ("blue_light_front", "Blue Light Front"),
     ("blue_light_rear", "Blue Light Rear"),
@@ -37,14 +37,13 @@ FIELD_LABELS = [
     ("battery", "Battery"),
     ("charger", "Charger"),
     ("local_options", "Local Options"),
-    ("expected_delivery", "Expected Delivery"),
+    ("expected_delivery", "Customer Requested Delivery"),
     ("lease_type", "Lease Type"),
     ("annual_hours", "Annual Hours"),
     ("lease_term", "Lease Term (Months)"),
     ("notes", "Notes / Special Requirements"),
     ("salesperson_name", "Salesperson Name"),
 ]
-
 
 def build_quote_request_pdf(form_data: Dict[str, str]) -> bytes:
     """
