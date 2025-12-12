@@ -616,3 +616,35 @@ body.quote-request-page {
         justify-content: center;
     }
 }
+
+/* ──────────────────────────────────────────────
+   Quote Request page: fix cut-off + match theme
+   ────────────────────────────────────────────── */
+
+/* Use the same light theme and allow normal scrolling */
+body.quote-request-page {
+    background: #f9f0e2;       /* same vibe as main page */
+    color: #3b2617;
+    overflow-y: auto;          /* allow page to scroll */
+}
+
+/* Kill any fixed-height / overflow tricks from the chat layout
+   ONLY on the quote request page */
+body.quote-request-page .app-shell,
+body.quote-request-page .main-layout,
+body.quote-request-page .quote-request-wrapper,
+body.quote-request-page .quote-request-main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+/* Make sure the form card itself is not a scroll box */
+body.quote-request-page .quote-request-card {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff7ec;               /* light card */
+    border-radius: 18px;
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.08);
+}
