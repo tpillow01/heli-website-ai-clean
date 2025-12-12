@@ -418,7 +418,9 @@ body{
 }
 
 /* ──────────────────────────────────────────────
-   Quote Request page – base layout (SCOPED)
+   Quote Request page – layout & styling
+   (scolls like a normal page, does not touch
+   global .tabs or main chat styling)
    ────────────────────────────────────────────── */
 
 body.quote-request-page {
@@ -426,88 +428,71 @@ body.quote-request-page {
     color: #f5f5f5;
 }
 
-/* Make the whole app area flex so header stays on top, form scrolls normally */
-body.quote-request-page .app-shell {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
+/* Push content below the header area */
+.quote-request-main {
+    padding: 6rem 1.25rem 2.5rem;
 }
 
-/* Wrapper below the existing top header;
-   let the BODY handle scrolling so we don’t cut off the top */
-body.quote-request-page .quote-request-wrapper {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-    padding: 1.5rem 1.5rem 2rem;
-    box-sizing: border-box;
-    /* no overflow-y here – avoids cutting off the top */
-}
-
-body.quote-request-page .quote-request-main {
-    width: 100%;
+.quote-request-container {
     max-width: 1100px;
+    margin: 0 auto;
 }
 
-/* Card that holds the form */
-body.quote-request-page .quote-request-card {
-    background: #111318;
+.quote-request-card {
+    background: #181a1f;
     border-radius: 18px;
-    padding: 1.75rem 2rem;
+    padding: 1.75rem 2rem 2rem;
     border: 1px solid rgba(255, 255, 255, 0.06);
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8);
-    margin-top: 0.75rem; /* small gap below header so it doesn’t feel jammed */
 }
 
-body.quote-request-page .quote-request-title {
+.quote-request-title {
     font-size: 1.6rem;
     font-weight: 700;
     margin-bottom: 0.25rem;
 }
 
-body.quote-request-page .quote-request-subtitle {
+.quote-request-subtitle {
     font-size: 0.95rem;
     color: #c3c3c3;
     margin-bottom: 1.5rem;
 }
 
 /* Form grid */
-body.quote-request-page .quote-request-form {
+.quote-request-form {
     margin-top: 0.5rem;
 }
 
-body.quote-request-page .quote-request-grid {
+.quote-request-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem 1.5rem;
 }
 
-body.quote-request-page .qr-group {
+.qr-group {
     display: flex;
     flex-direction: column;
     gap: 0.18rem;
 }
 
-body.quote-request-page .qr-group-full {
+.qr-group-full {
     grid-column: 1 / -1;
 }
 
-body.quote-request-page .qr-group label {
+.qr-group label {
     font-size: 0.9rem;
     font-weight: 600;
     color: #f5f5f5;
 }
 
-/* You can keep qr-hint for fields where you STILL want helper text;
-   for ones you removed in the HTML, this simply won’t be used. */
-body.quote-request-page .qr-hint {
+.qr-hint {
     font-size: 0.8rem;
     color: #9b9b9b;
 }
 
-body.quote-request-page .qr-input,
-body.quote-request-page .qr-select,
-body.quote-request-page .qr-textarea {
+.qr-input,
+.qr-select,
+.qr-textarea {
     background: #050609;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -519,101 +504,101 @@ body.quote-request-page .qr-textarea {
     box-sizing: border-box;
 }
 
-body.quote-request-page .qr-input::placeholder,
-body.quote-request-page .qr-textarea::placeholder {
+.qr-input::placeholder,
+.qr-textarea::placeholder {
     color: #727272;
 }
 
-body.quote-request-page .qr-input:focus,
-body.quote-request-page .qr-select:focus,
-body.quote-request-page .qr-textarea:focus {
+.qr-input:focus,
+.qr-select:focus,
+.qr-textarea:focus {
     border-color: #cc0000;
     box-shadow: 0 0 0 1px rgba(204, 0, 0, 0.65);
 }
 
-body.quote-request-page .qr-select {
+.qr-select {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-    background-image: linear-gradient(45deg, transparent 50%, #f5f5f5 50%),
+    background-image:
+        linear-gradient(45deg, transparent 50%, #f5f5f5 50%),
         linear-gradient(135deg, #f5f5f5 50%, transparent 50%);
-    background-position: calc(100% - 1rem) calc(50% - 3px),
+    background-position:
+        calc(100% - 1rem) calc(50% - 3px),
         calc(100% - 0.85rem) calc(50% + 3px);
     background-size: 7px 7px, 7px 7px;
     background-repeat: no-repeat;
 }
 
-body.quote-request-page .qr-textarea {
+.qr-textarea {
     min-height: 90px;
     resize: vertical;
 }
 
 /* Action button */
-body.quote-request-page .qr-actions {
+.qr-actions {
     margin-top: 1.6rem;
     display: flex;
     justify-content: flex-end;
 }
 
-body.quote-request-page .qr-actions .primary-button {
+.qr-actions .primary-button {
     padding: 0.7rem 1.4rem;
     font-size: 0.95rem;
     border-radius: 999px;
 }
 
 /* ──────────────────────────────────────────────
-   Mobile responsiveness (only quote page)
+   Mobile responsiveness
    ────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
-    body.quote-request-page .quote-request-wrapper {
-        padding: 0.85rem 0.75rem 1.4rem;
+    .quote-request-main {
+        padding: 5.2rem 0.75rem 2rem;
     }
 
-    body.quote-request-page .quote-request-card {
-        padding: 1.2rem 0.85rem;
+    .quote-request-card {
+        padding: 1.2rem 0.9rem 1.6rem;
         border-radius: 14px;
-        margin-top: 0.6rem;
     }
 
-    body.quote-request-page .quote-request-title {
-        font-size: 1.3rem;
+    .quote-request-title {
+        font-size: 1.35rem;
         text-align: center;
     }
 
-    body.quote-request-page .quote-request-subtitle {
+    .quote-request-subtitle {
         font-size: 0.85rem;
         text-align: center;
         margin-bottom: 1.1rem;
     }
 
-    body.quote-request-page .quote-request-grid {
+    .quote-request-grid {
         grid-template-columns: 1fr;
         gap: 0.8rem;
     }
 
-    body.quote-request-page .qr-input,
-    body.quote-request-page .qr-select,
-    body.quote-request-page .qr-textarea {
+    .qr-input,
+    .qr-select,
+    .qr-textarea {
         font-size: 0.9rem;
         padding: 0.55rem 0.7rem;
     }
 
-    body.quote-request-page .qr-group label {
+    .qr-group label {
         font-size: 0.85rem;
     }
 
-    body.quote-request-page .qr-hint {
+    .qr-hint {
         font-size: 0.78rem;
     }
 
-    body.quote-request-page .qr-actions {
+    .qr-actions {
         justify-content: center;
     }
 
-    body.quote-request-page .qr-actions .primary-button {
+    .qr-actions .primary-button {
         width: 100%;
         text-align: center;
-        justify-content: center;
     }
 }

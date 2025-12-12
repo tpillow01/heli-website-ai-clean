@@ -12,7 +12,7 @@
 <body class="quote-request-page">
 <div class="app-shell">
 
-    <!-- Top header: matches main site -->
+    <!-- Same style of header/nav as other pages -->
     <header class="top-header">
         <div class="header-left">
             <div class="app-title">Tynan Equipment AI</div>
@@ -39,30 +39,16 @@
         </div>
     </header>
 
-    <!-- Scrollable content area -->
-    <div class="quote-request-wrapper">
-        <main class="quote-request-main">
+    <!-- The page now just scrolls normally; no funky inner scroll -->
+    <main class="quote-request-main">
+        <div class="quote-request-container">
             <section class="quote-request-card">
                 <h1 class="quote-request-title">HELI Quote Request</h1>
                 <p class="quote-request-subtitle">
                     Fill out every field below to generate a clean PDF for the quoting team.
                 </p>
 
-                <!-- Flash error messages (from server-side validation) -->
-                {% with messages = get_flashed_messages(with_categories=True) %}
-                  {% if messages %}
-                    <div class="flash-container">
-                      {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                      {% endfor %}
-                    </div>
-                  {% endif %}
-                {% endwith %}
-
-                <form method="post"
-                      action="{{ url_for('quote_request') }}"
-                      class="quote-request-form"
-                      novalidate>
+                <form method="post" action="{{ url_for('quote_request') }}" class="quote-request-form" novalidate>
                     <div class="quote-request-grid">
 
                         <!-- Customer info -->
@@ -103,9 +89,9 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="fuel">Fuel</label>
+                            <label for="fuel_type">Fuel</label>
                             <div class="qr-hint">LPG, Diesel, Electric, or Dual Fuel</div>
-                            <select id="fuel" name="fuel" class="qr-select" required>
+                            <select id="fuel_type" name="fuel_type" class="qr-select" required>
                                 <option value="" disabled selected>Select fuel type</option>
                                 {% for option in fuel_options %}
                                     <option value="{{ option }}">{{ option }}</option>
@@ -193,7 +179,7 @@
                             </select>
                         </div>
 
-                        <!-- Seat / lights -->
+                        <!-- Seat / lights (all Yes/No) -->
                         <div class="qr-group">
                             <label for="seat_suspension">Seat Suspension</label>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
@@ -205,8 +191,8 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="headlights">Front Work Lights</label>
-                            <select id="headlights" name="headlights" class="qr-select" required>
+                            <label for="front_work_lights">Front Work Lights</label>
+                            <select id="front_work_lights" name="front_work_lights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
@@ -233,7 +219,6 @@
                                 {% endfor %}
                             </select>
                         </div>
-
 
                         <!-- Yes/No lights -->
                         <div class="qr-group">
@@ -334,7 +319,7 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="lease_term">Lease Terms (Months)</label>
+                            <label for="lease_term">Lease Term (Months)</label>
                             <div class="qr-hint">Ask customer how many months they would like to lease</div>
                             <input type="number" id="lease_term" name="lease_term"
                                    class="qr-input" required />
@@ -361,18 +346,18 @@
                     </div>
                 </form>
             </section>
-        </main>
-    </div>
+        </div>
+    </main>
 </div>
 
 <script>
-    // Fuel -> battery voltage requirement visibility
-    const fuelSelect = document.getElementById('fuel');
+document.addEventListener('DOMContentLoaded', function () {
+    const fuelSelect = document.getElementById('fuel_type');
     const voltageGroup = document.getElementById('battery_voltage_group');
     const voltageInput = document.getElementById('battery_voltage');
 
     function updateVoltageVisibility() {
-        if (!fuelSelect || !voltageGroup || !voltageInput) return;
+        if (!fuelSelect) return;
         const isElectric = fuelSelect.value === 'Electric';
         if (isElectric) {
             voltageGroup.style.display = 'block';
@@ -384,10 +369,11 @@
         }
     }
 
-    if (fuelSelect) {
+    if (fuelSelect && voltageGroup && voltageInput) {
         updateVoltageVisibility();
         fuelSelect.addEventListener('change', updateVoltageVisibility);
     }
+});
 </script>
 </body>
 </html>
