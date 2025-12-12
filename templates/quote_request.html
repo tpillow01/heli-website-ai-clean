@@ -146,28 +146,28 @@
 <body class="qr-page">
 
     <!-- Top nav bar – mirror your Chat / Map / Battle Cards bar -->
-    <header class="top-bar">
-        <div class="top-bar-left">
-            <button class="menu-button" id="menuToggle">
-                &#9776;
+<header class="top-bar">
+    <div class="top-bar-left">
+        <button class="menu-button" id="menuToggle">
+            &#9776;
+        </button>
+        <nav class="top-nav">
+            <a href="{{ url_for('home') }}" class="nav-link">Chat</a>
+            <a href="{{ url_for('map_page') }}" class="nav-link">Map</a>
+            <a href="{{ url_for('battlecards') }}" class="nav-link">Battle Cards</a>
+            <a href="{{ url_for('quote_request') }}" class="nav-link active">Quote Request</a>
+            <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+        </nav>
+    </div>
+    <div class="top-bar-right">
+        <div class="mode-toggle">
+            <span class="mode-label">Mode</span>
+            <button class="mode-pill" type="button">
+                Quote Request
             </button>
-            <nav class="top-nav">
-                <a href="{{ url_for('home') }}" class="nav-link">Chat</a>
-                <a href="{{ url_for('map') }}" class="nav-link">Map</a>
-                <a href="{{ url_for('battlecards') }}" class="nav-link">Battle Cards</a>
-                <a href="{{ url_for('quote_request') }}" class="nav-link active">Quote Request</a>
-                <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
-            </nav>
         </div>
-        <div class="top-bar-right">
-            <div class="mode-toggle">
-                <span class="mode-label">Mode</span>
-                <button class="mode-pill" type="button">
-                    Quote Request
-                </button>
-            </div>
-        </div>
-    </header>
+    </div>
+</header>
 
     <main class="qr-main">
         <h1 class="qr-title">HELI Quote Request</h1>
