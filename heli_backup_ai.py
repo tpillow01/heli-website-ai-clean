@@ -322,7 +322,7 @@ TIRE_COMPOUND_OPTIONS = ["Standard", "Non-Marking"]
 
 YES_NO_OPTIONS = ["Yes", "No"]
 
-BATTERY_OPTIONS = ["Lithium", "Lead Acid"]
+BATTERY_OPTIONS = ["None", "Lithium", "Lead Acid"]
 
 LEASE_TYPE_OPTIONS = ["FMV", "FPO"]
 
@@ -3349,22 +3349,25 @@ def quote_request():
             if not value:
                 errors.append(f"{label} is required.")
 
-        # Electric-specific rules
+              # Electric-specific rules
         if fuel_type == "Electric":
+            # Battery must NOT be "None" for electric
+            if not battery or battery == "None":
+                errors.append("A battery (Lithium or Lead Acid) is required for Electric trucks.")
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
-            if not battery:
-                errors.append("Battery type is required for Electric trucks.")
             # Force charger logic for electric
             charger = "Standard"
         else:
-            # Non-electric: we don't really care about battery fields
+            # Non-electric: charger should default to None
             if not charger:
                 charger = "None"
+            # For LPG/Diesel, battery is optional; default to "None"
             if not battery:
-                battery = "N/A"
+                battery = "None"
+            # Voltage is irrelevant; just clean it up for the PDF
             if not battery_voltage:
-                battery_voltage = "N/A"
+                battery_voltage = "-"
 
         # Keep aux hose in sync with aux valve as a final guard
         if aux_valve and not aux_hose:
