@@ -418,47 +418,56 @@ body{
 }
 
 /* ──────────────────────────────────────────────
-   Quote Request page – layout & styling
-   (scolls like a normal page, does not touch
-   global .tabs or main chat styling)
+   Quote Request page – layout + theme
+   (matches main app colors, no inner scroll)
    ────────────────────────────────────────────── */
 
+/* Use the same light background as the rest of the app */
 body.quote-request-page {
-    background: #050608;
-    color: #f5f5f5;
+    background: #f9f0e2; /* close to main theme */
+    color: #3b2617;
 }
 
-/* Push content below the header area */
-.quote-request-main {
-    padding: 6rem 1.25rem 2.5rem;
-}
-
-.quote-request-container {
+/* Simple wrapper under the existing top header */
+.quote-request-wrapper {
     max-width: 1100px;
-    margin: 0 auto;
+    margin: 1.5rem auto 2.5rem;
+    padding: 0 1.5rem;
+    box-sizing: border-box;
+}
+
+/* Let the page itself scroll – NO fixed heights / inner scroll */
+.quote-request-main {
+    width: 100%;
 }
 
 .quote-request-card {
-    background: #181a1f;
+    background: #fff7ec;
     border-radius: 18px;
-    padding: 1.75rem 2rem 2rem;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8);
+    padding: 1.8rem 2rem 2.3rem;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.08);
+    box-sizing: border-box;
+    /* critical: no max-height, no overflow here */
+    max-height: none;
+    overflow: visible;
 }
 
 .quote-request-title {
     font-size: 1.6rem;
     font-weight: 700;
     margin-bottom: 0.25rem;
+    color: #3b2617;
 }
 
 .quote-request-subtitle {
     font-size: 0.95rem;
-    color: #c3c3c3;
-    margin-bottom: 1.5rem;
+    color: #7a5b3a;
+    margin-bottom: 1.4rem;
 }
 
-/* Form grid */
+/* ── Form grid ─────────────────────────────── */
+
 .quote-request-form {
     margin-top: 0.5rem;
 }
@@ -482,22 +491,23 @@ body.quote-request-page {
 .qr-group label {
     font-size: 0.9rem;
     font-weight: 600;
-    color: #f5f5f5;
+    color: #3b2617;
 }
 
 .qr-hint {
-    font-size: 0.8rem;
-    color: #9b9b9b;
+    font-size: 0.78rem;
+    color: #9b7a54;
 }
 
+/* Inputs / selects / textarea – match site look */
 .qr-input,
 .qr-select,
 .qr-textarea {
-    background: #050609;
+    background: #fffaf3;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     padding: 0.6rem 0.75rem;
-    color: #f5f5f5;
+    color: #3b2617;
     font-size: 0.95rem;
     outline: none;
     width: 100%;
@@ -506,23 +516,24 @@ body.quote-request-page {
 
 .qr-input::placeholder,
 .qr-textarea::placeholder {
-    color: #727272;
+    color: #b18f68;
 }
 
 .qr-input:focus,
 .qr-select:focus,
 .qr-textarea:focus {
     border-color: #cc0000;
-    box-shadow: 0 0 0 1px rgba(204, 0, 0, 0.65);
+    box-shadow: 0 0 0 1px rgba(204, 0, 0, 0.35);
 }
 
+/* Nice dropdown arrow but still on light theme */
 .qr-select {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
     background-image:
-        linear-gradient(45deg, transparent 50%, #f5f5f5 50%),
-        linear-gradient(135deg, #f5f5f5 50%, transparent 50%);
+        linear-gradient(45deg, transparent 50%, #3b2617 50%),
+        linear-gradient(135deg, #3b2617 50%, transparent 50%);
     background-position:
         calc(100% - 1rem) calc(50% - 3px),
         calc(100% - 0.85rem) calc(50% + 3px);
@@ -535,7 +546,8 @@ body.quote-request-page {
     resize: vertical;
 }
 
-/* Action button */
+/* ── Actions ─────────────────────────────── */
+
 .qr-actions {
     margin-top: 1.6rem;
     display: flex;
@@ -553,12 +565,13 @@ body.quote-request-page {
    ────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
-    .quote-request-main {
-        padding: 5.2rem 0.75rem 2rem;
+    .quote-request-wrapper {
+        margin: 1rem auto 1.8rem;
+        padding: 0 0.9rem;
     }
 
     .quote-request-card {
-        padding: 1.2rem 0.9rem 1.6rem;
+        padding: 1.3rem 1rem 1.8rem;
         border-radius: 14px;
     }
 
@@ -575,7 +588,7 @@ body.quote-request-page {
 
     .quote-request-grid {
         grid-template-columns: 1fr;
-        gap: 0.8rem;
+        gap: 0.85rem;
     }
 
     .qr-input,
@@ -600,5 +613,6 @@ body.quote-request-page {
     .qr-actions .primary-button {
         width: 100%;
         text-align: center;
+        justify-content: center;
     }
 }
