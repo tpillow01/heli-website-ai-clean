@@ -422,25 +422,26 @@ body{
    ────────────────────────────────────────────── */
 
 body.quote-request-page {
-    background: #050608;
-    color: #f5f5f5;
+    /* Match the light theme of the rest of the site */
+    background: #f7efe3;
+    color: #2a130c;
 }
 
-/* Make the whole app area flex so header stays on top, form scrolls */
+/* Keep header on top, content scrolls underneath */
 .quote-request-page .app-shell {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
 }
 
-/* Scrollable wrapper under the header */
+/* Scrollable wrapper below the header */
 .quote-request-wrapper {
     flex: 1;
     display: flex;
     justify-content: center;
-    padding: 1.5rem 1.5rem 2rem;
+    padding: 1.5rem 1.5rem 2.5rem;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow-y: auto;   /* page scrolls, not the card */
 }
 
 .quote-request-main {
@@ -448,24 +449,30 @@ body.quote-request-page {
     max-width: 1100px;
 }
 
+/* Main card with form */
 .quote-request-card {
-    background: #111318;
+    background: #fbf3e6;
     border-radius: 18px;
     padding: 1.75rem 2rem;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(134, 97, 60, 0.25);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
+
+    /* Make sure no internal scrollbars appear */
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 .quote-request-title {
     font-size: 1.6rem;
     font-weight: 700;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.3rem;
+    color: #2a130c;
 }
 
 .quote-request-subtitle {
     font-size: 0.95rem;
-    color: #c3c3c3;
-    margin-bottom: 1.5rem;
+    color: #6b5744;
+    margin-bottom: 1.6rem;
 }
 
 /* Form grid */
@@ -482,7 +489,7 @@ body.quote-request-page {
 .qr-group {
     display: flex;
     flex-direction: column;
-    gap: 0.18rem;
+    gap: 0.25rem;
 }
 
 .qr-group-full {
@@ -492,22 +499,24 @@ body.quote-request-page {
 .qr-group label {
     font-size: 0.9rem;
     font-weight: 600;
-    color: #f5f5f5;
+    color: #311a10;
 }
 
 .qr-hint {
     font-size: 0.8rem;
-    color: #9b9b9b;
+    color: #8d7258;
 }
+
+/* Inputs / selects / textareas */
 
 .qr-input,
 .qr-select,
 .qr-textarea {
-    background: #050609;
+    background: #fdf7ef;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(134, 97, 60, 0.45);
     padding: 0.6rem 0.75rem;
-    color: #f5f5f5;
+    color: #2a130c;
     font-size: 0.95rem;
     outline: none;
     width: 100%;
@@ -516,23 +525,26 @@ body.quote-request-page {
 
 .qr-input::placeholder,
 .qr-textarea::placeholder {
-    color: #727272;
+    color: #a08b76;
 }
 
 .qr-input:focus,
 .qr-select:focus,
 .qr-textarea:focus {
-    border-color: #cc0000;
-    box-shadow: 0 0 0 1px rgba(204, 0, 0, 0.65);
+    border-color: #b41218;
+    box-shadow: 0 0 0 1px rgba(180, 18, 24, 0.45);
+    background: #fffaf2;
 }
 
 .qr-select {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-    background-image: linear-gradient(45deg, transparent 50%, #f5f5f5 50%),
-        linear-gradient(135deg, #f5f5f5 50%, transparent 50%);
-    background-position: calc(100% - 1rem) calc(50% - 3px),
+    background-image:
+        linear-gradient(45deg, transparent 50%, #6b5744 50%),
+        linear-gradient(135deg, #6b5744 50%, transparent 50%);
+    background-position:
+        calc(100% - 1rem) calc(50% - 3px),
         calc(100% - 0.85rem) calc(50% + 3px);
     background-size: 7px 7px, 7px 7px;
     background-repeat: no-repeat;
@@ -543,7 +555,8 @@ body.quote-request-page {
     resize: vertical;
 }
 
-/* Action button */
+/* Action button area */
+
 .qr-actions {
     margin-top: 1.6rem;
     display: flex;
@@ -551,38 +564,9 @@ body.quote-request-page {
 }
 
 .qr-actions .primary-button {
-    padding: 0.7rem 1.4rem;
+    padding: 0.75rem 1.6rem;
     font-size: 0.95rem;
     border-radius: 999px;
-}
-
-/* Tabs look – reuse existing style but ensure bold black text look */
-.tabs {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-}
-
-.tab {
-    padding: 0.45rem 0.9rem;
-    border-radius: 999px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    text-decoration: none;
-    border: 1px solid transparent;
-    background: transparent;
-    color: #f5f5f5;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.tab:hover {
-    background: rgba(255, 255, 255, 0.07);
-}
-
-.tab.active {
-    background: #f5f5f5;
-    color: #000;
-    border-color: #f5f5f5;
 }
 
 /* ──────────────────────────────────────────────
@@ -604,22 +588,17 @@ body.quote-request-page {
         text-align: center;
     }
 
-    .tabs {
-        justify-content: center;
-        flex-wrap: wrap;
-    }
-
     .quote-request-wrapper {
-        padding: 0.85rem 0.75rem 1.4rem;
+        padding: 1rem 0.75rem 2rem;
     }
 
     .quote-request-card {
-        padding: 1.2rem 0.85rem;
+        padding: 1.3rem 1rem;
         border-radius: 14px;
     }
 
     .quote-request-title {
-        font-size: 1.3rem;
+        font-size: 1.35rem;
         text-align: center;
     }
 
@@ -631,7 +610,7 @@ body.quote-request-page {
 
     .quote-request-grid {
         grid-template-columns: 1fr;
-        gap: 0.8rem;
+        gap: 0.85rem;
     }
 
     .qr-input,
@@ -642,7 +621,7 @@ body.quote-request-page {
     }
 
     .qr-group label {
-        font-size: 0.85rem;
+        font-size: 0.86rem;
     }
 
     .qr-hint {
@@ -656,6 +635,5 @@ body.quote-request-page {
     .qr-actions .primary-button {
         width: 100%;
         text-align: center;
-        justify-content: center;
     }
 }

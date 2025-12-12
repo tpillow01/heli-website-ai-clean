@@ -12,7 +12,7 @@
 <body class="quote-request-page">
 <div class="app-shell">
 
-    <!-- Top header + nav (matches other tabs) -->
+    <!-- Top header: matches main site -->
     <header class="top-header">
         <div class="header-left">
             <div class="app-title">Tynan Equipment AI</div>
@@ -39,7 +39,7 @@
         </div>
     </header>
 
-    <!-- Dedicated scroll wrapper so the whole form can scroll -->
+    <!-- Scrollable content area -->
     <div class="quote-request-wrapper">
         <main class="quote-request-main">
             <section class="quote-request-card">
@@ -48,18 +48,21 @@
                     Fill out every field below to generate a clean PDF for the quoting team.
                 </p>
 
-                <!-- Flash messages for validation errors (if any) -->
-                {% with messages = get_flashed_messages(with_categories=true) %}
+                <!-- Flash error messages (from server-side validation) -->
+                {% with messages = get_flashed_messages(with_categories=True) %}
                   {% if messages %}
                     <div class="flash-container">
                       {% for category, message in messages %}
-                        <div class="flash {{ category }}">{{ message }}</div>
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
                       {% endfor %}
                     </div>
                   {% endif %}
                 {% endwith %}
 
-                <form method="post" action="{{ url_for('quote_request') }}" class="quote-request-form" novalidate>
+                <form method="post"
+                      action="{{ url_for('quote_request') }}"
+                      class="quote-request-form"
+                      novalidate>
                     <div class="quote-request-grid">
 
                         <!-- Customer info -->
@@ -85,8 +88,8 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="contact_name">Contact Name</label>
-                            <div class="qr-hint">First &amp; Last Name of primary contact</div>
+                            <label for="contact_name">Contact Name (First &amp; Last)</label>
+                            <div class="qr-hint">Primary contact at the company</div>
                             <input type="text" id="contact_name" name="contact_name"
                                    class="qr-input" required />
                         </div>
@@ -100,9 +103,9 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="fuel_type">Fuel</label>
+                            <label for="fuel">Fuel</label>
                             <div class="qr-hint">LPG, Diesel, Electric, or Dual Fuel</div>
-                            <select id="fuel_type" name="fuel_type" class="qr-select" required>
+                            <select id="fuel" name="fuel" class="qr-select" required>
                                 <option value="" disabled selected>Select fuel type</option>
                                 {% for option in fuel_options %}
                                     <option value="{{ option }}">{{ option }}</option>
@@ -119,7 +122,7 @@
 
                         <div class="qr-group">
                             <label for="mast_ohl_mfh">Mast OHL / MFH</label>
-                            <div class="qr-hint">Enter Maximum Fork Height</div>
+                            <div class="qr-hint">Enter maximum fork height</div>
                             <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh"
                                    class="qr-input" required />
                         </div>
@@ -146,9 +149,9 @@
                             <label for="aux_valve">Auxiliary Control Valve</label>
                             <select id="aux_valve" name="aux_valve" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                {% for option in aux_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
-                                {% endfor %}
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
                             </select>
                         </div>
 
@@ -156,29 +159,32 @@
                             <label for="aux_hose">Auxiliary Hose Take Up</label>
                             <select id="aux_hose" name="aux_hose" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                {% for option in aux_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
-                                {% endfor %}
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
                             </select>
                         </div>
 
                         <div class="qr-group">
                             <label for="fork_type">Fork Type</label>
-                            <div class="qr-hint">Standard, Hinged Fork etc</div>
+                            <div class="qr-hint">Standard, Hinged Fork, etc.</div>
                             <input type="text" id="fork_type" name="fork_type"
                                    class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="fork_length">Fork Length</label>
-                            <div class="qr-hint">42 in, 48 in etc</div>
+                            <div class="qr-hint">42 in, 48 in, etc.</div>
                             <input type="text" id="fork_length" name="fork_length"
                                    class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="tires">Tire</label>
-                            <div class="qr-hint">Select tire style</div>
+                            <div class="qr-hint">
+                                Cushion Standard, Cushion Non Marking, Cushion Non Marking Traction,
+                                Smooth, Solid Pneumatic, Pneumatic
+                            </div>
                             <select id="tires" name="tires" class="qr-select" required>
                                 <option value="" disabled selected>Select tires</option>
                                 {% for option in tire_options %}
@@ -190,6 +196,9 @@
                         <!-- Seat / lights -->
                         <div class="qr-group">
                             <label for="seat_suspension">Seat Suspension</label>
+                            <div class="qr-hint">
+                                Stock up to 10,000 lbs, above that capacity is an extra charge
+                            </div>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -200,6 +209,9 @@
 
                         <div class="qr-group">
                             <label for="headlights">Front Work Lights</label>
+                            <div class="qr-hint">
+                                Stock up to 10,000 lbs, above that capacity is an extra charge
+                            </div>
                             <select id="headlights" name="headlights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -220,6 +232,9 @@
 
                         <div class="qr-group">
                             <label for="strobe">Strobe</label>
+                            <div class="qr-hint">
+                                Stock up to 10,000 lbs, above that capacity is an extra charge
+                            </div>
                             <select id="strobe" name="strobe" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -228,9 +243,10 @@
                             </select>
                         </div>
 
-                        <!-- Yes/No safety lights -->
+                        <!-- Yes/No lights -->
                         <div class="qr-group">
                             <label for="rear_work_light">Rear Work Light</label>
+                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -241,6 +257,7 @@
 
                         <div class="qr-group">
                             <label for="blue_light_front">Blue Light Front</label>
+                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_front" name="blue_light_front" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -251,6 +268,7 @@
 
                         <div class="qr-group">
                             <label for="blue_light_rear">Blue Light Rear</label>
+                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_rear" name="blue_light_rear" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -261,6 +279,7 @@
 
                         <div class="qr-group">
                             <label for="red_curtain_lights">Red Curtain Lights</label>
+                            <div class="qr-hint">Additional charge if yes</div>
                             <select id="red_curtain_lights" name="red_curtain_lights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
@@ -272,7 +291,7 @@
                         <!-- Battery / charger -->
                         <div class="qr-group">
                             <label for="battery">Battery</label>
-                            <div class="qr-hint">Lithium, Lead Acid, or None for IC</div>
+                            <div class="qr-hint">Lithium, Lead Acid, None, etc.</div>
                             <select id="battery" name="battery" class="qr-select" required>
                                 <option value="" disabled selected>Select battery</option>
                                 {% for option in battery_options %}
@@ -283,7 +302,7 @@
 
                         <div class="qr-group">
                             <label for="charger">Charger</label>
-                            <div class="qr-hint">Standard if truck is electric, otherwise type "None"</div>
+                            <div class="qr-hint">Standard if the truck is electric; otherwise type "None"</div>
                             <input type="text" id="charger" name="charger"
                                    class="qr-input" required />
                         </div>
@@ -291,14 +310,16 @@
                         <!-- Local options / lease info -->
                         <div class="qr-group qr-group-full">
                             <label for="local_options">Local Options</label>
-                            <div class="qr-hint">Paint, Fan, Computer Holder, Cup Holder etc (type "None" if no local options)</div>
+                            <div class="qr-hint">
+                                Paint, Fan, Computer Holder, Cup Holder etc. (type "None" if no local options)
+                            </div>
                             <input type="text" id="local_options" name="local_options"
                                    class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="expected_delivery">Customer Requested Delivery</label>
-                            <div class="qr-hint">Enter customer requested delivery date or "-"</div>
+                            <div class="qr-hint">Use "-" if unknown</div>
                             <input type="text" id="expected_delivery" name="expected_delivery"
                                    class="qr-input" value="-" required />
                         </div>
@@ -330,13 +351,13 @@
 
                         <div class="qr-group qr-group-full">
                             <label for="notes">Notes</label>
-                            <div class="qr-hint">Customer Special Requirements</div>
+                            <div class="qr-hint">Customer special requirements</div>
                             <textarea id="notes" name="notes" class="qr-textarea" required></textarea>
                         </div>
 
                         <div class="qr-group qr-group-full">
                             <label for="salesperson_name">Salesperson Name</label>
-                            <div class="qr-hint">Your Name</div>
+                            <div class="qr-hint">Your name</div>
                             <input type="text" id="salesperson_name" name="salesperson_name"
                                    class="qr-input" required />
                         </div>
@@ -354,13 +375,13 @@
 </div>
 
 <script>
-    // Fuel -> battery voltage requirement
-    const fuelSelect = document.getElementById('fuel_type');
+    // Fuel -> battery voltage requirement visibility
+    const fuelSelect = document.getElementById('fuel');
     const voltageGroup = document.getElementById('battery_voltage_group');
     const voltageInput = document.getElementById('battery_voltage');
 
     function updateVoltageVisibility() {
-        if (!fuelSelect) return;
+        if (!fuelSelect || !voltageGroup || !voltageInput) return;
         const isElectric = fuelSelect.value === 'Electric';
         if (isElectric) {
             voltageGroup.style.display = 'block';
@@ -372,7 +393,7 @@
         }
     }
 
-    if (fuelSelect && voltageGroup && voltageInput) {
+    if (fuelSelect) {
         updateVoltageVisibility();
         fuelSelect.addEventListener('change', updateVoltageVisibility);
     }

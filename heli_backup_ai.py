@@ -308,7 +308,7 @@ def api_echo():
 # ── Quote Request dropdown options ─────────────────────────────
 FUEL_OPTIONS = ["LPG", "Diesel", "Electric", "Dual Fuel"]
 
-MAST_TYPE_OPTIONS = ["Simplex", "Duplex", "Three Stage", "Quad Stage"]
+MAST_TYPE_OPTIONS = ["Simplex", "Duplex", "Triplex", "Quad"]
 
 TIRE_OPTIONS = [
     "Cushion Standard",
