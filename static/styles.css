@@ -416,3 +416,129 @@ body{
   content: none !important;
   display: none !important;
 }
+
+/* --- Quote Request page layout --- */
+
+.quote-request-page {
+  /* Push content down so it doesn't hide under the fixed header */
+  padding-top: 90px; /* tweak up/down if needed depending on header height */
+}
+
+/* Main container for quote request */
+.quote-request-main {
+  max-width: 1200px;
+  margin: 0 auto 40px;
+  padding: 0 20px;
+}
+
+/* Dark card to match the rest of the app's panels */
+.quote-request-card {
+  background: #2a2520;
+  color: #f7f2ea;
+  border-radius: 18px;
+  padding: 24px 28px 32px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Headings */
+.quote-request-title {
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+}
+
+.quote-request-subtitle {
+  margin: 0 0 18px;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.qr-section-heading {
+  margin: 20px 0 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+/* Grid layout for fields (2-column on desktop, 1-column on mobile) */
+.quote-request-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px 22px;
+}
+
+.qr-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.qr-group-full {
+  grid-column: 1 / -1;
+}
+
+/* Labels + hints */
+.qr-group label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.qr-hint {
+  font-size: 0.75rem;
+  color: #d0c0aa;
+  margin-bottom: 4px;
+}
+
+/* Inputs / selects / textareas styled like dark form fields elsewhere */
+.qr-input,
+.qr-select,
+.qr-textarea {
+  background: #1d1814;
+  border-radius: 8px;
+  border: 1px solid #463a30;
+  padding: 8px 10px;
+  color: #f7f2ea;
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+.qr-input:focus,
+.qr-select:focus,
+.qr-textarea:focus {
+  outline: none;
+  border-color: #cc0000;
+}
+
+/* Make selects look consistent */
+.qr-select {
+  appearance: none;
+}
+
+/* Notes textarea */
+.qr-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* Submit button row */
+.qr-actions {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Reuse your existing primary button style if you have one;
+   this is a safe fallback. */
+.primary-button {
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: none;
+  background: #cc0000;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-button:hover {
+  filter: brightness(1.05);
+}

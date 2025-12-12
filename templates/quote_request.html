@@ -1,661 +1,690 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <title>HELI Quote Request</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-        /* Form-specific layout that sits inside your existing theme */
-
-        .qr-page {
-            min-height: 100vh;
-            background: var(--app-bg, #f5ebdb);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .qr-main {
-            max-width: 1100px;
-            margin: 32px auto 40px;
-            padding: 24px;
-            background: rgba(0, 0, 0, 0.72);
-            border-radius: 16px;
-            box-shadow: 0 0 32px rgba(0,0,0,0.5);
-        }
-
-        .qr-title {
-            font-size: 1.8rem;
-            margin-bottom: 6px;
-            color: #ffffff;
-            text-align: center;
-        }
-
-        .qr-subtitle {
-            font-size: 0.95rem;
-            color: #dddddd;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .qr-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 16px 24px;
-        }
-
-        .qr-field {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .qr-label {
-            font-size: 0.85rem;
-            color: #f5f0e8;
-            margin-bottom: 4px;
-            font-weight: 600;
-        }
-
-        .qr-hint {
-            font-size: 0.75rem;
-            color: #aaa093;
-            margin-bottom: 4px;
-        }
-
-        .qr-input,
-        .qr-select,
-        .qr-textarea {
-            background: #1c1511;
-            border: 1px solid #4b4035;
-            border-radius: 8px;
-            padding: 8px 10px;
-            color: #f5f0e8;
-            font-size: 0.9rem;
-            width: 100%;
-        }
-
-        .qr-input::placeholder,
-        .qr-textarea::placeholder {
-            color: #8e8072;
-        }
-
-        .qr-input:focus,
-        .qr-select:focus,
-        .qr-textarea:focus {
-            outline: none;
-            border-color: #b02a27;
-            box-shadow: 0 0 0 1px #b02a27;
-        }
-
-        .qr-textarea {
-            min-height: 80px;
-            resize: vertical;
-        }
-
-        .qr-section-title {
-            margin-top: 24px;
-            margin-bottom: 8px;
-            font-size: 1.1rem;
-            color: #fff7ec;
-            border-bottom: 1px solid #3a3027;
-            padding-bottom: 4px;
-        }
-
-        .qr-actions {
-            margin-top: 28px;
-            text-align: center;
-        }
-
-        .qr-submit-btn {
-            background: #b02a27;
-            border: none;
-            border-radius: 999px;
-            color: #ffffff;
-            font-size: 1rem;
-            padding: 10px 32px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-
-        .qr-submit-btn:hover {
-            background: #d33430;
-        }
-
-        .qr-errors {
-            margin-bottom: 16px;
-            padding: 10px 14px;
-            border-radius: 8px;
-            background: #4b1414;
-            color: #ffe2e2;
-            font-size: 0.9rem;
-        }
-
-        .qr-errors ul {
-            margin: 4px 0 0;
-            padding-left: 18px;
-        }
-
-        @media (max-width: 600px) {
-            .qr-main {
-                margin: 16px;
-                padding: 16px;
-            }
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Quote Request – Tynan Equipment AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='styles.css') }}?v=ymfix1"
+  />
 </head>
-<body class="qr-page">
+<body class="quote-request-page">
+  <div class="app-shell">
+    <!-- Top Header / Nav (matches other pages) -->
+    <header class="top-header">
+      <div class="header-left">
+        <div class="app-title">Tynan Equipment AI</div>
+      </div>
 
-    <!-- Top nav bar – mirror your Chat / Map / Battle Cards bar -->
-<header class="top-bar">
-    <div class="top-bar-left">
-        <button class="menu-button" id="menuToggle">
-            &#9776;
-        </button>
-<nav class="top-nav">
-    <a href="{{ url_for('home') }}" class="nav-link">Chat</a>
-    <a href="{{ url_for('map_page') }}" class="nav-link">Map</a>
-    <a href="{{ url_for('battlecards_index') }}" class="nav-link">Battle Cards</a>
-    <a href="{{ url_for('quote_request') }}" class="nav-link active">Quote Request</a>
-    <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
-</nav>
-    </div>
-    <div class="top-bar-right">
+      <div class="header-center">
+        <nav class="tabs">
+          <a href="{{ url_for('home') }}" class="tab">Chat</a>
+          <a href="{{ url_for('map_page') }}" class="tab">Map</a>
+          <a href="/battlecards"
+             class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
+            Battle Cards
+          </a>
+          <a href="{{ url_for('quote_request') }}" class="tab active">Quote Request</a>
+          <a href="{{ url_for('logout') }}" class="tab">Logout</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
         <div class="mode-toggle">
-            <span class="mode-label">Mode</span>
-            <button class="mode-pill" type="button">
-                Quote Request
-            </button>
+          <span class="mode-label">Mode</span>
+          <span class="mode-pill">Forklift Recommendation</span>
         </div>
-    </div>
-</header>
+      </div>
+    </header>
 
-    <main class="qr-main">
-        <h1 class="qr-title">HELI Quote Request</h1>
-        <p class="qr-subtitle">
-            Please complete all fields. When submitted, this form will generate a clean PDF for your sales request.
+    <!-- Main content -->
+    <main class="quote-request-main">
+      <section class="quote-request-card">
+        <h1 class="quote-request-title">HELI Quote Request Form</h1>
+        <p class="quote-request-subtitle">
+          Please complete all fields. Every field is required before the form can be submitted.
         </p>
 
-        {# Flash error messages from server-side validation #}
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            <div class="qr-errors">
-              <strong>There were some issues with your submission:</strong>
-              <ul>
-              {% for category, msg in messages %}
-                {% if category == "error" %}
-                  <li>{{ msg }}</li>
-                {% endif %}
-              {% endfor %}
-              </ul>
-            </div>
-          {% endif %}
-        {% endwith %}
-
-        <form method="POST" action="{{ url_for('quote_request') }}">
-            <!-- Customer Info -->
-            <div class="qr-section-title">Customer Information</div>
-            <div class="qr-grid">
-                <div class="qr-field">
-                    <label class="qr-label" for="customer_name">Customer Name</label>
-                    <div class="qr-hint">Company Name</div>
-                    <input
-                        id="customer_name"
-                        name="customer_name"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Company Name"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="address">Address</label>
-                    <div class="qr-hint">Companies Address</div>
-                    <input
-                        id="address"
-                        name="address"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Street address"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="city_state_zip">City / State / Zip</label>
-                    <div class="qr-hint">City, State, Zip</div>
-                    <input
-                        id="city_state_zip"
-                        name="city_state_zip"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Indianapolis, IN 46204"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="contact_name">Contact Name</label>
-                    <div class="qr-hint">Customer contact person</div>
-                    <input
-                        id="contact_name"
-                        name="contact_name"
-                        type="text"
-                        class="qr-input"
-                        placeholder="John Smith"
-                        required
-                    />
-                </div>
+        <form
+          method="post"
+          action="{{ url_for('quote_request') }}"
+          class="quote-request-form"
+        >
+          <!-- CUSTOMER INFO -->
+          <h2 class="qr-section-heading">Customer Information</h2>
+          <div class="quote-request-grid">
+            <!-- Customer Name -->
+            <div class="qr-group">
+              <label for="customer_name">Customer Name</label>
+              <div class="qr-hint">Company Name</div>
+              <input
+                type="text"
+                id="customer_name"
+                name="customer_name"
+                class="qr-input"
+                required
+                value="{{ request.form.get('customer_name', '') }}"
+              />
             </div>
 
-            <!-- Truck Spec -->
-            <div class="qr-section-title">Truck Specification</div>
-            <div class="qr-grid">
-                <div class="qr-field">
-                    <label class="qr-label" for="model">Model</label>
-                    <div class="qr-hint">Please check stock list first</div>
-                    <input
-                        id="model"
-                        name="model"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Please check stock list first"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="fuel_type">Fuel</label>
-                    <div class="qr-hint">LPG, Diesel, Electric</div>
-                    <select id="fuel_type" name="fuel_type" class="qr-select" required>
-                        <option value="" disabled selected>Select fuel type</option>
-                        {% for option in fuel_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="battery_voltage">Battery Voltage</label>
-                    <div class="qr-hint">Required if Electric</div>
-                    <input
-                        id="battery_voltage"
-                        name="battery_voltage"
-                        type="text"
-                        class="qr-input"
-                        placeholder="e.g. 36V, 48V"
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="mast_ohl_mfh">Mast OHL / MFH</label>
-                    <div class="qr-hint">Enter Maximum Fork Height</div>
-                    <input
-                        id="mast_ohl_mfh"
-                        name="mast_ohl_mfh"
-                        type="text"
-                        class="qr-input"
-                        placeholder="e.g. 188&quot; MFH"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="mast_type">Mast Type</label>
-                    <div class="qr-hint">Simplex, Duplex, Three Stage, Quad Stage</div>
-                    <select id="mast_type" name="mast_type" class="qr-select" required>
-                        <option value="" disabled selected>Select mast type</option>
-                        {% for option in mast_type_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="attachment">Attachment</label>
-                    <div class="qr-hint">SS, SSFP, Bale Clamp etc... (type "None" if not needed)</div>
-                    <input
-                        id="attachment"
-                        name="attachment"
-                        type="text"
-                        class="qr-input"
-                        placeholder="SS, SSFP, Bale Clamp etc..."
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="aux_valve">Auxiliary Control Valve</label>
-                    <div class="qr-hint">
-                        There will always be 2. For every attachment added, this bumps up (e.g. SS = 3, SSFP = 4).
-                    </div>
-                    <input
-                        id="aux_valve"
-                        name="aux_valve"
-                        type="text"
-                        class="qr-input"
-                        placeholder="e.g. 2, 3, 4"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="aux_hose">Auxiliary Hose Take Up</label>
-                    <div class="qr-hint">Matches the number from the auxiliary control valve</div>
-                    <input
-                        id="aux_hose"
-                        name="aux_hose"
-                        type="text"
-                        class="qr-input"
-                        placeholder="e.g. 2, 3, 4"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="fork_type">Fork Type</label>
-                    <div class="qr-hint">Standard, Hinged Fork etc.</div>
-                    <input
-                        id="fork_type"
-                        name="fork_type"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Standard, Hinged Fork etc."
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="fork_length">Fork Length</label>
-                    <div class="qr-hint">42 in, 48 in etc.</div>
-                    <input
-                        id="fork_length"
-                        name="fork_length"
-                        type="text"
-                        class="qr-input"
-                        placeholder="42 in, 48 in etc."
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="tires">Tire</label>
-                    <div class="qr-hint">Select tire style</div>
-                    <select id="tires" name="tires" class="qr-select" required>
-                        <option value="" disabled selected>Select tire</option>
-                        {% for option in tire_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="tire_compound">Tire Compound</label>
-                    <div class="qr-hint">Non-marking or Standard</div>
-                    <select id="tire_compound" name="tire_compound" class="qr-select" required>
-                        <option value="" disabled selected>Select tire compound</option>
-                        {% for option in tire_compound_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+            <!-- Contact Name -->
+            <div class="qr-group">
+              <label for="contact_name">Contact Name</label>
+              <div class="qr-hint">Main contact for this quote</div>
+              <input
+                type="text"
+                id="contact_name"
+                name="contact_name"
+                class="qr-input"
+                required
+                value="{{ request.form.get('contact_name', '') }}"
+              />
             </div>
 
-            <!-- Standard Options -->
-            <div class="qr-section-title">Standard Equipment</div>
-            <div class="qr-grid">
-                <div class="qr-field">
-                    <label class="qr-label" for="seat_suspension">Seat Suspension</label>
-                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-                    <input
-                        id="seat_suspension"
-                        name="seat_suspension"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Yes / No"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="headlights">Headlights</label>
-                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-                    <input
-                        id="headlights"
-                        name="headlights"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Yes / No"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="back_up_alarm">Backup Alarm</label>
-                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-                    <input
-                        id="back_up_alarm"
-                        name="back_up_alarm"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Yes / No"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="strobe">Strobe</label>
-                    <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
-                    <input
-                        id="strobe"
-                        name="strobe"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Yes / No"
-                        required
-                    />
-                </div>
+            <!-- Address -->
+            <div class="qr-group">
+              <label for="address">Address</label>
+              <div class="qr-hint">Company's Address</div>
+              <input
+                type="text"
+                id="address"
+                name="address"
+                class="qr-input"
+                required
+                value="{{ request.form.get('address', '') }}"
+              />
             </div>
 
-            <!-- Lighting / Safety Options -->
-            <div class="qr-section-title">Lighting & Safety Options</div>
-            <div class="qr-grid">
-                <div class="qr-field">
-                    <label class="qr-label" for="rear_work_light">Rear Work Light</label>
-                    <div class="qr-hint">Additional charge if yes</div>
-                    <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
-                        <option value="" disabled selected>Select</option>
-                        {% for option in yes_no_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="blue_light_front">Blue Light Front</label>
-                    <div class="qr-hint">Additional charge if yes</div>
-                    <select id="blue_light_front" name="blue_light_front" class="qr-select" required>
-                        <option value="" disabled selected>Select</option>
-                        {% for option in yes_no_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="blue_light_rear">Blue Light Rear</label>
-                    <div class="qr-hint">Additional charge if yes</div>
-                    <select id="blue_light_rear" name="blue_light_rear" class="qr-select" required>
-                        <option value="" disabled selected>Select</option>
-                        {% for option in yes_no_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="red_curtain_lights">Red Curtain Lights</label>
-                    <div class="qr-hint">Additional charge if yes</div>
-                    <select id="red_curtain_lights" name="red_curtain_lights" class="qr-select" required>
-                        <option value="" disabled selected>Select</option>
-                        {% for option in yes_no_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+            <!-- City -->
+            <div class="qr-group">
+              <label for="city">City</label>
+              <div class="qr-hint">City</div>
+              <input
+                type="text"
+                id="city"
+                name="city"
+                class="qr-input"
+                required
+                value="{{ request.form.get('city', '') }}"
+              />
             </div>
 
-            <!-- Battery / Charger / Local options -->
-            <div class="qr-section-title">Power & Local Options</div>
-            <div class="qr-grid">
-                <div class="qr-field">
-                    <label class="qr-label" for="battery">Battery</label>
-                    <div class="qr-hint">Lithium or Lead Acid</div>
-                    <select id="battery" name="battery" class="qr-select">
-                        <option value="" disabled selected>Select battery</option>
-                        {% for option in battery_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="charger">Charger</label>
-                    <div class="qr-hint">
-                        Standard if the truck is electric; if not, set to "None".
-                    </div>
-                    <input
-                        id="charger"
-                        name="charger"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Standard / None"
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="local_options">Location Options</label>
-                    <div class="qr-hint">Paint, Fan, Computer Holder, Cup Holder etc. (type "None" if not needed)</div>
-                    <input
-                        id="local_options"
-                        name="local_options"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Paint, Fan, Computer Holder, Cup Holder etc."
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="expected_delivery">Expected Delivery</label>
-                    <div class="qr-hint">Use a "-" if unknown</div>
-                    <input
-                        id="expected_delivery"
-                        name="expected_delivery"
-                        type="text"
-                        class="qr-input"
-                        placeholder="-"
-                        value="-"
-                    />
-                </div>
+            <!-- State -->
+            <div class="qr-group">
+              <label for="state">State</label>
+              <div class="qr-hint">State</div>
+              <input
+                type="text"
+                id="state"
+                name="state"
+                class="qr-input"
+                required
+                value="{{ request.form.get('state', '') }}"
+              />
             </div>
 
-            <!-- Lease & Notes -->
-            <div class="qr-section-title">Lease Details & Notes</div>
-            <div class="qr-grid">
-                <div class="qr-field">
-                    <label class="qr-label" for="lease_type">Lease Type</label>
-                    <div class="qr-hint">FMV or FPO</div>
-                    <select id="lease_type" name="lease_type" class="qr-select" required>
-                        <option value="" disabled selected>Select lease type</option>
-                        {% for option in lease_type_options %}
-                            <option value="{{ option }}">{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+            <!-- Zip -->
+            <div class="qr-group">
+              <label for="zip_code">Zip Code</label>
+              <div class="qr-hint">Zip</div>
+              <input
+                type="text"
+                id="zip_code"
+                name="zip_code"
+                class="qr-input"
+                required
+                value="{{ request.form.get('zip_code', '') }}"
+              />
+            </div>
+          </div>
 
-                <div class="qr-field">
-                    <label class="qr-label" for="annual_hours">Annual Hours</label>
-                    <div class="qr-hint">Ask customer how many hours they use a year</div>
-                    <input
-                        id="annual_hours"
-                        name="annual_hours"
-                        type="text"
-                        class="qr-input"
-                        placeholder="e.g. 2,000"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="lease_term">Lease Term (Months)</label>
-                    <div class="qr-hint">Ask customer how many months they would like to lease</div>
-                    <input
-                        id="lease_term"
-                        name="lease_term"
-                        type="text"
-                        class="qr-input"
-                        placeholder="e.g. 36, 48, 60"
-                        required
-                    />
-                </div>
-
-                <div class="qr-field">
-                    <label class="qr-label" for="salesperson_name">Salesperson Name</label>
-                    <div class="qr-hint">Your Name</div>
-                    <input
-                        id="salesperson_name"
-                        name="salesperson_name"
-                        type="text"
-                        class="qr-input"
-                        placeholder="Your Name"
-                        required
-                    />
-                </div>
+          <!-- TRUCK SPECS -->
+          <h2 class="qr-section-heading">Truck Specification</h2>
+          <div class="quote-request-grid">
+            <!-- Model -->
+            <div class="qr-group">
+              <label for="model">Model</label>
+              <div class="qr-hint">Please check stock list first</div>
+              <input
+                type="text"
+                id="model"
+                name="model"
+                class="qr-input"
+                required
+                value="{{ request.form.get('model', '') }}"
+              />
             </div>
 
-            <div class="qr-field" style="margin-top:16px;">
-                <label class="qr-label" for="notes">Notes</label>
-                <div class="qr-hint">Customer Special Requirements</div>
-                <textarea
-                    id="notes"
-                    name="notes"
-                    class="qr-textarea"
-                    placeholder="Customer Special Requirements"
-                    required
-                ></textarea>
+            <!-- Fuel -->
+            <div class="qr-group">
+              <label for="fuel">Fuel</label>
+              <div class="qr-hint">LPG, Diesel, Electric (select from list)</div>
+              <select
+                id="fuel"
+                name="fuel"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('fuel') %}selected{% endif %}>
+                  Select fuel
+                </option>
+                {% for option in fuel_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('fuel') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
             </div>
 
-            <div class="qr-actions">
-                <button type="submit" class="qr-submit-btn">
-                    Generate Quote Request PDF
-                </button>
+            <!-- Battery Voltage (required if Electric) -->
+            <div class="qr-group">
+              <label for="battery_voltage">Battery Voltage</label>
+              <div class="qr-hint">Required if Electric &mdash; e.g. 36V, 48V</div>
+              <input
+                type="text"
+                id="battery_voltage"
+                name="battery_voltage"
+                class="qr-input"
+                required
+                value="{{ request.form.get('battery_voltage', '') }}"
+              />
             </div>
+
+            <!-- Mast OHL / MFH -->
+            <div class="qr-group">
+              <label for="mast_ohl_mfh">Mast OHL / MFH</label>
+              <div class="qr-hint">Enter Maximum Fork Height</div>
+              <input
+                type="text"
+                id="mast_ohl_mfh"
+                name="mast_ohl_mfh"
+                class="qr-input"
+                required
+                value="{{ request.form.get('mast_ohl_mfh', '') }}"
+              />
+            </div>
+
+            <!-- Mast Type -->
+            <div class="qr-group">
+              <label for="mast_type">Mast Type</label>
+              <div class="qr-hint">Simplex, Duplex, Three Stage, Quad Stage</div>
+              <select
+                id="mast_type"
+                name="mast_type"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('mast_type') %}selected{% endif %}>
+                  Select mast type
+                </option>
+                {% for option in mast_type_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('mast_type') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Attachment -->
+            <div class="qr-group">
+              <label for="attachment">Attachment</label>
+              <div class="qr-hint">SS, SSFP, Bale Clamp etc... (type "None" if not needed)</div>
+              <input
+                type="text"
+                id="attachment"
+                name="attachment"
+                class="qr-input"
+                required
+                value="{{ request.form.get('attachment', '') }}"
+              />
+            </div>
+
+            <!-- Auxiliary Control Valve -->
+            <div class="qr-group">
+              <label for="aux_valve">Auxiliary Control Valve</label>
+              <div class="qr-hint">
+                There will always be 2. For every attachment added, this bumps up (e.g. SS = 3, SSFP = 4).
+              </div>
+              <input
+                type="text"
+                id="aux_valve"
+                name="aux_valve"
+                class="qr-input"
+                required
+                value="{{ request.form.get('aux_valve', '') }}"
+              />
+            </div>
+
+            <!-- Auxiliary Hose Take Up -->
+            <div class="qr-group">
+              <label for="aux_hose">Auxiliary Hose Take Up</label>
+              <div class="qr-hint">Matches the number from the auxiliary control valve</div>
+              <input
+                type="text"
+                id="aux_hose"
+                name="aux_hose"
+                class="qr-input"
+                required
+                value="{{ request.form.get('aux_hose', '') }}"
+              />
+            </div>
+
+            <!-- Fork Type -->
+            <div class="qr-group">
+              <label for="fork_type">Fork Type</label>
+              <div class="qr-hint">Standard, Hinged Fork etc.</div>
+              <input
+                type="text"
+                id="fork_type"
+                name="fork_type"
+                class="qr-input"
+                required
+                value="{{ request.form.get('fork_type', '') }}"
+              />
+            </div>
+
+            <!-- Fork Length -->
+            <div class="qr-group">
+              <label for="fork_length">Fork Length</label>
+              <div class="qr-hint">42 in, 48 in etc.</div>
+              <input
+                type="text"
+                id="fork_length"
+                name="fork_length"
+                class="qr-input"
+                required
+                value="{{ request.form.get('fork_length', '') }}"
+              />
+            </div>
+
+            <!-- Tire -->
+            <div class="qr-group">
+              <label for="tire">Tire</label>
+              <div class="qr-hint">Select tire style</div>
+              <select
+                id="tire"
+                name="tire"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('tire') %}selected{% endif %}>
+                  Select tire
+                </option>
+                {% for option in tire_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('tire') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Tire Compound -->
+            <div class="qr-group">
+              <label for="tire_compound">Tire Compound</label>
+              <div class="qr-hint">Non-marking or Standard</div>
+              <select
+                id="tire_compound"
+                name="tire_compound"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('tire_compound') %}selected{% endif %}>
+                  Select tire compound
+                </option>
+                {% for option in tire_compound_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('tire_compound') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <!-- STANDARD EQUIPMENT -->
+          <h2 class="qr-section-heading">Standard Equipment</h2>
+          <div class="quote-request-grid">
+            <!-- Seat Suspension -->
+            <div class="qr-group">
+              <label for="seat_suspension">Seat Suspension</label>
+              <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+              <input
+                type="text"
+                id="seat_suspension"
+                name="seat_suspension"
+                class="qr-input"
+                required
+                placeholder="Yes / No"
+                value="{{ request.form.get('seat_suspension', '') }}"
+              />
+            </div>
+
+            <!-- Headlights -->
+            <div class="qr-group">
+              <label for="headlights">Headlights</label>
+              <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+              <input
+                type="text"
+                id="headlights"
+                name="headlights"
+                class="qr-input"
+                required
+                placeholder="Yes / No"
+                value="{{ request.form.get('headlights', '') }}"
+              />
+            </div>
+
+            <!-- Backup Alarm -->
+            <div class="qr-group">
+              <label for="back_up_alarm">Backup Alarm</label>
+              <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+              <input
+                type="text"
+                id="back_up_alarm"
+                name="back_up_alarm"
+                class="qr-input"
+                required
+                placeholder="Yes / No"
+                value="{{ request.form.get('back_up_alarm', '') }}"
+              />
+            </div>
+
+            <!-- Strobe -->
+            <div class="qr-group">
+              <label for="strobe">Strobe</label>
+              <div class="qr-hint">Stock up to 10,000 lbs, above that capacity is an extra charge</div>
+              <input
+                type="text"
+                id="strobe"
+                name="strobe"
+                class="qr-input"
+                required
+                placeholder="Yes / No"
+                value="{{ request.form.get('strobe', '') }}"
+              />
+            </div>
+          </div>
+
+          <!-- LIGHTING & SAFETY -->
+          <h2 class="qr-section-heading">Lighting &amp; Safety Options</h2>
+          <div class="quote-request-grid">
+            <!-- Rear Work Light -->
+            <div class="qr-group">
+              <label for="rear_work_light">Rear Work Light</label>
+              <div class="qr-hint">Additional charge if yes</div>
+              <select
+                id="rear_work_light"
+                name="rear_work_light"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('rear_work_light') %}selected{% endif %}>
+                  Select
+                </option>
+                {% for option in yes_no_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('rear_work_light') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Blue Light Front -->
+            <div class="qr-group">
+              <label for="blue_light_front">Blue Light Front</label>
+              <div class="qr-hint">Additional charge if yes</div>
+              <select
+                id="blue_light_front"
+                name="blue_light_front"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('blue_light_front') %}selected{% endif %}>
+                  Select
+                </option>
+                {% for option in yes_no_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('blue_light_front') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Blue Light Rear -->
+            <div class="qr-group">
+              <label for="blue_light_rear">Blue Light Rear</label>
+              <div class="qr-hint">Additional charge if yes</div>
+              <select
+                id="blue_light_rear"
+                name="blue_light_rear"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('blue_light_rear') %}selected{% endif %}>
+                  Select
+                </option>
+                {% for option in yes_no_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('blue_light_rear') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Red Curtain Lights -->
+            <div class="qr-group">
+              <label for="red_curtain_lights">Red Curtain Lights</label>
+              <div class="qr-hint">Additional charge if yes</div>
+              <select
+                id="red_curtain_lights"
+                name="red_curtain_lights"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('red_curtain_lights') %}selected{% endif %}>
+                  Select
+                </option>
+                {% for option in yes_no_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('red_curtain_lights') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <!-- POWER & LOCAL OPTIONS -->
+          <h2 class="qr-section-heading">Power &amp; Local Options</h2>
+          <div class="quote-request-grid">
+            <!-- Battery -->
+            <div class="qr-group">
+              <label for="battery">Battery</label>
+              <div class="qr-hint">Lithium or Lead Acid</div>
+              <select
+                id="battery"
+                name="battery"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('battery') %}selected{% endif %}>
+                  Select battery
+                </option>
+                {% for option in battery_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('battery') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Charger -->
+            <div class="qr-group">
+              <label for="charger">Charger</label>
+              <div class="qr-hint">Standard if the truck is electric; if not, set to "None".</div>
+              <input
+                type="text"
+                id="charger"
+                name="charger"
+                class="qr-input"
+                required
+                placeholder="Standard / None"
+                value="{{ request.form.get('charger', '') }}"
+              />
+            </div>
+
+            <!-- Location Options -->
+            <div class="qr-group">
+              <label for="local_options">Location Options</label>
+              <div class="qr-hint">
+                Paint, Fan, Computer Holder, Cup Holder etc. (type "None" if no local options)
+              </div>
+              <input
+                type="text"
+                id="local_options"
+                name="local_options"
+                class="qr-input"
+                required
+                value="{{ request.form.get('local_options', '') }}"
+              />
+            </div>
+
+            <!-- Expected Delivery -->
+            <div class="qr-group">
+              <label for="expected_delivery">Expected Delivery</label>
+              <div class="qr-hint">Use a "-" if unknown</div>
+              <input
+                type="text"
+                id="expected_delivery"
+                name="expected_delivery"
+                class="qr-input"
+                required
+                placeholder="-"
+                value="{{ request.form.get('expected_delivery', '-') }}"
+              />
+            </div>
+
+            <!-- Lease Type -->
+            <div class="qr-group">
+              <label for="lease_type">Lease Type</label>
+              <div class="qr-hint">FMV or FPO</div>
+              <select
+                id="lease_type"
+                name="lease_type"
+                class="qr-select"
+                required
+              >
+                <option value="" disabled {% if not request.form.get('lease_type') %}selected{% endif %}>
+                  Select lease type
+                </option>
+                {% for option in lease_type_options %}
+                  <option
+                    value="{{ option }}"
+                    {% if request.form.get('lease_type') == option %}selected{% endif %}
+                  >
+                    {{ option }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Annual Hours -->
+            <div class="qr-group">
+              <label for="annual_hours">Annual Hours</label>
+              <div class="qr-hint">Ask customer how many hours they use a year</div>
+              <input
+                type="number"
+                min="0"
+                id="annual_hours"
+                name="annual_hours"
+                class="qr-input"
+                required
+                value="{{ request.form.get('annual_hours', '') }}"
+              />
+            </div>
+
+            <!-- Lease Term -->
+            <div class="qr-group">
+              <label for="lease_term">Lease Term (Months)</label>
+              <div class="qr-hint">Ask customer how many months they would like to lease</div>
+              <input
+                type="number"
+                min="0"
+                id="lease_term"
+                name="lease_term"
+                class="qr-input"
+                required
+                value="{{ request.form.get('lease_term', '') }}"
+              />
+            </div>
+          </div>
+
+          <!-- NOTES & SALESPERSON -->
+          <h2 class="qr-section-heading">Notes &amp; Salesperson</h2>
+          <div class="quote-request-grid">
+            <!-- Notes -->
+            <div class="qr-group qr-group-full">
+              <label for="notes">Notes</label>
+              <div class="qr-hint">Customer Special Requirements</div>
+              <textarea
+                id="notes"
+                name="notes"
+                class="qr-textarea"
+                rows="3"
+                required
+              >{{ request.form.get('notes', '') }}</textarea>
+            </div>
+
+            <!-- Salesperson Name -->
+            <div class="qr-group">
+              <label for="salesperson_name">Salesperson Name</label>
+              <div class="qr-hint">Your Name</div>
+              <input
+                type="text"
+                id="salesperson_name"
+                name="salesperson_name"
+                class="qr-input"
+                required
+                value="{{ request.form.get('salesperson_name', '') }}"
+              />
+            </div>
+          </div>
+
+          <!-- Submit -->
+          <div class="qr-actions">
+            <button type="submit" class="primary-button">
+              Generate Quote Request PDF
+            </button>
+          </div>
         </form>
+      </section>
     </main>
-
-    <script>
-        // Require battery voltage & battery type when Electric is chosen
-        const fuelSelect = document.getElementById('fuel_type');
-        const battVoltageInput = document.getElementById('battery_voltage');
-        const batterySelect = document.getElementById('battery');
-
-        function handleFuelChange() {
-            if (!fuelSelect) return;
-            const val = fuelSelect.value;
-            if (val === 'Electric') {
-                if (battVoltageInput) battVoltageInput.required = true;
-                if (batterySelect) batterySelect.required = true;
-            } else {
-                if (battVoltageInput) battVoltageInput.required = false;
-                if (batterySelect) batterySelect.required = false;
-            }
-        }
-
-        if (fuelSelect) {
-            fuelSelect.addEventListener('change', handleFuelChange);
-            handleFuelChange();
-        }
-    </script>
-
+  </div>
 </body>
 </html>
