@@ -46,7 +46,6 @@
                     Fill out every field below to generate a clean PDF for the quoting team.
                 </p>
 
-                <!-- Flash messages (so you can SEE why PDF didn't generate) -->
                 {% with messages = get_flashed_messages(with_categories=true) %}
                   {% if messages %}
                     <div class="flash-wrap">
@@ -57,7 +56,6 @@
                   {% endif %}
                 {% endwith %}
 
-                <!-- Mobile-only helper -->
                 <div id="mobileSaveHint" style="display:none; margin-top:12px;">
                     <div class="qr-hint">
                         Mobile tip: after the PDF opens, tap <strong>Share</strong> → <strong>Save to Files</strong> (iPhone)
@@ -69,41 +67,34 @@
                       class="quote-request-form" novalidate>
                     <div class="quote-request-grid">
 
-                        <!-- Customer info -->
                         <div class="qr-group qr-group-full">
                             <label for="customer_name">Customer Name</label>
                             <div class="qr-hint">Company Name</div>
-                            <input type="text" id="customer_name" name="customer_name"
-                                   class="qr-input" required />
+                            <input type="text" id="customer_name" name="customer_name" class="qr-input" required />
                         </div>
 
                         <div class="qr-group qr-group-full">
                             <label for="address">Address</label>
                             <div class="qr-hint">Company Address</div>
-                            <input type="text" id="address" name="address"
-                                   class="qr-input" required />
+                            <input type="text" id="address" name="address" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="city_state_zip">City / State / Zip</label>
                             <div class="qr-hint">City, State, Zip</div>
-                            <input type="text" id="city_state_zip" name="city_state_zip"
-                                   class="qr-input" required />
+                            <input type="text" id="city_state_zip" name="city_state_zip" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="contact_name">Contact Name (First &amp; Last)</label>
                             <div class="qr-hint">Primary contact at the company</div>
-                            <input type="text" id="contact_name" name="contact_name"
-                                   class="qr-input" required />
+                            <input type="text" id="contact_name" name="contact_name" class="qr-input" required />
                         </div>
 
-                        <!-- Truck spec -->
                         <div class="qr-group">
                             <label for="model">Model</label>
                             <div class="qr-hint">Please check stock list first</div>
-                            <input type="text" id="model" name="model"
-                                   class="qr-input" required />
+                            <input type="text" id="model" name="model" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
@@ -120,15 +111,13 @@
                         <div class="qr-group" id="battery_voltage_group">
                             <label for="battery_voltage">Battery Voltage</label>
                             <div class="qr-hint">Required if fuel is Electric (e.g. 24V, 36V, 48V)</div>
-                            <input type="text" id="battery_voltage" name="battery_voltage"
-                                   class="qr-input" />
+                            <input type="text" id="battery_voltage" name="battery_voltage" class="qr-input" />
                         </div>
 
                         <div class="qr-group">
                             <label for="mast_ohl_mfh">Mast OHL / MFH</label>
                             <div class="qr-hint">Enter maximum fork height</div>
-                            <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh"
-                                   class="qr-input" required />
+                            <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
@@ -145,8 +134,7 @@
                         <div class="qr-group qr-group-full">
                             <label for="attachment">Attachment</label>
                             <div class="qr-hint">SS, SSFP, Bale Clamp etc... (type "None" if no attachment)</div>
-                            <input type="text" id="attachment" name="attachment"
-                                   class="qr-input" required />
+                            <input type="text" id="attachment" name="attachment" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
@@ -172,15 +160,13 @@
                         <div class="qr-group">
                             <label for="fork_type">Fork Type</label>
                             <div class="qr-hint">Standard, Hinged Fork, etc.</div>
-                            <input type="text" id="fork_type" name="fork_type"
-                                   class="qr-input" required />
+                            <input type="text" id="fork_type" name="fork_type" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="fork_length">Fork Length</label>
                             <div class="qr-hint">42 in, 48 in, etc.</div>
-                            <input type="text" id="fork_length" name="fork_length"
-                                   class="qr-input" required />
+                            <input type="text" id="fork_length" name="fork_length" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
@@ -197,7 +183,6 @@
                             </select>
                         </div>
 
-                        <!-- Seat / lights -->
                         <div class="qr-group">
                             <label for="seat_suspension">Seat Suspension</label>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
@@ -208,7 +193,7 @@
                             </select>
                         </div>
 
-                        <!-- IMPORTANT: must be headlights to match heli_backup_ai.py and quote_request_pdf.py -->
+                        <!-- MUST be headlights to match heli_backup_ai.py + quote_request_pdf.py -->
                         <div class="qr-group">
                             <label for="headlights">Front Work Lights</label>
                             <select id="headlights" name="headlights" class="qr-select" required>
@@ -282,7 +267,6 @@
                             </select>
                         </div>
 
-                        <!-- Battery / charger -->
                         <div class="qr-group">
                             <label for="battery">Battery</label>
                             <div class="qr-hint">Lithium, Lead Acid, None, etc.</div>
@@ -297,25 +281,19 @@
                         <div class="qr-group">
                             <label for="charger">Charger</label>
                             <div class="qr-hint">Standard if the truck is electric; otherwise type "None"</div>
-                            <input type="text" id="charger" name="charger"
-                                   class="qr-input" required />
+                            <input type="text" id="charger" name="charger" class="qr-input" required />
                         </div>
 
-                        <!-- Local options / lease info -->
                         <div class="qr-group qr-group-full">
                             <label for="local_options">Local Options</label>
-                            <div class="qr-hint">
-                                Paint, Fan, Computer Holder, Cup Holder etc. (type "None" if no local options)
-                            </div>
-                            <input type="text" id="local_options" name="local_options"
-                                   class="qr-input" required />
+                            <div class="qr-hint">Paint, Fan, Computer Holder, Cup Holder etc. (type "None" if no local options)</div>
+                            <input type="text" id="local_options" name="local_options" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="expected_delivery">Customer Requested Delivery</label>
                             <div class="qr-hint">Use "-" if unknown</div>
-                            <input type="text" id="expected_delivery" name="expected_delivery"
-                                   class="qr-input" value="-" required />
+                            <input type="text" id="expected_delivery" name="expected_delivery" class="qr-input" value="-" required />
                         </div>
 
                         <div class="qr-group">
@@ -332,15 +310,13 @@
                         <div class="qr-group">
                             <label for="annual_hours">Annual Hours</label>
                             <div class="qr-hint">Ask customer how many hours they use a year</div>
-                            <input type="number" id="annual_hours" name="annual_hours"
-                                   class="qr-input" required />
+                            <input type="number" id="annual_hours" name="annual_hours" class="qr-input" required />
                         </div>
 
                         <div class="qr-group">
                             <label for="lease_term">Lease Term (Months)</label>
                             <div class="qr-hint">Ask customer how many months they would like to lease</div>
-                            <input type="number" id="lease_term" name="lease_term"
-                                   class="qr-input" required />
+                            <input type="number" id="lease_term" name="lease_term" class="qr-input" required />
                         </div>
 
                         <div class="qr-group qr-group-full">
@@ -352,17 +328,17 @@
                         <div class="qr-group qr-group-full">
                             <label for="salesperson_name">Salesperson Name</label>
                             <div class="qr-hint">Your name</div>
-                            <input type="text" id="salesperson_name" name="salesperson_name"
-                                   class="qr-input" required />
+                            <input type="text" id="salesperson_name" name="salesperson_name" class="qr-input" required />
                         </div>
                     </div>
 
                     <div class="qr-actions">
-                        <button type="submit" class="primary-button">
+                        <button id="btnGeneratePdf" type="submit" class="primary-button">
                             Generate Quote Request PDF
                         </button>
                     </div>
                 </form>
+
             </section>
         </div>
     </main>
@@ -392,23 +368,82 @@
         fuelSelect.addEventListener('change', updateVoltageVisibility);
     }
 
-    // Mobile: open PDF in a new tab so users can Save/Share easily.
-    // Desktop stays exactly the same (downloads normally).
+    // Mobile Share/Save behavior (desktop stays EXACTLY the same)
     (function () {
         const form = document.getElementById("quoteRequestForm");
+        const btn = document.getElementById("btnGeneratePdf");
         const hint = document.getElementById("mobileSaveHint");
-        if (!form) return;
+        if (!form || !btn) return;
 
         const ua = navigator.userAgent || "";
         const isMobile = /iPhone|iPad|iPod|Android/i.test(ua);
 
-        if (isMobile) {
-            form.setAttribute("target", "_blank");
-            if (hint) hint.style.display = "block";
-        } else {
-            form.removeAttribute("target");
+        if (!isMobile) {
+            // Desktop: do nothing; normal submit -> normal download
             if (hint) hint.style.display = "none";
+            return;
         }
+
+        if (hint) hint.style.display = "block";
+
+        form.addEventListener("submit", async (e) => {
+            // Mobile: intercept submit and try to open native Share sheet
+            e.preventDefault();
+
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = "Generating PDF...";
+
+            try {
+                const formData = new FormData(form);
+
+                const res = await fetch(form.action, {
+                    method: "POST",
+                    body: formData,
+                    headers: {
+                        "X-Requested-With": "fetch",
+                        "Accept": "application/pdf"
+                    }
+                });
+
+                const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+                if (!res.ok || !contentType.includes("application/pdf")) {
+                    const msg = await res.text().catch(() => "");
+                    throw new Error(msg || `PDF generation failed (${res.status}).`);
+                }
+
+                const blob = await res.blob();
+
+                // Try filename from header
+                const dispo = res.headers.get("content-disposition") || "";
+                const match = dispo.match(/filename="(.+?)"/);
+                const filename = match ? match[1] : "heli_quote_request.pdf";
+
+                const file = new File([blob], filename, { type: "application/pdf" });
+
+                // Best case: native share sheet with the PDF attached
+                if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: "HELI Quote Request",
+                        text: "Quote request PDF",
+                        files: [file],
+                    });
+                    return;
+                }
+
+                // Fallback: open PDF in a new tab so user can use browser Share/Save
+                const url = URL.createObjectURL(blob);
+                window.open(url, "_blank");
+                setTimeout(() => URL.revokeObjectURL(url), 30000);
+
+            } catch (err) {
+                alert(err?.message || "Failed to generate/share the PDF.");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        });
     })();
 </script>
 </body>
