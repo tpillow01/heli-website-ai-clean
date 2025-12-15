@@ -12,7 +12,6 @@
 <body class="quote-request-page">
 <div class="app-shell">
 
-    <!-- Same style of header/nav as other pages -->
     <header class="top-header">
         <div class="header-left">
             <div class="app-title">Tynan Equipment AI</div>
@@ -39,7 +38,6 @@
         </div>
     </header>
 
-    <!-- The page now just scrolls normally; no funky inner scroll -->
     <main class="quote-request-main">
         <div class="quote-request-container">
             <section class="quote-request-card">
@@ -59,8 +57,15 @@
                   {% endif %}
                 {% endwith %}
 
-                <!-- target="_blank" keeps the form page from "wiping" when PDF downloads -->
-                <form method="post" action="{{ url_for('quote_request') }}" target="_blank"
+                <!-- Mobile-only helper -->
+                <div id="mobileSaveHint" style="display:none; margin-top:12px;">
+                    <div class="qr-hint">
+                        Mobile tip: after the PDF opens, tap <strong>Share</strong> → <strong>Save to Files</strong> (iPhone)
+                        or <strong>Download</strong>/<strong>Save to Drive</strong> (Android).
+                    </div>
+                </div>
+
+                <form id="quoteRequestForm" method="post" action="{{ url_for('quote_request') }}"
                       class="quote-request-form" novalidate>
                     <div class="quote-request-grid">
 
@@ -192,7 +197,7 @@
                             </select>
                         </div>
 
-                        <!-- Seat / lights (all Yes/No) -->
+                        <!-- Seat / lights -->
                         <div class="qr-group">
                             <label for="seat_suspension">Seat Suspension</label>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
@@ -203,7 +208,7 @@
                             </select>
                         </div>
 
-                        <!-- IMPORTANT FIX: this MUST be name="headlights" to match heli_backup_ai.py -->
+                        <!-- IMPORTANT: must be headlights to match heli_backup_ai.py and quote_request_pdf.py -->
                         <div class="qr-group">
                             <label for="headlights">Front Work Lights</label>
                             <select id="headlights" name="headlights" class="qr-select" required>
@@ -234,7 +239,6 @@
                             </select>
                         </div>
 
-                        <!-- Yes/No lights -->
                         <div class="qr-group">
                             <label for="rear_work_light">Rear Work Light</label>
                             <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
@@ -387,6 +391,25 @@
         updateVoltageVisibility();
         fuelSelect.addEventListener('change', updateVoltageVisibility);
     }
+
+    // Mobile: open PDF in a new tab so users can Save/Share easily.
+    // Desktop stays exactly the same (downloads normally).
+    (function () {
+        const form = document.getElementById("quoteRequestForm");
+        const hint = document.getElementById("mobileSaveHint");
+        if (!form) return;
+
+        const ua = navigator.userAgent || "";
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(ua);
+
+        if (isMobile) {
+            form.setAttribute("target", "_blank");
+            if (hint) hint.style.display = "block";
+        } else {
+            form.removeAttribute("target");
+            if (hint) hint.style.display = "none";
+        }
+    })();
 </script>
 </body>
 </html>
