@@ -3267,7 +3267,7 @@ def quote_request():
     #     return redirect(url_for("login"))
 
     if request.method == "POST":
-        # ── Grab form fields ─────────────────────────────
+        # ── Grab form fields (names must match quote_request.html) ─────────────
         customer_name = request.form.get("customer_name", "").strip()
         address = request.form.get("address", "").strip()
         city_state_zip = request.form.get("city_state_zip", "").strip()
@@ -3275,8 +3275,9 @@ def quote_request():
 
         model = request.form.get("model", "").strip()
 
-        fuel_type = request.form.get("fuel_type", "").strip()
-        battery_voltage = request.form.get("battery_voltage", "").strip()
+        # HTML uses name="fuel" and name="fuel_voltage"
+        fuel = request.form.get("fuel", "").strip()
+        battery_voltage = request.form.get("fuel_voltage", "").strip()
 
         mast_ohl_mfh = request.form.get("mast_ohl_mfh", "").strip()
         mast_type = request.form.get("mast_type", "").strip()
@@ -3289,9 +3290,11 @@ def quote_request():
         fork_length = request.form.get("fork_length", "").strip()
 
         tires = request.form.get("tires", "").strip()
+        # We removed this field from the form, but keep the key around for PDF
+        tire_compound = request.form.get("tire_compound", "").strip()
 
         seat_suspension = request.form.get("seat_suspension", "").strip()
-        headlights = request.form.get("headlights", "").strip()
+        headlights = request.form.get("headlights", "").strip()  # Front Work Lights
         back_up_alarm = request.form.get("back_up_alarm", "").strip()
         strobe = request.form.get("strobe", "").strip()
 
@@ -3313,16 +3316,17 @@ def quote_request():
         notes = request.form.get("notes", "").strip()
         salesperson_name = request.form.get("salesperson_name", "").strip()
 
-        # ── Server-side validation ───────────────────────
+        # ── Server-side validation ─────────────────────────────────────────────
         errors = []
 
+        # Only require fields that actually exist on the form
         required_text_fields = [
             ("Customer Name", customer_name),
             ("Address", address),
             ("City / State / Zip", city_state_zip),
             ("Contact Name", contact_name),
             ("Model", model),
-            ("Fuel", fuel_type),
+            ("Fuel", fuel),
             ("Mast OHL / MFH", mast_ohl_mfh),
             ("Mast Type", mast_type),
             ("Attachment", attachment),
@@ -3331,9 +3335,10 @@ def quote_request():
             ("Fork Type", fork_type),
             ("Fork Length", fork_length),
             ("Tire", tires),
+            # ("Tire Compound", tire_compound),  # REMOVED – no longer on form
             ("Seat Suspension", seat_suspension),
             ("Front Work Lights", headlights),
-            ("Back Up Alarm", back_up_alarm),
+            ("Backup Alarm", back_up_alarm),
             ("Strobe", strobe),
             ("Rear Work Light", rear_work_light),
             ("Blue Light Front", blue_light_front),
@@ -3350,20 +3355,20 @@ def quote_request():
             if not value:
                 errors.append(f"{label} is required.")
 
-        # Electric-specific rules
-        if fuel_type == "Electric":
+        # Electric-specific rules (fuel field drives this)
+        if fuel == "Electric":
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
-            if not battery or battery == "None":
+            if not battery or battery == "Select battery":
                 errors.append("Battery type is required for Electric trucks.")
-            # Force charger logic for electric
+            # For electric, force charger to "Standard" for the PDF
             charger = "Standard"
         else:
-            # Non-electric: we don't really care about battery fields
+            # Non-electric: normalize these fields
             if not charger:
                 charger = "None"
             if not battery:
-                battery = "None"
+                battery = "N/A"
             if not battery_voltage:
                 battery_voltage = "N/A"
 
@@ -3371,24 +3376,25 @@ def quote_request():
         if aux_valve and not aux_hose:
             aux_hose = aux_valve
 
+        # If anything is missing, flash errors and re-render the page
         if errors:
             for e in errors:
                 flash(e, "error")
             return redirect(url_for("quote_request"))
 
-        # Combine fuel + voltage for the PDF row
-        fuel_voltage = fuel_type
+        # ── Combine fuel + voltage for the PDF row ────────────────────────────
+        fuel_voltage = fuel
         if battery_voltage and battery_voltage != "N/A":
-            fuel_voltage = f"{fuel_type} / {battery_voltage}"
+            fuel_voltage = f"{fuel} / {battery_voltage}"
 
-        # ── Build data for the PDF ───────────────────────
+        # ── Build data for the PDF ────────────────────────────────────────────
         form_data = {
             "customer_name": customer_name,
             "address": address,
             "city_state_zip": city_state_zip,
             "contact_name": contact_name,
             "model": model,
-            "fuel_voltage": fuel_voltage,
+            "fuel_voltage": fuel_voltage,   # combined fuel + voltage
             "mast_ohl_mfh": mast_ohl_mfh,
             "mast_type": mast_type,
             "attachment": attachment,
@@ -3397,8 +3403,9 @@ def quote_request():
             "fork_type": fork_type,
             "fork_length": fork_length,
             "tires": tires,
+            "tire_compound": tire_compound,  # will just be blank now
             "seat_suspension": seat_suspension,
-            "headlights": headlights,
+            "headlights": headlights,       # “Front Work Lights” in UI
             "back_up_alarm": back_up_alarm,
             "strobe": strobe,
             "rear_work_light": rear_work_light,
@@ -3428,16 +3435,16 @@ def quote_request():
             download_name=filename,
         )
 
+      # ── GET: show the form ───────────────────────────────────────────────────
     return render_template(
-    "quote_request.html",
-    fuel_options=FUEL_OPTIONS,
-    mast_type_options=MAST_TYPE_OPTIONS,
-    tire_options=TIRE_OPTIONS,
-    yes_no_options=YES_NO_OPTIONS,
-    battery_options=BATTERY_OPTIONS,
-    lease_type_options=LEASE_TYPE_OPTIONS,
-    aux_options=AUX_OPTIONS,
-)
+        "quote_request.html",
+        fuel_options=FUEL_OPTIONS,
+        mast_type_options=MAST_TYPE_OPTIONS,
+        tire_options=TIRE_OPTIONS,
+        yes_no_options=YES_NO_OPTIONS,
+        battery_options=BATTERY_OPTIONS,
+        lease_type_options=LEASE_TYPE_OPTIONS,
+    )
 
 @app.get("/api/competitor_peers")
 def api_competitor_peers():
