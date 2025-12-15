@@ -103,7 +103,7 @@
                             <label for="battery_voltage">Battery Voltage</label>
                             <div class="qr-hint">Required if fuel is Electric (e.g. 24V, 36V, 48V)</div>
                             <input type="text" id="battery_voltage" name="battery_voltage"
-                                   class="qr-input" />
+                                class="qr-input" />
                         </div>
 
                         <div class="qr-group">
@@ -351,13 +351,13 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
+    // Fuel -> battery voltage requirement
     const fuelSelect = document.getElementById('fuel_type');
     const voltageGroup = document.getElementById('battery_voltage_group');
     const voltageInput = document.getElementById('battery_voltage');
 
     function updateVoltageVisibility() {
-        if (!fuelSelect) return;
+        if (!fuelSelect || !voltageGroup || !voltageInput) return;
         const isElectric = fuelSelect.value === 'Electric';
         if (isElectric) {
             voltageGroup.style.display = 'block';
@@ -369,11 +369,10 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    if (fuelSelect && voltageGroup && voltageInput) {
+    if (fuelSelect) {
         updateVoltageVisibility();
         fuelSelect.addEventListener('change', updateVoltageVisibility);
     }
-});
 </script>
 </body>
 </html>
