@@ -605,3 +605,85 @@ body.quote-request-page .qr-actions .primary-button {
         text-align: center;
     }
 }
+
+/* =========================================================
+   Top navigation cleanup (consistent with main theme)
+   ========================================================= */
+
+.top-header,
+.navbar,
+.navbar-container {
+    background: #faefdd;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+/* Logo + text alignment */
+.top-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1.5rem;
+    font-family: "Exo 2", sans-serif;
+}
+
+/* Nav menu layout */
+.navbar ul {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 1.8rem;
+    margin: 0;
+    padding: 0;
+}
+
+/* Nav links */
+.navbar ul li a {
+    text-decoration: none;
+    color: #3b2617;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: color 0.2s, border-color 0.2s;
+    padding-bottom: 4px;
+    border-bottom: 2px solid transparent;
+}
+
+/* Active tab underline */
+.navbar ul li.active a,
+.navbar ul li a:hover {
+    border-bottom-color: #cc0000;
+    color: #cc0000;
+}
+
+/* “Mode” label (Forklift Recommendation, etc.) */
+.navbar .mode-label {
+    background: #fff7ec;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    color: #3b2617;
+}
+
+/* Keep nav compact and scrollable on mobile */
+@media (max-width: 768px) {
+    .top-header {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 0.8rem 1rem;
+    }
+
+    .navbar ul {
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 0.5rem;
+    }
+
+    .navbar .mode-label {
+        margin-top: 0.5rem;
+        align-self: flex-end;
+    }
+}
