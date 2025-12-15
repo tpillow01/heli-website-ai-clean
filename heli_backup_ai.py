@@ -3262,10 +3262,6 @@ def find_brand_coverage_peers(heli_model: dict, max_rows: int = 10, per_brand: i
 
 @app.route("/quote-request", methods=["GET", "POST"])
 def quote_request():
-    # If you want to require login, you can uncomment this:
-    # if "user_id" not in session:
-    #     return redirect(url_for("login"))
-
     if request.method == "POST":
         form = request.form
 
@@ -3318,6 +3314,7 @@ def quote_request():
         # ── Server-side validation ───────────────────────
         errors = []
 
+        # Only require truly critical fields (leave financing + notes optional)
         required_text_fields = [
             ("Customer Name", customer_name),
             ("Address", address),
@@ -3329,22 +3326,9 @@ def quote_request():
             ("Mast Type", mast_type),
             ("Attachment", attachment),
             ("Auxiliary Control Valve", aux_valve),
-            ("Auxiliary Hose Take Up", aux_hose),
             ("Fork Type", fork_type),
             ("Fork Length", fork_length),
             ("Tire", tires),
-            ("Seat Suspension", seat_suspension),
-            ("Headlights / Front Work Lights", headlights),
-            ("Back Up Alarm", back_up_alarm),
-            ("Strobe", strobe),
-            ("Rear Work Light", rear_work_light),
-            ("Blue Light Front", blue_light_front),
-            ("Blue Light Rear", blue_light_rear),
-            ("Red Curtain Lights", red_curtain_lights),
-            ("Lease Type", lease_type),
-            ("Annual Hours", annual_hours),
-            ("Lease Term", lease_term),
-            ("Notes", notes),
             ("Salesperson Name", salesperson_name),
         ]
 
@@ -3361,7 +3345,7 @@ def quote_request():
             # Force charger logic for electric
             charger = "Standard"
         else:
-            # Non-electric: normalize battery/voltage if left blank
+            # Non-electric: normalize battery/voltage
             if not battery:
                 battery = "None"
             if not battery_voltage:
@@ -3369,14 +3353,23 @@ def quote_request():
             if not charger:
                 charger = "None"
 
-        # Keep aux hose in sync with aux valve as a final guard
+        # Keep aux hose in sync with aux valve
         if aux_valve and not aux_hose:
             aux_hose = aux_valve
 
+        # If errors, DO NOT redirect (redirect wipes the form)
         if errors:
             for e in errors:
                 flash(e, "error")
-            return redirect(url_for("quote_request"))
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
+            )
 
         # Combine fuel + voltage for the PDF row
         fuel_voltage = fuel_type
@@ -3419,8 +3412,19 @@ def quote_request():
         }
 
         pdf_bytes = build_quote_request_pdf(form_data)
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
+            )
 
-        safe_customer = customer_name.replace(" ", "_") or "customer"
+        safe_customer = (customer_name or "customer").replace(" ", "_")
         filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
         return send_file(

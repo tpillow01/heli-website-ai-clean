@@ -48,7 +48,20 @@
                     Fill out every field below to generate a clean PDF for the quoting team.
                 </p>
 
-                <form method="post" action="{{ url_for('quote_request') }}" class="quote-request-form" novalidate>
+                <!-- Flash messages (so you can SEE why PDF didn't generate) -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                  {% if messages %}
+                    <div class="flash-wrap">
+                      {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                {% endwith %}
+
+                <!-- target="_blank" keeps the form page from "wiping" when PDF downloads -->
+                <form method="post" action="{{ url_for('quote_request') }}" target="_blank"
+                      class="quote-request-form" novalidate>
                     <div class="quote-request-grid">
 
                         <!-- Customer info -->
@@ -103,7 +116,7 @@
                             <label for="battery_voltage">Battery Voltage</label>
                             <div class="qr-hint">Required if fuel is Electric (e.g. 24V, 36V, 48V)</div>
                             <input type="text" id="battery_voltage" name="battery_voltage"
-                                class="qr-input" />
+                                   class="qr-input" />
                         </div>
 
                         <div class="qr-group">
@@ -190,9 +203,10 @@
                             </select>
                         </div>
 
+                        <!-- IMPORTANT FIX: this MUST be name="headlights" to match heli_backup_ai.py -->
                         <div class="qr-group">
-                            <label for="front_work_lights">Front Work Lights</label>
-                            <select id="front_work_lights" name="front_work_lights" class="qr-select" required>
+                            <label for="headlights">Front Work Lights</label>
+                            <select id="headlights" name="headlights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
