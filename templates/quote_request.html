@@ -12,38 +12,35 @@
 <body class="quote-request-page">
 <div class="app-shell">
 
-    <header class="top-header">
-        <div class="header-left">
-            <div class="app-title">Tynan Equipment AI</div>
-        </div>
+    <header class="top-header qr-brand-header">
+    <div class="header-left">
+        <div class="app-title qr-brand-title">Tynan Equipment AI</div>
+    </div>
 
-        <div class="header-center">
-            <nav class="tabs">
-                <a href="{{ url_for('home') }}" class="tab">Chat</a>
-                <a href="{{ url_for('map_page') }}" class="tab">Map</a>
-                <a href="/battlecards"
-                   class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
-                    Battle Cards
-                </a>
-                <a href="{{ url_for('quote_request') }}" class="tab active">Quote Request</a>
-                <a href="{{ url_for('logout') }}" class="tab">Logout</a>
-            </nav>
-        </div>
+    <div class="header-center">
+        <nav class="tabs qr-brand-tabs">
+            <a href="{{ url_for('home') }}" class="tab">Chat</a>
+            <a href="{{ url_for('map_page') }}" class="tab">Map</a>
+            <a href="/battlecards"
+               class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
+                Battle Cards
+            </a>
+            <a href="{{ url_for('quote_request') }}" class="tab active">Quote Request</a>
+            <a href="{{ url_for('logout') }}" class="tab">Logout</a>
+        </nav>
+    </div>
 
-        <div class="header-right">
-            <div class="mode-toggle">
-                <span class="mode-label">Mode</span>
-                <span class="mode-pill">Quote Request</span>
-            </div>
-        </div>
-    </header>
+    <div class="header-right">
+        <div class="qr-brand-heli">HELI</div>
+    </div>
+</header>
 
     <main class="quote-request-main">
         <div class="quote-request-container">
             <section class="quote-request-card">
                 <h1 class="quote-request-title">HELI Quote Request</h1>
                 <p class="quote-request-subtitle">
-                    Fill out every field below to generate a clean PDF for the quoting team.
+                    Fill out every field below to generate a clean PDF for Lisa.
                 </p>
 
                 {% with messages = get_flashed_messages(with_categories=true) %}
