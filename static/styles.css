@@ -687,3 +687,69 @@ body.quote-request-page .qr-actions .primary-button {
         align-self: flex-end;
     }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Quote Request banner header (tan grid + big red branding)
+   ───────────────────────────────────────────────────────────── */
+
+.quote-request-page .top-header.qr-brand-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+
+  padding:14px 18px;
+
+  background-color:#f4e6d2;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.35) 1px, transparent 1px);
+  background-size:46px 46px;
+
+  border-bottom:3px solid #b30000;
+}
+
+/* Left title */
+.quote-request-page .qr-brand-title{
+  color:#b30000;
+  font-weight:900;
+  font-size:34px;
+  letter-spacing:0.2px;
+  line-height:1;
+}
+
+/* Right HELI */
+.quote-request-page .qr-brand-heli{
+  color:#b30000;
+  font-weight:900;
+  font-size:30px;
+  letter-spacing:2px;
+  line-height:1;
+}
+
+/* Tabs in the center */
+.quote-request-page .qr-brand-tabs{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:26px;
+}
+
+.quote-request-page .qr-brand-tabs .tab{
+  color:#111;
+  font-weight:800;
+  text-decoration:none;
+  padding:8px 6px;
+  border-bottom:3px solid transparent;
+}
+
+.quote-request-page .qr-brand-tabs .tab.active{
+  border-bottom-color:#b30000;
+}
+
+/* Mobile sizing */
+@media (max-width: 900px){
+  .quote-request-page .qr-brand-title{ font-size:26px; }
+  .quote-request-page .qr-brand-heli{ font-size:22px; }
+  .quote-request-page .qr-brand-tabs{ gap:16px; flex-wrap:wrap; }
+}
