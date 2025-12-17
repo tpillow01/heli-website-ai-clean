@@ -839,10 +839,12 @@
 
                         <div class="qr-group">
                             <label for="used_fuel_type">Fuel Type</label>
-                            <div class="qr-hint">Select LP/Gas/Diesel or Electric</div>
+                            <div class="qr-hint">Select LP, Gas, Diesel, or Electric</div>
                             <select id="used_fuel_type" name="fuel_type" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="LP/Gas/Diesel">LP/Gas/Diesel</option>
+                                <option value="LP">LP</option>
+                                <option value="Gas">Gas</option>
+                                <option value="Diesel">Diesel</option>
                                 <option value="Electric">Electric</option>
                             </select>
                         </div>
@@ -882,7 +884,7 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="used_budget_price">Budget Price</label>
+                            <label for="used_budget_price">Customer Budget</label>
                             <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
                         </div>
 
