@@ -44,8 +44,6 @@ QUOTE_FIELD_LABELS: List[Tuple[str, str]] = [
     ("salesperson_name", "Salesperson Name"),
 ]
 
-
-# DEMO: no cartage, no charger_set_for, mast split, headlights label is "Work Lights"
 DEMO_FIELD_LABELS: List[Tuple[str, str]] = [
     ("ordered_by", "Ordered By"),
     ("company_name", "Company Name"),
@@ -76,8 +74,6 @@ DEMO_FIELD_LABELS: List[Tuple[str, str]] = [
     ("special_instructions", "Special Instructions"),
 ]
 
-
-# RENTAL: keeps cartage, no charger_set_for, mast split, headlights label is "Work Lights"
 RENTAL_FIELD_LABELS: List[Tuple[str, str]] = [
     ("ordered_by", "Ordered By"),
     ("company_name", "Company Name"),
@@ -109,6 +105,28 @@ RENTAL_FIELD_LABELS: List[Tuple[str, str]] = [
     ("special_instructions", "Special Instructions"),
 ]
 
+# Used Equipment: show internal info on PDF only
+USED_FIELD_LABELS: List[Tuple[str, str]] = [
+    ("customer_name", "Customer"),
+    ("address", "Address"),
+    ("city_zip_code", "City and Zip Code"),
+    ("contact_name", "Contact Name"),
+    ("model", "Model"),
+    ("fuel_type", "Fuel"),
+    ("battery_voltage", "Electric 36/48 Volt"),
+    ("line_voltage", "Line Voltage If Electric"),
+    ("mast_height", "Mast Height"),
+    ("mast_type", "Mast Type"),
+    ("fork_size", "Fork Size"),
+    ("budget_price", "Budget Price"),
+    ("options_need", "Options Need"),
+    ("additional_notes", "Additional Notes"),
+    ("__SECTION__", "Internal Information"),
+    ("quote_number", "Quote #"),
+    ("asset_number", "Asset #"),
+    ("serial_number", "Serial #"),
+]
+
 
 def _clean(v) -> str:
     return ("" if v is None else str(v)).strip()
@@ -136,32 +154,43 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
     elements.extend([title, subtitle, Spacer(1, 18)])
 
     rows = []
+    section_row_indexes = []
+
     for key, label in field_labels:
-        value = _clean(form_data.get(key))
-        rows.append([label, value])
+        if key == "__SECTION__":
+            section_row_indexes.append(len(rows))
+            rows.append([label, ""])
+        else:
+            rows.append([label, _clean(form_data.get(key))])
 
     table = Table(rows, colWidths=[180, 350])
-    table.setStyle(
-        TableStyle(
-            [
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("ALIGN", (0, 0), (0, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ]
-        )
-    )
 
+    base_style = [
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("ALIGN", (0, 0), (0, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]
+
+    # Style section header rows (Used Equipment: Internal Information)
+    for r in section_row_indexes:
+        base_style += [
+            ("SPAN", (0, r), (1, r)),
+            ("BACKGROUND", (0, r), (1, r), colors.lightgrey),
+            ("FONTNAME", (0, r), (1, r), "Helvetica-Bold"),
+        ]
+
+    table.setStyle(TableStyle(base_style))
     elements.append(table)
-    doc.build(elements)
 
+    doc.build(elements)
     pdf_data = buffer.getvalue()
     buffer.close()
     return pdf_data
@@ -189,10 +218,16 @@ def build_rental_request_pdf(form_data: Dict[str, str]) -> bytes:
     return _build_request_pdf("HELI Rental Request", RENTAL_FIELD_LABELS, form_data)
 
 
+def build_used_equipment_request_pdf(form_data: Dict[str, str]) -> bytes:
+    return _build_request_pdf("Used Equipment Request", USED_FIELD_LABELS, form_data)
+
+
 def build_request_pdf(form_data: Dict[str, str], request_type: str) -> bytes:
     rt = (request_type or "").strip().lower()
     if rt == "demo":
         return build_demo_request_pdf(form_data)
     if rt == "rental":
         return build_rental_request_pdf(form_data)
+    if rt == "used":
+        return build_used_equipment_request_pdf(form_data)
     return build_quote_request_pdf(form_data)

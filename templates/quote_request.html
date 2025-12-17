@@ -7,7 +7,7 @@
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='qrbrand2_forms_v2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='qrbrand2_forms_v3_used') }}">
 </head>
 
 <body class="quote-request-page">
@@ -69,7 +69,7 @@
                     <option value="quote" selected>Quote Request</option>
                     <option value="demo">Demo Request</option>
                     <option value="rental">Rental Request</option>
-                    <!-- Used Equipment later -->
+                    <option value="used">Used Equipment Request</option>
                 </select>
             </div>
 
@@ -531,7 +531,6 @@
                             </select>
                         </div>
 
-                        <!-- Electric-only block -->
                         <div id="demo_electric_block" style="display:none;" class="qr-group qr-group-full">
                             <div class="quote-request-grid" style="margin-top:0;">
                                 <div class="qr-group">
@@ -754,7 +753,6 @@
                             </select>
                         </div>
 
-                        <!-- Electric-only block -->
                         <div id="rental_electric_block" style="display:none;" class="qr-group qr-group-full">
                             <div class="quote-request-grid" style="margin-top:0;">
                                 <div class="qr-group">
@@ -798,6 +796,119 @@
                 </form>
             </div>
 
+            <!-- ========================= -->
+            <!-- USED EQUIPMENT (NEW)      -->
+            <!-- ========================= -->
+            <div id="form_wrap_used" class="request-form-wrap" style="display:none;">
+                <form id="usedRequestForm"
+                      method="post"
+                      action="{{ url_for('quote_request') }}"
+                      class="quote-request-form"
+                      novalidate
+                      data-request-type="used"
+                      data-pdf-title="Used Equipment Request">
+
+                    <input type="hidden" name="request_type" value="used" />
+
+                    <div class="quote-request-grid">
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_customer_name">Customer</label>
+                            <input type="text" id="used_customer_name" name="customer_name" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_address">Address</label>
+                            <input type="text" id="used_address" name="address" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_city_zip">City and Zip Code</label>
+                            <input type="text" id="used_city_zip" name="city_zip_code" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_contact_name">Contact Name</label>
+                            <input type="text" id="used_contact_name" name="contact_name" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_model">Model</label>
+                            <input type="text" id="used_model" name="model" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_fuel_type">Fuel Type</label>
+                            <div class="qr-hint">Select LP/Gas/Diesel or Electric</div>
+                            <select id="used_fuel_type" name="fuel_type" class="qr-select" required>
+                                <option value="" disabled selected>Select</option>
+                                <option value="LP/Gas/Diesel">LP/Gas/Diesel</option>
+                                <option value="Electric">Electric</option>
+                            </select>
+                        </div>
+
+                        <div class="qr-group" id="used_voltage_group" style="display:none;">
+                            <label for="used_voltage">Electric 36/48 Volt</label>
+                            <select id="used_voltage" name="battery_voltage" class="qr-select">
+                                <option value="" selected>—</option>
+                                <option value="36V">36V</option>
+                                <option value="48V">48V</option>
+                            </select>
+                        </div>
+
+                        <div class="qr-group" id="used_line_voltage_group" style="display:none;">
+                            <label for="used_line_voltage">Line Voltage If Electric</label>
+                            <input type="text" id="used_line_voltage" name="line_voltage" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_mast_height">Mast Height</label>
+                            <input type="text" id="used_mast_height" name="mast_height" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_mast_type">Mast Type</label>
+                            <select id="used_mast_type" name="mast_type" class="qr-select" required>
+                                <option value="" disabled selected>Select mast type</option>
+                                {% for option in mast_type_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_fork_size">Fork Size</label>
+                            <input type="text" id="used_fork_size" name="fork_size" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_budget_price">Budget Price</label>
+                            <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_options_need">Options Need</label>
+                            <input type="text" id="used_options_need" name="options_need" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_additional_notes">Additional Notes</label>
+                            <textarea id="used_additional_notes" name="additional_notes" class="qr-textarea"></textarea>
+                        </div>
+
+                        <!-- IMPORTANT: Internal info NOT shown on form (per your request).
+                             It WILL appear on the PDF as blank rows. -->
+
+                    </div>
+
+                    <div class="qr-actions">
+                        <button type="submit" class="primary-button">
+                            Generate Used Equipment Request PDF
+                        </button>
+                    </div>
+                </form>
+            </div>
+
         </section>
     </div>
 </main>
@@ -812,6 +923,7 @@
     const wrapQuote  = document.getElementById("form_wrap_quote");
     const wrapDemo   = document.getElementById("form_wrap_demo");
     const wrapRental = document.getElementById("form_wrap_rental");
+    const wrapUsed   = document.getElementById("form_wrap_used");
 
     const pageTitle = document.getElementById("pageTitle");
     const pageSubtitle = document.getElementById("pageSubtitle");
@@ -820,6 +932,7 @@
         wrapQuote.style.display  = "none";
         wrapDemo.style.display   = "none";
         wrapRental.style.display = "none";
+        wrapUsed.style.display   = "none";
 
         if (type === "demo") {
             wrapDemo.style.display = "block";
@@ -828,6 +941,10 @@
         } else if (type === "rental") {
             wrapRental.style.display = "block";
             pageTitle.textContent = "HELI Rental Request";
+            pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+        } else if (type === "used") {
+            wrapUsed.style.display = "block";
+            pageTitle.textContent = "Used Equipment Request";
             pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
         } else {
             wrapQuote.style.display = "block";
@@ -842,7 +959,7 @@
     }
 
     // -----------------------------
-    // 2) Quote Fuel -> Battery Voltage requirement (existing logic)
+    // 2) Quote Fuel -> Battery Voltage requirement
     // -----------------------------
     const fuelSelect = document.getElementById('fuel_type');
     const voltageGroup = document.getElementById('battery_voltage_group');
@@ -867,7 +984,7 @@
     }
 
     // -----------------------------
-    // 3) Demo/Rental power type behavior:
+    // 3) Demo/Rental power type behavior
     //    - show electric block when Electric
     //    - hide "Need LP Tank" when Electric
     // -----------------------------
@@ -909,9 +1026,46 @@
     wirePowerTypeBehavior("rental_power_type", "rental_electric_block", "rental_need_lp_tank_group");
 
     // -----------------------------
-    // 4) Mobile Share/Save behavior
-    //    - Desktop: normal submit
-    //    - Mobile: intercept submit -> share sheet
+    // 4) Used Equipment fuel behavior:
+    //    - if Electric: show Voltage + Line Voltage
+    //    - else: hide both
+    // -----------------------------
+    (function wireUsedElectric() {
+        const sel = document.getElementById("used_fuel_type");
+        const gVolt = document.getElementById("used_voltage_group");
+        const gLine = document.getElementById("used_line_voltage_group");
+        const iVolt = document.getElementById("used_voltage");
+        const iLine = document.getElementById("used_line_voltage");
+
+        if (!sel) return;
+
+        function update() {
+            const isElectric = (sel.value || "").toLowerCase() === "electric";
+            if (gVolt) gVolt.style.display = isElectric ? "block" : "none";
+            if (gLine) gLine.style.display = isElectric ? "block" : "none";
+
+            if (iVolt) {
+                if (isElectric) iVolt.setAttribute("required", "required");
+                else {
+                    iVolt.removeAttribute("required");
+                    iVolt.selectedIndex = 0;
+                }
+            }
+            if (iLine) {
+                if (isElectric) iLine.setAttribute("required", "required");
+                else {
+                    iLine.removeAttribute("required");
+                    iLine.value = "";
+                }
+            }
+        }
+
+        update();
+        sel.addEventListener("change", update);
+    })();
+
+    // -----------------------------
+    // 5) Mobile Share/Save behavior
     // -----------------------------
     (function () {
         const hint = document.getElementById("mobileSaveHint");

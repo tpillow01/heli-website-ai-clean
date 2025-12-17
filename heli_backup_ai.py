@@ -3270,7 +3270,6 @@ def quote_request():
         # QUOTE REQUEST (existing logic)
         # -----------------------------
         if request_type == "quote":
-            # ── Grab form fields ─────────────────────────────
             customer_name = form.get("customer_name", "").strip()
             address = form.get("address", "").strip()
             city_state_zip = form.get("city_state_zip", "").strip()
@@ -3316,9 +3315,7 @@ def quote_request():
             notes = form.get("notes", "").strip()
             salesperson_name = form.get("salesperson_name", "").strip()
 
-            # ── Server-side validation ───────────────────────
             errors = []
-
             required_text_fields = [
                 ("Customer Name", customer_name),
                 ("Address", address),
@@ -3335,12 +3332,10 @@ def quote_request():
                 ("Tire", tires),
                 ("Salesperson Name", salesperson_name),
             ]
-
             for label, value in required_text_fields:
                 if not value:
                     errors.append(f"{label} is required.")
 
-            # Electric-specific rules
             if fuel_type == "Electric":
                 if not battery_voltage:
                     errors.append("Battery voltage is required for Electric trucks.")
@@ -3355,7 +3350,6 @@ def quote_request():
                 if not charger:
                     charger = "None"
 
-            # Keep aux hose in sync with aux valve
             if aux_valve and not aux_hose:
                 aux_hose = aux_valve
 
@@ -3434,7 +3428,7 @@ def quote_request():
             )
 
         # -----------------------------
-        # DEMO / RENTAL (updated logic)
+        # DEMO / RENTAL
         # -----------------------------
         if request_type in {"demo", "rental"}:
             ordered_by = (form.get("ordered_by") or "").strip()
@@ -3444,7 +3438,6 @@ def quote_request():
             phone = (form.get("phone") or "").strip()
             bill_to_address = (form.get("bill_to_address") or "").strip()
 
-            # Demo: cartage removed. Rental: keep it.
             cartage = ""
             if request_type == "rental":
                 cartage = (form.get("cartage") or "").strip()
@@ -3457,22 +3450,15 @@ def quote_request():
             freight_charges = (form.get("freight_charges") or "").strip()
 
             fork_length = (form.get("fork_length") or "").strip()
-
-            # LBR is now Yes/No dropdown
             lbr = (form.get("lbr") or "").strip()
-
             side_shifter = (form.get("side_shifter") or "").strip()
             backup_alarm = (form.get("backup_alarm") or "").strip()
-
-            # still stored under "headlights" key, but labeled Work Lights in the PDF
-            headlights = (form.get("headlights") or "").strip()
-
+            headlights = (form.get("headlights") or "").strip()  # labeled "Work Lights" on PDF
             tires = (form.get("tires") or "").strip()
 
             power_type = (form.get("power_type") or "").strip()
             need_lp_tank = (form.get("need_lp_tank") or "").strip()
 
-            # Mast split into height + type
             mast_height = (form.get("mast_height") or "").strip()
             mast_type = (form.get("mast_type") or "").strip()
 
@@ -3499,11 +3485,9 @@ def quote_request():
             if not mast_type:
                 errors.append("Mast Type is required.")
 
-            # If electric, wipe LP tank + electric fields behave normally
             if (power_type or "").lower() == "electric":
-                need_lp_tank = ""  # field is hidden in UI; keep PDF clean too
+                need_lp_tank = ""
             else:
-                # if not electric, wipe electric-only values so PDF is clean
                 connector = ""
                 need_charger = ""
                 input_volts = ""
@@ -3529,7 +3513,7 @@ def quote_request():
                 "contact_name": contact_name,
                 "phone": phone,
                 "bill_to_address": bill_to_address,
-                "cartage": cartage,  # rental only; demo will be blank and omitted from demo PDF labels anyway
+                "cartage": cartage,
                 "company_phone_fax": company_phone_fax,
                 "po_number": po_number,
                 "quantity": quantity,
@@ -3577,8 +3561,113 @@ def quote_request():
             )
 
         # -----------------------------
-        # Unknown request_type fallback
+        # USED EQUIPMENT (NEW)
         # -----------------------------
+        if request_type == "used":
+            customer_name = (form.get("customer_name") or "").strip()
+            address = (form.get("address") or "").strip()
+            city_zip_code = (form.get("city_zip_code") or "").strip()
+            contact_name = (form.get("contact_name") or "").strip()
+
+            model = (form.get("model") or "").strip()
+            fuel_type = (form.get("fuel_type") or "").strip()
+
+            battery_voltage = (form.get("battery_voltage") or "").strip()
+            line_voltage = (form.get("line_voltage") or "").strip()
+
+            mast_height = (form.get("mast_height") or "").strip()
+            mast_type = (form.get("mast_type") or "").strip()
+
+            fork_size = (form.get("fork_size") or "").strip()
+            budget_price = (form.get("budget_price") or "").strip()
+            options_need = (form.get("options_need") or "").strip()
+            additional_notes = (form.get("additional_notes") or "").strip()
+
+            errors = []
+            if not customer_name:
+                errors.append("Customer is required.")
+            if not address:
+                errors.append("Address is required.")
+            if not city_zip_code:
+                errors.append("City and Zip Code is required.")
+            if not contact_name:
+                errors.append("Contact Name is required.")
+            if not model:
+                errors.append("Model is required.")
+            if not fuel_type:
+                errors.append("Fuel Type is required.")
+            if not mast_height:
+                errors.append("Mast Height is required.")
+            if not mast_type:
+                errors.append("Mast Type is required.")
+
+            is_electric = (fuel_type or "").lower() == "electric"
+            if is_electric:
+                if not battery_voltage:
+                    errors.append("Electric 36/48 Volt is required for Electric.")
+                if not line_voltage:
+                    errors.append("Line Voltage is required for Electric.")
+            else:
+                battery_voltage = ""
+                line_voltage = ""
+
+            if errors:
+                for e in errors:
+                    flash(e, "error")
+                return render_template(
+                    "quote_request.html",
+                    fuel_options=FUEL_OPTIONS,
+                    mast_type_options=MAST_TYPE_OPTIONS,
+                    tire_options=TIRE_OPTIONS,
+                    yes_no_options=YES_NO_OPTIONS,
+                    battery_options=BATTERY_OPTIONS,
+                    lease_type_options=LEASE_TYPE_OPTIONS,
+                )
+
+            # Internal info must appear on PDF, but NOT on online form (blank rows)
+            form_data = {
+                "customer_name": customer_name,
+                "address": address,
+                "city_zip_code": city_zip_code,
+                "contact_name": contact_name,
+                "model": model,
+                "fuel_type": fuel_type,
+                "battery_voltage": battery_voltage,
+                "line_voltage": line_voltage,
+                "mast_height": mast_height,
+                "mast_type": mast_type,
+                "fork_size": fork_size,
+                "budget_price": budget_price,
+                "options_need": options_need,
+                "additional_notes": additional_notes,
+                "quote_number": "",
+                "asset_number": "",
+                "serial_number": "",
+            }
+
+            pdf_bytes = build_request_pdf(form_data, "used")
+            if not pdf_bytes:
+                flash("PDF generation failed (empty PDF). Check server logs.", "error")
+                return render_template(
+                    "quote_request.html",
+                    fuel_options=FUEL_OPTIONS,
+                    mast_type_options=MAST_TYPE_OPTIONS,
+                    tire_options=TIRE_OPTIONS,
+                    yes_no_options=YES_NO_OPTIONS,
+                    battery_options=BATTERY_OPTIONS,
+                    lease_type_options=LEASE_TYPE_OPTIONS,
+                )
+
+            safe_customer = (customer_name or "customer").replace(" ", "_")
+            filename = f"used_equipment_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+            return send_file(
+                io.BytesIO(pdf_bytes),
+                mimetype="application/pdf",
+                as_attachment=True,
+                download_name=filename,
+            )
+
         flash("Unknown request type submitted. Please try again.", "error")
         return render_template(
             "quote_request.html",
@@ -3590,7 +3679,6 @@ def quote_request():
             lease_type_options=LEASE_TYPE_OPTIONS,
         )
 
-    # ── GET: show the form ──────────────────────────────
     return render_template(
         "quote_request.html",
         fuel_options=FUEL_OPTIONS,
