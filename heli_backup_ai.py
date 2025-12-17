@@ -3434,17 +3434,21 @@ def quote_request():
             )
 
         # -----------------------------
-        # DEMO / RENTAL (new logic)
+        # DEMO / RENTAL (updated logic)
         # -----------------------------
         if request_type in {"demo", "rental"}:
-            # Fields shared by demo/rental
             ordered_by = (form.get("ordered_by") or "").strip()
             company_name = (form.get("company_name") or "").strip()
             ship_to_address = (form.get("ship_to_address") or "").strip()
             contact_name = (form.get("contact_name") or "").strip()
             phone = (form.get("phone") or "").strip()
             bill_to_address = (form.get("bill_to_address") or "").strip()
-            cartage = (form.get("cartage") or "").strip()
+
+            # Demo: cartage removed. Rental: keep it.
+            cartage = ""
+            if request_type == "rental":
+                cartage = (form.get("cartage") or "").strip()
+
             company_phone_fax = (form.get("company_phone_fax") or "").strip()
             po_number = (form.get("po_number") or "").strip()
             quantity = (form.get("quantity") or "").strip()
@@ -3453,27 +3457,33 @@ def quote_request():
             freight_charges = (form.get("freight_charges") or "").strip()
 
             fork_length = (form.get("fork_length") or "").strip()
+
+            # LBR is now Yes/No dropdown
             lbr = (form.get("lbr") or "").strip()
+
             side_shifter = (form.get("side_shifter") or "").strip()
             backup_alarm = (form.get("backup_alarm") or "").strip()
+
+            # still stored under "headlights" key, but labeled Work Lights in the PDF
             headlights = (form.get("headlights") or "").strip()
+
             tires = (form.get("tires") or "").strip()
 
             power_type = (form.get("power_type") or "").strip()
             need_lp_tank = (form.get("need_lp_tank") or "").strip()
-            mast = (form.get("mast") or "").strip()
+
+            # Mast split into height + type
+            mast_height = (form.get("mast_height") or "").strip()
+            mast_type = (form.get("mast_type") or "").strip()
 
             connector = (form.get("connector") or "").strip()
             need_charger = (form.get("need_charger") or "").strip()
-            charger_set_for = (form.get("charger_set_for") or "").strip()
             input_volts = (form.get("input_volts") or "").strip()
             phase = (form.get("phase") or "").strip()
 
             special_instructions = (form.get("special_instructions") or "").strip()
 
             errors = []
-
-            # Keep validation light but meaningful
             if not ordered_by:
                 errors.append("Ordered By is required.")
             if not company_name:
@@ -3484,12 +3494,18 @@ def quote_request():
                 errors.append("Contact Name is required.")
             if not description_model:
                 errors.append("Description / Model is required.")
+            if not mast_height:
+                errors.append("Mast Height is required.")
+            if not mast_type:
+                errors.append("Mast Type is required.")
 
-            # Electric cleanup: if not electric, wipe electric-only values so PDF is clean
-            if (power_type or "").lower() != "electric":
+            # If electric, wipe LP tank + electric fields behave normally
+            if (power_type or "").lower() == "electric":
+                need_lp_tank = ""  # field is hidden in UI; keep PDF clean too
+            else:
+                # if not electric, wipe electric-only values so PDF is clean
                 connector = ""
                 need_charger = ""
-                charger_set_for = ""
                 input_volts = ""
                 phase = ""
 
@@ -3513,7 +3529,7 @@ def quote_request():
                 "contact_name": contact_name,
                 "phone": phone,
                 "bill_to_address": bill_to_address,
-                "cartage": cartage,
+                "cartage": cartage,  # rental only; demo will be blank and omitted from demo PDF labels anyway
                 "company_phone_fax": company_phone_fax,
                 "po_number": po_number,
                 "quantity": quantity,
@@ -3528,10 +3544,10 @@ def quote_request():
                 "tires": tires,
                 "power_type": power_type,
                 "need_lp_tank": need_lp_tank,
-                "mast": mast,
+                "mast_height": mast_height,
+                "mast_type": mast_type,
                 "connector": connector,
                 "need_charger": need_charger,
-                "charger_set_for": charger_set_for,
                 "input_volts": input_volts,
                 "phase": phase,
                 "special_instructions": special_instructions,

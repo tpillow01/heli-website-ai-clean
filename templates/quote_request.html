@@ -7,7 +7,7 @@
 
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='qrbrand2_forms_v1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='qrbrand2_forms_v2') }}">
 </head>
 
 <body class="quote-request-page">
@@ -85,7 +85,6 @@
                       data-request-type="quote"
                       data-pdf-title="HELI Quote Request">
 
-                    <!-- Hidden request type (safe even if backend ignores it today) -->
                     <input type="hidden" name="request_type" value="quote" />
 
                     <div class="quote-request-grid">
@@ -355,7 +354,7 @@
                     </div>
 
                     <div class="qr-actions">
-                        <button type="submit" class="primary-button" data-submit-label="Generate Quote Request PDF">
+                        <button type="submit" class="primary-button">
                             Generate Quote Request PDF
                         </button>
                     </div>
@@ -363,7 +362,7 @@
             </div>
 
             <!-- ========================= -->
-            <!-- DEMO REQUEST (NEW)        -->
+            <!-- DEMO REQUEST (UPDATED)    -->
             <!-- ========================= -->
             <div id="form_wrap_demo" class="request-form-wrap" style="display:none;">
                 <form id="demoRequestForm"
@@ -408,14 +407,6 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="demo_cartage">Cartage</label>
-                            <select id="demo_cartage" name="cartage" class="qr-select">
-                                <option value="" selected>—</option>
-                                <option value="Dock">Dock</option>
-                            </select>
-                        </div>
-
-                        <div class="qr-group">
                             <label for="demo_company_phone_fax">Company Phone/Fax</label>
                             <input type="text" id="demo_company_phone_fax" name="company_phone_fax" class="qr-input" />
                         </div>
@@ -447,7 +438,7 @@
 
                         <div class="qr-group qr-group-full">
                             <label for="demo_freight_charges">Freight Charges</label>
-                            <div class="qr-hint">One way charge (or note if included)</div>
+                            <div class="qr-hint">Please add $25 for each additional truck</div>
                             <input type="text" id="demo_freight_charges" name="freight_charges" class="qr-input" />
                         </div>
 
@@ -456,9 +447,14 @@
                             <input type="text" id="demo_fork_length" name="fork_length" class="qr-input" />
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="demo_lbr_group">
                             <label for="demo_lbr">LBR</label>
-                            <input type="text" id="demo_lbr" name="lbr" class="qr-input" />
+                            <select id="demo_lbr" name="lbr" class="qr-select">
+                                <option value="" selected>—</option>
+                                {% for option in yes_no_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
 
                         <div class="qr-group">
@@ -482,8 +478,8 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="demo_headlights">Headlights</label>
-                            <select id="demo_headlights" name="headlights" class="qr-select">
+                            <label for="demo_work_lights">Work Lights</label>
+                            <select id="demo_work_lights" name="headlights" class="qr-select">
                                 <option value="" selected>—</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
@@ -510,7 +506,7 @@
                             </select>
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="demo_need_lp_tank_group">
                             <label for="demo_need_lp_tank">Need LP Tank</label>
                             <select id="demo_need_lp_tank" name="need_lp_tank" class="qr-select">
                                 <option value="" selected>—</option>
@@ -521,8 +517,18 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="demo_mast">Mast</label>
-                            <input type="text" id="demo_mast" name="mast" class="qr-input" />
+                            <label for="demo_mast_height">Mast Height</label>
+                            <input type="text" id="demo_mast_height" name="mast_height" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="demo_mast_type">Mast Type</label>
+                            <select id="demo_mast_type" name="mast_type" class="qr-select" required>
+                                <option value="" disabled selected>Select mast type</option>
+                                {% for option in mast_type_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
 
                         <!-- Electric-only block -->
@@ -544,11 +550,6 @@
                                 </div>
 
                                 <div class="qr-group">
-                                    <label for="demo_charger_set_for">Charger Set For</label>
-                                    <input type="text" id="demo_charger_set_for" name="charger_set_for" class="qr-input" />
-                                </div>
-
-                                <div class="qr-group">
                                     <label for="demo_input_volts">Input Volts</label>
                                     <input type="text" id="demo_input_volts" name="input_volts" class="qr-input" />
                                 </div>
@@ -567,7 +568,7 @@
                     </div>
 
                     <div class="qr-actions">
-                        <button type="submit" class="primary-button" data-submit-label="Generate Demo Request PDF">
+                        <button type="submit" class="primary-button">
                             Generate Demo Request PDF
                         </button>
                     </div>
@@ -575,7 +576,7 @@
             </div>
 
             <!-- ========================= -->
-            <!-- RENTAL REQUEST (NEW)      -->
+            <!-- RENTAL REQUEST (UPDATED)  -->
             <!-- ========================= -->
             <div id="form_wrap_rental" class="request-form-wrap" style="display:none;">
                 <form id="rentalRequestForm"
@@ -660,7 +661,7 @@
 
                         <div class="qr-group qr-group-full">
                             <label for="rental_freight_charges">Freight Charges</label>
-                            <div class="qr-hint">One way charge (or note if included)</div>
+                            <div class="qr-hint">Please add $25 for each additional truck</div>
                             <input type="text" id="rental_freight_charges" name="freight_charges" class="qr-input" />
                         </div>
 
@@ -669,9 +670,14 @@
                             <input type="text" id="rental_fork_length" name="fork_length" class="qr-input" />
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="rental_lbr_group">
                             <label for="rental_lbr">LBR</label>
-                            <input type="text" id="rental_lbr" name="lbr" class="qr-input" />
+                            <select id="rental_lbr" name="lbr" class="qr-select">
+                                <option value="" selected>—</option>
+                                {% for option in yes_no_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
 
                         <div class="qr-group">
@@ -695,8 +701,8 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="rental_headlights">Headlights</label>
-                            <select id="rental_headlights" name="headlights" class="qr-select">
+                            <label for="rental_work_lights">Work Lights</label>
+                            <select id="rental_work_lights" name="headlights" class="qr-select">
                                 <option value="" selected>—</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
@@ -723,7 +729,7 @@
                             </select>
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="rental_need_lp_tank_group">
                             <label for="rental_need_lp_tank">Need LP Tank</label>
                             <select id="rental_need_lp_tank" name="need_lp_tank" class="qr-select">
                                 <option value="" selected>—</option>
@@ -734,8 +740,18 @@
                         </div>
 
                         <div class="qr-group">
-                            <label for="rental_mast">Mast</label>
-                            <input type="text" id="rental_mast" name="mast" class="qr-input" />
+                            <label for="rental_mast_height">Mast Height</label>
+                            <input type="text" id="rental_mast_height" name="mast_height" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="rental_mast_type">Mast Type</label>
+                            <select id="rental_mast_type" name="mast_type" class="qr-select" required>
+                                <option value="" disabled selected>Select mast type</option>
+                                {% for option in mast_type_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
 
                         <!-- Electric-only block -->
@@ -757,11 +773,6 @@
                                 </div>
 
                                 <div class="qr-group">
-                                    <label for="rental_charger_set_for">Charger Set For</label>
-                                    <input type="text" id="rental_charger_set_for" name="charger_set_for" class="qr-input" />
-                                </div>
-
-                                <div class="qr-group">
                                     <label for="rental_input_volts">Input Volts</label>
                                     <input type="text" id="rental_input_volts" name="input_volts" class="qr-input" />
                                 </div>
@@ -780,7 +791,7 @@
                     </div>
 
                     <div class="qr-actions">
-                        <button type="submit" class="primary-button" data-submit-label="Generate Rental Request PDF">
+                        <button type="submit" class="primary-button">
                             Generate Rental Request PDF
                         </button>
                     </div>
@@ -806,12 +817,10 @@
     const pageSubtitle = document.getElementById("pageSubtitle");
 
     function setActiveForm(type) {
-        // hide all
         wrapQuote.style.display  = "none";
         wrapDemo.style.display   = "none";
         wrapRental.style.display = "none";
 
-        // show selected
         if (type === "demo") {
             wrapDemo.style.display = "block";
             pageTitle.textContent = "HELI Demo Request";
@@ -833,7 +842,7 @@
     }
 
     // -----------------------------
-    // 2) Quote Fuel -> Battery Voltage requirement (existing logic, unchanged)
+    // 2) Quote Fuel -> Battery Voltage requirement (existing logic)
     // -----------------------------
     const fuelSelect = document.getElementById('fuel_type');
     const voltageGroup = document.getElementById('battery_voltage_group');
@@ -858,24 +867,37 @@
     }
 
     // -----------------------------
-    // 3) Demo/Rental: show electric block when power_type == Electric
+    // 3) Demo/Rental power type behavior:
+    //    - show electric block when Electric
+    //    - hide "Need LP Tank" when Electric
     // -----------------------------
-    function wireElectricToggle(selectId, blockId) {
+    function wirePowerTypeBehavior(selectId, electricBlockId, lpGroupId) {
         const sel = document.getElementById(selectId);
-        const block = document.getElementById(blockId);
-        if (!sel || !block) return;
+        const electricBlock = document.getElementById(electricBlockId);
+        const lpGroup = document.getElementById(lpGroupId);
+
+        if (!sel) return;
+
+        function clearInputs(container) {
+            if (!container) return;
+            const inputs = container.querySelectorAll("input, select, textarea");
+            inputs.forEach(el => {
+                if (el.tagName === "SELECT") el.selectedIndex = 0;
+                else el.value = "";
+            });
+        }
 
         function update() {
             const isElectric = (sel.value || "").toLowerCase() === "electric";
-            block.style.display = isElectric ? "block" : "none";
 
-            if (!isElectric) {
-                // Clear fields inside block when hidden
-                const inputs = block.querySelectorAll("input, select, textarea");
-                inputs.forEach(el => {
-                    if (el.tagName === "SELECT") el.selectedIndex = 0;
-                    else el.value = "";
-                });
+            if (electricBlock) {
+                electricBlock.style.display = isElectric ? "block" : "none";
+                if (!isElectric) clearInputs(electricBlock);
+            }
+
+            if (lpGroup) {
+                lpGroup.style.display = isElectric ? "none" : "block";
+                if (isElectric) clearInputs(lpGroup);
             }
         }
 
@@ -883,13 +905,13 @@
         sel.addEventListener("change", update);
     }
 
-    wireElectricToggle("demo_power_type", "demo_electric_block");
-    wireElectricToggle("rental_power_type", "rental_electric_block");
+    wirePowerTypeBehavior("demo_power_type", "demo_electric_block", "demo_need_lp_tank_group");
+    wirePowerTypeBehavior("rental_power_type", "rental_electric_block", "rental_need_lp_tank_group");
 
     // -----------------------------
     // 4) Mobile Share/Save behavior
-    //    - Desktop: normal submit (unchanged)
-    //    - Mobile: intercept active form submit -> try native share sheet
+    //    - Desktop: normal submit
+    //    - Mobile: intercept submit -> share sheet
     // -----------------------------
     (function () {
         const hint = document.getElementById("mobileSaveHint");
@@ -905,7 +927,6 @@
         const forms = document.querySelectorAll("form.quote-request-form");
         forms.forEach((form) => {
             form.addEventListener("submit", async (e) => {
-                // Only intercept on mobile
                 e.preventDefault();
 
                 const btn = form.querySelector("button[type='submit']");
@@ -936,7 +957,6 @@
 
                     const blob = await res.blob();
 
-                    // Filename from header if present
                     const dispo = res.headers.get("content-disposition") || "";
                     const match = dispo.match(/filename="(.+?)"/);
                     const defaultName = (form.dataset.requestType || "request") + "_request.pdf";
@@ -944,7 +964,6 @@
 
                     const file = new File([blob], filename, { type: "application/pdf" });
 
-                    // Native share if possible
                     if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
                         await navigator.share({
                             title: form.dataset.pdfTitle || "HELI Request",
@@ -954,7 +973,6 @@
                         return;
                     }
 
-                    // Fallback: open in new tab for browser Share/Save
                     const url = URL.createObjectURL(blob);
                     window.open(url, "_blank");
                     setTimeout(() => URL.revokeObjectURL(url), 30000);

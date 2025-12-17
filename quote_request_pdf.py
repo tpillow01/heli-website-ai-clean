@@ -10,9 +10,6 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
 
-# -----------------------------
-# Quote Request (EXISTING)
-# -----------------------------
 QUOTE_FIELD_LABELS: List[Tuple[str, str]] = [
     ("customer_name", "Customer Name"),
     ("address", "Address"),
@@ -48,10 +45,7 @@ QUOTE_FIELD_LABELS: List[Tuple[str, str]] = [
 ]
 
 
-# -----------------------------
-# Demo Request (NEW)
-# Matches your Demo sheet fields/order
-# -----------------------------
+# DEMO: no cartage, no charger_set_for, mast split, headlights label is "Work Lights"
 DEMO_FIELD_LABELS: List[Tuple[str, str]] = [
     ("ordered_by", "Ordered By"),
     ("company_name", "Company Name"),
@@ -59,35 +53,31 @@ DEMO_FIELD_LABELS: List[Tuple[str, str]] = [
     ("contact_name", "Contact Name"),
     ("phone", "Phone"),
     ("bill_to_address", "Bill To Address"),
-    ("cartage", "Cartage"),
     ("company_phone_fax", "Company Phone/Fax"),
     ("po_number", "PO #"),
     ("quantity", "Quantity"),
     ("description_model", "Description / Model"),
     ("rate", "Rate (Daily/Weekly/Monthly)"),
-    ("freight_charges", "Freight Charges (one-way / notes)"),
+    ("freight_charges", "Freight Charges"),
     ("fork_length", "Fork Length"),
     ("lbr", "LBR"),
     ("side_shifter", "Side Shifter"),
     ("backup_alarm", "Back-up Alarm"),
-    ("headlights", "Headlights"),
+    ("headlights", "Work Lights"),
     ("tires", "Tires"),
     ("power_type", "LP or Gas / Electric"),
     ("need_lp_tank", "Need LP Tank"),
-    ("mast", "Mast"),
+    ("mast_height", "Mast Height"),
+    ("mast_type", "Mast Type"),
     ("connector", "Connector (if electric)"),
     ("need_charger", "Need Charger (if electric)"),
-    ("charger_set_for", "Charger Set For"),
     ("input_volts", "Input Volts"),
     ("phase", "Phase"),
     ("special_instructions", "Special Instructions"),
 ]
 
 
-# -----------------------------
-# Rental Request (NEW)
-# Matches your Rental sheet fields/order
-# -----------------------------
+# RENTAL: keeps cartage, no charger_set_for, mast split, headlights label is "Work Lights"
 RENTAL_FIELD_LABELS: List[Tuple[str, str]] = [
     ("ordered_by", "Ordered By"),
     ("company_name", "Company Name"),
@@ -101,19 +91,19 @@ RENTAL_FIELD_LABELS: List[Tuple[str, str]] = [
     ("quantity", "Quantity"),
     ("description_model", "Description / Model"),
     ("rate", "Rate (Daily/Weekly/Monthly)"),
-    ("freight_charges", "Freight Charges (one-way / notes)"),
+    ("freight_charges", "Freight Charges"),
     ("fork_length", "Fork Length"),
     ("lbr", "LBR"),
     ("side_shifter", "Side Shifter"),
     ("backup_alarm", "Back-up Alarm"),
-    ("headlights", "Headlights"),
+    ("headlights", "Work Lights"),
     ("tires", "Tires"),
     ("power_type", "LP or Gas / Electric"),
     ("need_lp_tank", "Need LP Tank"),
-    ("mast", "Mast"),
+    ("mast_height", "Mast Height"),
+    ("mast_type", "Mast Type"),
     ("connector", "Connector (if electric)"),
     ("need_charger", "Need Charger (if electric)"),
-    ("charger_set_for", "Charger Set For"),
     ("input_volts", "Input Volts"),
     ("phase", "Phase"),
     ("special_instructions", "Special Instructions"),
@@ -125,9 +115,6 @@ def _clean(v) -> str:
 
 
 def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], form_data: Dict[str, str]) -> bytes:
-    """
-    Shared PDF builder to guarantee Demo/Rental match the same exact format as Quote.
-    """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -141,7 +128,6 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
     styles = getSampleStyleSheet()
     elements = []
 
-    # Title + timestamp (same as your Quote format)
     title = Paragraph(title_text, styles["Title"])
     subtitle = Paragraph(
         datetime.now().strftime("Generated on %Y-%m-%d at %H:%M"),
@@ -149,15 +135,12 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
     )
     elements.extend([title, subtitle, Spacer(1, 18)])
 
-    # Table rows
     rows = []
     for key, label in field_labels:
         value = _clean(form_data.get(key))
         rows.append([label, value])
 
     table = Table(rows, colWidths=[180, 350])
-
-    # SAME style block you currently use
     table.setStyle(
         TableStyle(
             [
@@ -185,11 +168,6 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
 
 
 def build_quote_request_pdf(form_data: Dict[str, str]) -> bytes:
-    """
-    Build a clean quote request PDF from submitted form data.
-    Keeps your existing function intact for backward compatibility.
-    """
-    # Optional safety: if backend forgets to send fuel_voltage, we can derive a reasonable value
     if not _clean(form_data.get("fuel_voltage")):
         fuel = _clean(form_data.get("fuel_type"))
         volts = _clean(form_data.get("battery_voltage"))
@@ -204,28 +182,17 @@ def build_quote_request_pdf(form_data: Dict[str, str]) -> bytes:
 
 
 def build_demo_request_pdf(form_data: Dict[str, str]) -> bytes:
-    """
-    Demo request PDF — same format as Quote PDF.
-    """
     return _build_request_pdf("HELI Demo Request", DEMO_FIELD_LABELS, form_data)
 
 
 def build_rental_request_pdf(form_data: Dict[str, str]) -> bytes:
-    """
-    Rental request PDF — same format as Quote PDF.
-    """
     return _build_request_pdf("HELI Rental Request", RENTAL_FIELD_LABELS, form_data)
 
 
 def build_request_pdf(form_data: Dict[str, str], request_type: str) -> bytes:
-    """
-    Dispatcher helper for your Flask route:
-      request_type: 'quote' | 'demo' | 'rental'
-    """
     rt = (request_type or "").strip().lower()
     if rt == "demo":
         return build_demo_request_pdf(form_data)
     if rt == "rental":
         return build_rental_request_pdf(form_data)
-    # default
     return build_quote_request_pdf(form_data)
