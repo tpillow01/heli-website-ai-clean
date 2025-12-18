@@ -805,123 +805,127 @@
                 </form>
             </div>
 
-            <!-- ========================= -->
-            <!-- USED EQUIPMENT (NEW)      -->
-            <!-- ========================= -->
-            <div id="form_wrap_used" class="request-form-wrap" style="display:none;">
-                <form id="usedRequestForm"
-                      method="post"
-                      action="{{ url_for('quote_request') }}"
-                      class="quote-request-form"
-                      novalidate
-                      data-request-type="used"
-                      data-pdf-title="Used Equipment Request">
+<!-- ========================= -->
+<!-- USED EQUIPMENT (NEW)      -->
+<!-- ========================= -->
+<div id="form_wrap_used" class="request-form-wrap" style="display:none;">
+    <form id="usedRequestForm"
+          method="post"
+          action="{{ url_for('quote_request') }}"
+          class="quote-request-form"
+          novalidate
+          data-request-type="used"
+          data-pdf-title="Used Equipment Request">
 
-                    <input type="hidden" name="request_type" value="used" />
+        <input type="hidden" name="request_type" value="used" />
 
-                    <div class="quote-request-grid">
+        <div class="quote-request-grid">
 
-                        <div class="qr-group qr-group-full">
-                            <label for="used_customer_name">Customer</label>
-                            <input type="text" id="used_customer_name" name="customer_name" class="qr-input" required />
-                        </div>
-
-                        <div class="qr-group qr-group-full">
-                            <label for="used_address">Address</label>
-                            <input type="text" id="used_address" name="address" class="qr-input" required />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_city_zip">City and Zip Code</label>
-                            <input type="text" id="used_city_zip" name="city_zip_code" class="qr-input" required />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_contact_name">Contact Name</label>
-                            <input type="text" id="used_contact_name" name="contact_name" class="qr-input" required />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_model">Model</label>
-                            <input type="text" id="used_model" name="model" class="qr-input" required />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_fuel_type">Fuel Type</label>
-                            <div class="qr-hint">Select LP, Gas, Diesel, or Electric</div>
-                            <select id="used_fuel_type" name="fuel_type" class="qr-select" required>
-                                <option value="" disabled selected>Select</option>
-                                <option value="LP">LP</option>
-                                <option value="Gas">Gas</option>
-                                <option value="Diesel">Diesel</option>
-                                <option value="Electric">Electric</option>
-                            </select>
-                        </div>
-
-                        <div class="qr-group" id="used_voltage_group" style="display:none;">
-                            <label for="used_voltage">Electric 36/48 Volt</label>
-                        <select id="used_voltage" name="battery_voltage" class="qr-select">
-                            <option value="" selected>—</option>
-                            <option value="12V">12V</option>
-                            <option value="24V">24V</option>
-                            <option value="36V">36V</option>
-                            <option value="48V">48V</option>
-                            <option value="80V">80V</option>
-                        </select>
-
-
-                        <div class="qr-group" id="used_line_voltage_group" style="display:none;">
-                            <label for="used_line_voltage">Line Voltage If Electric</label>
-                            <input type="text" id="used_line_voltage" name="line_voltage" class="qr-input" />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_mast_height">Mast Height</label>
-                            <input type="text" id="used_mast_height" name="mast_height" class="qr-input" required />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_mast_type">Mast Type</label>
-                            <select id="used_mast_type" name="mast_type" class="qr-select" required>
-                                <option value="" disabled selected>Select mast type</option>
-                                {% for option in mast_type_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_fork_size">Fork Size</label>
-                            <input type="text" id="used_fork_size" name="fork_size" class="qr-input" />
-                        </div>
-
-                        <div class="qr-group">
-                            <label for="used_budget_price">Customer Budget</label>
-                            <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
-                        </div>
-
-                        <div class="qr-group qr-group-full">
-                            <label for="used_options_need">Options Need</label>
-                            <input type="text" id="used_options_need" name="options_need" class="qr-input" />
-                        </div>
-
-                        <div class="qr-group qr-group-full">
-                            <label for="used_additional_notes">Additional Notes</label>
-                            <textarea id="used_additional_notes" name="additional_notes" class="qr-textarea"></textarea>
-                        </div>
-
-                        <!-- IMPORTANT: Internal info NOT shown on form (per your request).
-                             It WILL appear on the PDF as blank rows. -->
-
-                    </div>
-
-                    <div class="qr-actions">
-                        <button type="submit" class="primary-button">
-                            Generate Used Equipment Request PDF
-                        </button>
-                    </div>
-                </form>
+            <div class="qr-group qr-group-full">
+                <label for="used_customer_name">Customer</label>
+                <input type="text" id="used_customer_name" name="customer_name" class="qr-input" required />
             </div>
+
+            <div class="qr-group qr-group-full">
+                <label for="used_address">Address</label>
+                <input type="text" id="used_address" name="address" class="qr-input" required />
+            </div>
+
+            <div class="qr-group">
+                <label for="used_city_zip">City and Zip Code</label>
+                <!-- ✅ IMPORTANT: name must match your route/PDF -->
+                <input type="text" id="used_city_zip" name="city_state_zip" class="qr-input" required />
+            </div>
+
+            <div class="qr-group">
+                <label for="used_contact_name">Contact Name</label>
+                <input type="text" id="used_contact_name" name="contact_name" class="qr-input" required />
+            </div>
+
+            <div class="qr-group">
+                <label for="used_model">Model</label>
+                <input type="text" id="used_model" name="model" class="qr-input" required />
+            </div>
+
+            <div class="qr-group">
+                <label for="used_fuel_type">Fuel Type</label>
+                <div class="qr-hint">Select LP, Gas, Diesel, or Electric</div>
+                <select id="used_fuel_type" name="fuel_type" class="qr-select" required>
+                    <option value="" disabled selected>Select</option>
+                    <option value="LP">LP</option>
+                    <option value="Gas">Gas</option>
+                    <option value="Diesel">Diesel</option>
+                    <option value="Electric">Electric</option>
+                </select>
+            </div>
+
+            <!-- ✅ Electric-only fields (ONLY these two groups are hidden) -->
+            <div class="qr-group" id="used_voltage_group" style="display:none;">
+                <label for="used_voltage">Electric Voltage</label>
+                <select id="used_voltage" name="battery_voltage" class="qr-select">
+                    <option value="" selected>—</option>
+                    <option value="12V">12V</option>
+                    <option value="24V">24V</option>
+                    <option value="36V">36V</option>
+                    <option value="48V">48V</option>
+                    <option value="80V">80V</option>
+                </select>
+            </div>
+
+            <div class="qr-group" id="used_line_voltage_group" style="display:none;">
+                <label for="used_line_voltage">Line Voltage</label>
+                <input type="text" id="used_line_voltage" name="line_voltage" class="qr-input" />
+            </div>
+
+            <!-- ✅ Always visible fields -->
+            <div class="qr-group">
+                <label for="used_mast_height">Mast Height</label>
+                <input type="text" id="used_mast_height" name="mast_height" class="qr-input" required />
+            </div>
+
+            <div class="qr-group">
+                <label for="used_mast_type">Mast Type</label>
+                <select id="used_mast_type" name="mast_type" class="qr-select" required>
+                    <option value="" disabled selected>Select mast type</option>
+                    {% for option in mast_type_options %}
+                        <option value="{{ option }}">{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="qr-group">
+                <label for="used_fork_size">Fork Size</label>
+                <input type="text" id="used_fork_size" name="fork_size" class="qr-input" />
+            </div>
+
+            <div class="qr-group">
+                <label for="used_budget_price">Customer Budget</label>
+                <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
+            </div>
+
+            <div class="qr-group qr-group-full">
+                <label for="used_options_need">Options Need</label>
+                <input type="text" id="used_options_need" name="options_need" class="qr-input" />
+            </div>
+
+            <div class="qr-group qr-group-full">
+                <label for="used_additional_notes">Additional Notes</label>
+                <textarea id="used_additional_notes" name="additional_notes" class="qr-textarea"></textarea>
+            </div>
+
+            <!-- Internal info NOT shown on form (per your request).
+                 It WILL appear on the PDF as blank rows. -->
+
+        </div>
+
+        <div class="qr-actions">
+            <button type="submit" class="primary-button">
+                Generate Used Equipment Request PDF
+            </button>
+        </div>
+    </form>
+</div>
+
 
         </section>
     </div>
@@ -1054,7 +1058,7 @@
         if (!sel) return;
 
         function update() {
-            const isElectric = (sel.value || "").toLowerCase() === "electric";
+            const isElectric = (sel.value || "").trim().toLowerCase() === "electric";
             if (gVolt) gVolt.style.display = isElectric ? "block" : "none";
             if (gLine) gLine.style.display = isElectric ? "block" : "none";
 
