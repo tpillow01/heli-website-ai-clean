@@ -417,6 +417,15 @@
                         </div>
 
                         <div class="qr-group">
+                            <label for="demo_cartage">Cartage</label>
+                            <select id="demo_cartage" name="cartage" class="qr-select">
+                                <option value="" selected>—</option>
+                                <option value="Dock">Dock</option>
+                                <option value="Ground">Ground</option>
+                            </select>
+                        </div>
+
+                        <div class="qr-group">
                             <label for="demo_quantity">Quantity</label>
                             <input type="number" id="demo_quantity" name="quantity" class="qr-input" min="1" />
                         </div>
@@ -851,12 +860,15 @@
 
                         <div class="qr-group" id="used_voltage_group" style="display:none;">
                             <label for="used_voltage">Electric 36/48 Volt</label>
-                            <select id="used_voltage" name="battery_voltage" class="qr-select">
-                                <option value="" selected>—</option>
-                                <option value="36V">36V</option>
-                                <option value="48V">48V</option>
-                            </select>
-                        </div>
+                        <select id="used_voltage" name="battery_voltage" class="qr-select">
+                            <option value="" selected>—</option>
+                            <option value="12V">12V</option>
+                            <option value="24V">24V</option>
+                            <option value="36V">36V</option>
+                            <option value="48V">48V</option>
+                            <option value="80V">80V</option>
+                        </select>
+
 
                         <div class="qr-group" id="used_line_voltage_group" style="display:none;">
                             <label for="used_line_voltage">Line Voltage If Electric</label>

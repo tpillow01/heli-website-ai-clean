@@ -3438,9 +3438,7 @@ def quote_request():
             phone = (form.get("phone") or "").strip()
             bill_to_address = (form.get("bill_to_address") or "").strip()
 
-            cartage = ""
-            if request_type == "rental":
-                cartage = (form.get("cartage") or "").strip()
+            cartage = (form.get("cartage") or "").strip()
 
             company_phone_fax = (form.get("company_phone_fax") or "").strip()
             po_number = (form.get("po_number") or "").strip()

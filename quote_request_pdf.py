@@ -52,6 +52,7 @@ DEMO_FIELD_LABELS: List[Tuple[str, str]] = [
     ("phone", "Phone"),
     ("bill_to_address", "Bill To Address"),
     ("company_phone_fax", "Company Phone/Fax"),
+    ("cartage", "Cartage (Dock / Ground)"),
     ("po_number", "PO #"),
     ("quantity", "Quantity"),
     ("description_model", "Description / Model"),
