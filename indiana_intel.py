@@ -3,21 +3,22 @@ indiana_intel.py
 
 Indiana developments / lead finder for Tynan / Heli AI.
 
-What this module does well:
-- Works for BOTH "facility/news" searches (new DCs, expansions, hiring) and
-  "planning/zoning" searches (plan commission / BZA / hearing examiner / agenda packets).
-- Uses Google Programmable Search Engine (Custom Search JSON API) for retrieval.
-- Normalizes results into structured dicts for your chat layer.
-
-Environment variables required:
-- GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
-- GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured for Indiana
+Key upgrades in this version:
+- Handles Google CSE 429 rate-limits with Retry-After + exponential backoff + jitter.
+- Avoids burning quota by NOT cascading tiers when rate-limited.
+- Adds a small TTL cache so repeated queries don't re-hit Google.
+- Sanitizes logs so your API key is never printed.
+- Keeps BOTH modes:
+    * facility/news mode (warehouses, DCs, plants, expansions)
+    * planning/zoning mode (plan commission/BZA/MDC agendas, packets, staff reports)
 """
 
 from __future__ import annotations
 
 import os
 import re
+import time
+import random
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,7 +41,25 @@ GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 GOOGLE_CSE_KEY = os.environ.get("GOOGLE_CSE_KEY")
 GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX")
 
-# Facility / industrial keywords (good for news + prospecting)
+# Quota/Rate-limit controls (safe defaults)
+CSE_TIMEOUT_SECONDS = float(os.environ.get("CSE_TIMEOUT_SECONDS", "10"))
+CSE_MAX_RETRIES = int(os.environ.get("CSE_MAX_RETRIES", "4"))
+CSE_BACKOFF_BASE_SECONDS = float(os.environ.get("CSE_BACKOFF_BASE_SECONDS", "1.2"))
+CSE_BACKOFF_MAX_SECONDS = float(os.environ.get("CSE_BACKOFF_MAX_SECONDS", "20"))
+CSE_MIN_INTERVAL_SECONDS = float(os.environ.get("CSE_MIN_INTERVAL_SECONDS", "0.4"))
+
+# Pagination controls: each page is 10 results (CSE limit per request)
+# IMPORTANT: Keeping this small prevents you from hitting 429 quickly.
+CSE_MAX_PAGES = int(os.environ.get("CSE_MAX_PAGES", "1"))  # 1 page = 10 results, 2 pages = 20, etc.
+CSE_MAX_RESULTS_HARD_CAP = 50  # don't allow runaway requests
+
+# Cache controls
+CACHE_TTL_SECONDS = int(os.environ.get("CSE_CACHE_TTL_SECONDS", "900"))  # 15 min
+
+# ---------------------------------------------------------------------------
+# Query keywords
+# ---------------------------------------------------------------------------
+
 BASE_FACILITY_KEYWORDS = (
     '(warehouse OR "distribution center" OR "distribution facility" OR '
     '"distribution hub" OR logistics OR "logistics center" OR '
@@ -51,7 +70,6 @@ BASE_FACILITY_KEYWORDS = (
     '"cold storage" OR "spec building" OR "truck terminal" OR facility OR 3PL)'
 )
 
-# Planning / zoning keywords (good for agendas, packets, staff reports)
 PLANNING_KEYWORDS = (
     '("plan commission" OR "area plan commission" OR "planning commission" OR '
     '"board of zoning appeals" OR BZA OR "hearing examiner" OR "hearing officer" OR '
@@ -62,46 +80,16 @@ PLANNING_KEYWORDS = (
     '"concept plan" OR "zoning case")'
 )
 
-# Industrial signals inside planning docs (we score these)
 INDUSTRIAL_SIGNALS = [
-    "industrial",
-    "warehouse",
-    "distribution",
-    "logistics",
-    "cold storage",
-    "spec building",
-    "truck terminal",
-    "manufacturing",
-    "plant",
-    "3pl",
-    "fulfillment",
-    # common zoning hints
-    "i-1",
-    "i-2",
-    "i-3",
-    "i-4",
-    "i1",
-    "i2",
-    "i3",
-    "i4",
-    "industrial district",
-    "light industrial",
-    "heavy industrial",
+    "industrial", "warehouse", "distribution", "logistics", "cold storage",
+    "spec building", "truck terminal", "manufacturing", "plant", "3pl", "fulfillment",
+    "i-1", "i-2", "i-3", "i-4", "i1", "i2", "i3", "i4",
+    "industrial district", "light industrial", "heavy industrial",
 ]
 
-# Common platform/page markers for agendas/packets
 AGENDA_PLATFORMS = [
-    "agendacenter",
-    "viewfile",
-    "documentcenter",
-    "legistar",
-    "municode",
-    "granicus",
-    "minutes",
-    "agenda",
-    "packet",
-    "meeting",
-    "hearing",
+    "agendacenter", "viewfile", "documentcenter", "legistar", "municode",
+    "granicus", "minutes", "agenda", "packet", "meeting", "hearing",
 ]
 
 _STOPWORDS = {
@@ -112,7 +100,6 @@ _STOPWORDS = {
     "announce", "expanded", "expansion", "hiring", "jobs",
 }
 
-# Obvious non-prospect noise
 _PROJECT_NEGATIVE_TEXT = [
     "visit", "tourism", "visitors bureau", "parks and recreation", "park and recreation",
     "shopping center", "outlet", "mall", "hotel", "resort", "casino", "water park",
@@ -129,20 +116,59 @@ _PROJECT_NEGATIVE_URL = [
     "tripadvisor.com",
 ]
 
+_FACILITY_POSITIVE = [
+    "warehouse", "distribution center", "distribution facility", "distribution hub",
+    "fulfillment center", "fulfillment facility",
+    "logistics center", "logistics facility", "logistics hub",
+    "industrial park", "business park", "industrial complex",
+    "manufacturing plant", "manufacturing facility", "production plant", "assembly plant",
+    "factory", "cold storage", "spec building", "truck terminal",
+    "3pl", "third-party logistics", "third party logistics",
+]
+
 # ---------------------------------------------------------------------------
-# Small helpers
+# Simple TTL cache (in-process)
 # ---------------------------------------------------------------------------
+
+_CACHE: Dict[str, Tuple[float, Any]] = {}
+_LAST_REQUEST_TS: float = 0.0
+
+
+def _cache_get(key: str) -> Optional[Any]:
+    now = time.time()
+    hit = _CACHE.get(key)
+    if not hit:
+        return None
+    ts, val = hit
+    if now - ts > CACHE_TTL_SECONDS:
+        _CACHE.pop(key, None)
+        return None
+    return val
+
+
+def _cache_set(key: str, val: Any) -> None:
+    _CACHE[key] = (time.time(), val)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+class CSEQuotaError(RuntimeError):
+    """Raised when Google CSE rate-limits (429) and we can't recover quickly."""
+
 
 def _lower(s: Any) -> str:
     return str(s or "").lower()
+
 
 def _slug(s: str) -> str:
     s = re.sub(r"[^a-z0-9\s-]", "", _lower(s))
     s = re.sub(r"\s+", "-", s).strip("-")
     return s
 
+
 def _is_planning_query(q: str) -> bool:
-    """Detect if user is asking for agendas/minutes/rezoning/site plan types of things."""
     t = _lower(q)
     triggers = [
         "plan commission", "area plan", "planning commission", "bza", "board of zoning",
@@ -152,14 +178,8 @@ def _is_planning_query(q: str) -> bool:
     ]
     return any(w in t for w in triggers)
 
-def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Extract (city, county) from a natural-language question.
 
-    - Finds 'X County' → county='X County'
-    - Grabs a city after 'in / near / around' phrases.
-    - Handles "Indianapolis (Marion County)" style.
-    """
+def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     if not q:
         return (None, None)
 
@@ -168,14 +188,12 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text)
     county = f"{m_county.group(1).strip()} County" if m_county else None
 
-    # "Indianapolis (Marion County)" or "Indianapolis - Marion County"
     m_paren = re.search(r"\b([A-Za-z][A-Za-z\s]+?)\s*\(\s*([A-Za-z]+)\s+County\s*\)", text)
     if m_paren:
         city = m_paren.group(1).strip()
         county = f"{m_paren.group(2).strip()} County"
         return (city, county)
 
-    # City: look for "in Plainfield", "around Whitestown, IN", etc.
     m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text)
     city = None
     if m_city:
@@ -185,6 +203,7 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
             city = raw
 
     return (city, county)
+
 
 def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
     pagemap = it.get("pagemap") or {}
@@ -222,6 +241,7 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
                 return dt
     return None
 
+
 def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
     if not days or days <= 0:
         return None
@@ -232,21 +252,57 @@ def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
         return f"m{months}"
     return None
 
+
+def _throttle() -> None:
+    global _LAST_REQUEST_TS
+    now = time.time()
+    elapsed = now - _LAST_REQUEST_TS
+    if elapsed < CSE_MIN_INTERVAL_SECONDS:
+        time.sleep(CSE_MIN_INTERVAL_SECONDS - elapsed)
+    _LAST_REQUEST_TS = time.time()
+
+
+def _safe_http_error_log(resp: requests.Response, prefix: str) -> None:
+    # Never log full URL (contains key). Log only status + a short excerpt.
+    try:
+        body = (resp.text or "")[:200].replace("\n", " ")
+    except Exception:
+        body = ""
+    log.warning("%s status=%s body=%s", prefix, resp.status_code, body)
+
+
 def _google_cse_search(query: str, max_results: int = 30, days: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Google CSE wrapper with:
+    - TTL cache
+    - retry/backoff on 429/5xx
+    - capped pages to prevent quota burn
+    """
     if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
         log.warning(
-            "GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set; returning empty result list. "
+            "GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set; returning empty list. "
             f"GOOGLE_CSE_KEY present={bool(GOOGLE_CSE_KEY)}, GOOGLE_CSE_CX present={bool(GOOGLE_CSE_CX)}"
         )
         return []
 
+    max_results = max(1, min(int(max_results), CSE_MAX_RESULTS_HARD_CAP))
+    pages_needed = (max_results + 9) // 10
+    pages = max(1, min(pages_needed, max(1, CSE_MAX_PAGES)))
+
     date_restrict = _days_to_date_restrict(days)
+
+    # Cache key
+    cache_key = f"q={query}|days={days}|pages={pages}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    sess = requests.Session()
     base_params = {
         "key": GOOGLE_CSE_KEY,
         "cx": GOOGLE_CSE_CX,
         "q": query,
         "num": 10,
-        # NOTE: CSE "sort=date" depends on engine config; we keep it but still rank ourselves.
         "sort": "date",
     }
     if date_restrict:
@@ -255,37 +311,84 @@ def _google_cse_search(query: str, max_results: int = 30, days: Optional[int] = 
     out: List[Dict[str, Any]] = []
     start = 1
 
-    while len(out) < max_results and start <= 91:
+    for _page_idx in range(pages):
+        # throttle between requests
+        _throttle()
+
         params = dict(base_params)
         params["start"] = start
-        try:
-            resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            log.warning("Google CSE request failed (start=%s): %s", start, e)
-            break
 
-        items = data.get("items", []) or []
-        log.info("Google CSE returned %s items at start=%s", len(items), start)
-        if not items:
-            break
-
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            title = it.get("title") or ""
-            snippet = it.get("snippet") or it.get("htmlSnippet") or ""
-            url = it.get("link") or ""
-            provider = it.get("displayLink") or ""
-            dt = _parse_date_from_pagemap(it)
-            out.append({"title": title, "snippet": snippet, "url": url, "provider": provider, "date": dt})
-            if len(out) >= max_results:
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                resp = sess.get(GOOGLE_CSE_ENDPOINT, params=params, timeout=CSE_TIMEOUT_SECONDS)
+            except Exception as e:
+                log.warning("Google CSE request failed (network) start=%s err=%s", start, e)
                 break
 
-        start += 10
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except Exception as e:
+                    log.warning("Google CSE JSON parse failed start=%s err=%s", start, e)
+                    break
 
+                items = data.get("items", []) or []
+                log.info("Google CSE returned %s items at start=%s", len(items), start)
+                if not items:
+                    break
+
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    title = it.get("title") or ""
+                    snippet = it.get("snippet") or it.get("htmlSnippet") or ""
+                    url = it.get("link") or ""
+                    provider = it.get("displayLink") or ""
+                    dt = _parse_date_from_pagemap(it)
+                    out.append({"title": title, "snippet": snippet, "url": url, "provider": provider, "date": dt})
+                    if len(out) >= max_results:
+                        break
+
+                break  # success for this page
+
+            # Rate limit / transient errors
+            if resp.status_code in (429, 500, 502, 503, 504):
+                _safe_http_error_log(resp, prefix="Google CSE transient error")
+                if attempt >= CSE_MAX_RETRIES:
+                    if resp.status_code == 429:
+                        raise CSEQuotaError("Google CSE rate-limited (429). Reduce pages/queries or increase quota.")
+                    break
+
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        wait = float(retry_after)
+                    except Exception:
+                        wait = None
+                else:
+                    wait = None
+
+                if wait is None:
+                    # exponential backoff + jitter
+                    wait = min(CSE_BACKOFF_MAX_SECONDS, CSE_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
+                    wait += random.uniform(0.0, 0.6)
+
+                time.sleep(wait)
+                continue
+
+            # Non-retryable error
+            _safe_http_error_log(resp, prefix="Google CSE non-retryable error")
+            break
+
+        start += 10
+        if len(out) >= max_results:
+            break
+
+    _cache_set(cache_key, out)
     return out
+
 
 def _dedupe_by_url(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
@@ -301,35 +404,6 @@ def _dedupe_by_url(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out.append(it)
     return out
 
-# ---------------------------------------------------------------------------
-# Filters / scoring
-# ---------------------------------------------------------------------------
-
-_FACILITY_POSITIVE = [
-    "warehouse",
-    "distribution center",
-    "distribution facility",
-    "distribution hub",
-    "fulfillment center",
-    "fulfillment facility",
-    "logistics center",
-    "logistics facility",
-    "logistics hub",
-    "industrial park",
-    "business park",
-    "industrial complex",
-    "manufacturing plant",
-    "manufacturing facility",
-    "production plant",
-    "assembly plant",
-    "factory",
-    "cold storage",
-    "spec building",
-    "truck terminal",
-    "3pl",
-    "third-party logistics",
-    "third party logistics",
-]
 
 def _looks_like_facility_hit(title: str, snippet: str, url: str) -> bool:
     text = _lower(f"{title} {snippet}")
@@ -343,14 +417,10 @@ def _looks_like_facility_hit(title: str, snippet: str, url: str) -> bool:
         if neg in text:
             return False
 
-    has_positive = any(pos in text for pos in _FACILITY_POSITIVE)
-    return bool(has_positive)
+    return any(pos in text for pos in _FACILITY_POSITIVE)
+
 
 def _looks_like_planning_doc(title: str, snippet: str, url: str) -> bool:
-    """
-    Accept agendas/packets/minutes/staff reports even if they don't say 'warehouse' in snippet.
-    Then we score for industrial signals.
-    """
     text = _lower(f"{title} {snippet}")
     url_l = _lower(url or "")
 
@@ -362,14 +432,10 @@ def _looks_like_planning_doc(title: str, snippet: str, url: str) -> bool:
         if neg in text:
             return False
 
-    # Must look like a meeting/agenda doc OR contain planning terms
     looks_platform = any(m in url_l for m in AGENDA_PLATFORMS) or any(m in text for m in AGENDA_PLATFORMS)
     has_planning = any(k in text for k in ["agenda", "minutes", "packet", "staff report", "petition", "rezon", "hearing", "commission", "bza", "plan commission", "mdc"])
-    if not (looks_platform or has_planning):
-        return False
+    return bool(looks_platform or has_planning)
 
-    # We don't require industrial signals to *accept*; we use them to rank.
-    return True
 
 def _geo_match_scores(title: str, snippet: str, city: Optional[str], county: Optional[str]) -> Tuple[int, bool, bool]:
     text = _lower(title + " " + snippet)
@@ -397,19 +463,19 @@ def _geo_match_scores(title: str, snippet: str, city: Optional[str], county: Opt
 
     return geo_score, match_city, match_county
 
+
 def _score_planning_industrial(title: str, snippet: str, url: str) -> int:
     text = _lower(f"{title} {snippet} {url}")
     score = 0
     for s in INDUSTRIAL_SIGNALS:
         if s in text:
             score += 2
-    # PDFs/packets are usually the good stuff
     if ".pdf" in text:
         score += 1
-    # bonus for staff report mention
     if "staff report" in text:
         score += 1
     return score
+
 
 def _compute_facility_score(title: str, snippet: str) -> int:
     text = _lower(f"{title} {snippet}")
@@ -423,6 +489,7 @@ def _compute_facility_score(title: str, snippet: str) -> int:
         score += 1
     return score
 
+
 def _infer_project_type(title: str, snippet: str, is_planning: bool) -> str:
     text = _lower(title + " " + snippet)
     if is_planning:
@@ -435,9 +502,6 @@ def _infer_project_type(title: str, snippet: str, is_planning: bool) -> str:
         return "business / industrial park"
     return "Industrial / commercial project"
 
-# ---------------------------------------------------------------------------
-# Query builders
-# ---------------------------------------------------------------------------
 
 def _tail_from_user_q(user_q: str, limit: int = 7) -> str:
     cleaned = re.sub(r"[“”\"']", " ", user_q or "")
@@ -449,6 +513,7 @@ def _tail_from_user_q(user_q: str, limit: int = 7) -> str:
             continue
         extra.append(tok)
     return " ".join(extra[:limit])
+
 
 def _build_facility_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     parts: List[str] = ["Indiana", BASE_FACILITY_KEYWORDS]
@@ -463,19 +528,15 @@ def _build_facility_query(user_q: str, city: Optional[str], county: Optional[str
     log.info("Google CSE facility query: %s", q)
     return q
 
+
 def _build_planning_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     parts: List[str] = ["Indiana", PLANNING_KEYWORDS]
-
-    # Keep geo anchors tight
     if county:
         parts.append(f'"{county}"')
     if city:
         parts.append(f'"{city}"')
 
-    # Industrial relevance helps the agenda search
-    parts.append("(industrial OR warehouse OR distribution OR logistics OR manufacturing OR \"cold storage\" OR \"industrial park\")")
-
-    # Force common hosting patterns
+    parts.append('(industrial OR warehouse OR distribution OR logistics OR manufacturing OR "cold storage" OR "industrial park")')
     parts.append('("AgendaCenter" OR "ViewFile" OR "DocumentCenter" OR "Legistar" OR municode OR granicus OR packet OR agenda OR minutes)')
 
     tail = _tail_from_user_q(user_q, limit=5)
@@ -486,26 +547,13 @@ def _build_planning_query(user_q: str, city: Optional[str], county: Optional[str
     log.info("Google CSE planning query: %s", q)
     return q
 
-def _build_planning_site_restrict(city: Optional[str], county: Optional[str]) -> str:
-    """
-    A light site restrict (not perfect) to prioritize government/municipal sources.
-    We do NOT hard-restrict to one domain because Indiana counties vary wildly.
-    """
+
+def _build_planning_site_bias(county: Optional[str]) -> str:
     sites = [
-        "site:*.in.gov",
-        "site:in.gov",
-        "site:*.in.us",
-        "site:in.us",
-        "site:*.us",
-        # municode is common for agendas/minutes
-        "site:meetings.municode.com",
-        "site:*municodemeetings.com",
-        # Indy/Marion often comes from these
-        "site:indy.gov",
-        "site:indianapolis.granicus.com",
-        "site:calendar.indy.gov",
+        "site:*.in.gov", "site:in.gov", "site:*.in.us", "site:in.us",
+        "site:meetings.municode.com", "site:*municodemeetings.com",
+        "site:indy.gov", "site:indianapolis.granicus.com",
     ]
-    # If county is provided, add some common county-domain guesses (not required)
     if county:
         cslug = _slug(county.replace(" county", ""))
         sites.extend([
@@ -515,9 +563,6 @@ def _build_planning_site_restrict(city: Optional[str], county: Optional[str]) ->
         ])
     return "(" + " OR ".join(sites) + ")"
 
-# ---------------------------------------------------------------------------
-# Normalization
-# ---------------------------------------------------------------------------
 
 def _normalize(
     raw_items: List[Dict[str, Any]],
@@ -551,7 +596,7 @@ def _normalize(
                 "scope": "local" if geo_score > 0 else "statewide",
                 "location_label": (county or city or "Indiana") if geo_score > 0 else "Indiana",
                 "original_area_label": original_area_label,
-                "forklift_score": max(1, min(5, 1 + industrial_score // 3)),  # map industrial score to 1..5
+                "forklift_score": max(1, min(5, 1 + industrial_score // 3)),
                 "forklift_label": "Planning doc (ranked for industrial relevance)",
                 "geo_match_score": geo_score,
                 "match_city": match_city,
@@ -604,6 +649,7 @@ def _normalize(
 
     return projects
 
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -612,97 +658,100 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 3
     """
     Main entrypoint.
 
-    If the user question looks like a planning/zoning query:
-      - Prioritize planning-doc retrieval (agenda packets, staff reports, minutes).
-    Otherwise:
-      - Prioritize facility/news retrieval.
-
-    Returns normalized dicts.
+    Behavior changes vs your previous version:
+    - Caps Google pagination by CSE_MAX_PAGES (default 1).
+    - If we hit 429, we STOP and return what we have (no tier cascade).
     """
     city, county = _extract_geo_hint(user_q)
     is_planning = _is_planning_query(user_q)
 
     log.info("Geo hint: city=%s county=%s planning=%s", city, county, is_planning)
 
-    projects: List[Dict[str, Any]] = []
+    max_items = max(1, min(int(max_items), CSE_MAX_RESULTS_HARD_CAP))
 
-    # ---- Tier 1: local (planning or facility) ----
-    if is_planning:
-        site_bias = _build_planning_site_restrict(city, county)
-        q1 = _build_planning_query(user_q, city, county)
-        query_local = f"{site_bias} {q1}"
-        raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
-        raw_local = _dedupe_by_url(raw_local)
-        if raw_local:
-            projects = _normalize(raw_local, city, county, user_q, source_tier="local", is_planning=True)
-    else:
-        query_local = _build_facility_query(user_q, city, county)
-        raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
-        raw_local = _dedupe_by_url(raw_local)
-        if raw_local:
-            projects = _normalize(raw_local, city, county, user_q, source_tier="local", is_planning=False)
-
-    # ---- Tier 2: statewide fallback (same mode, looser geo) ----
-    if not projects:
-        log.info("No local results; trying statewide tier")
+    # ---- Tier 1: local ----
+    try:
         if is_planning:
-            site_bias = _build_planning_site_restrict(city=None, county=None)
-            q2 = _build_planning_query(user_q, city=None, county=None)
-            query_statewide = f"{site_bias} {q2}"
-            raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
-            raw_statewide = _dedupe_by_url(raw_statewide)
-            if raw_statewide:
-                projects = _normalize(raw_statewide, None, None, user_q, source_tier="statewide", is_planning=True)
+            site_bias = _build_planning_site_bias(county)
+            q_local = _build_planning_query(user_q, city, county)
+            raw_local = _google_cse_search(f"{site_bias} {q_local}", max_results=max_items, days=days)
         else:
-            query_statewide = _build_facility_query(user_q, city=None, county=None)
-            raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
-            raw_statewide = _dedupe_by_url(raw_statewide)
-            if raw_statewide:
-                projects = _normalize(raw_statewide, None, None, user_q, source_tier="statewide", is_planning=False)
-
-    # ---- Tier 3: mode-specific generic fallback ----
-    if not projects:
-        log.info("No results; running generic fallback")
-        if is_planning:
-            generic = f'{(county or "Indiana")} {PLANNING_KEYWORDS} (industrial OR warehouse OR logistics OR manufacturing) ("AgendaCenter" OR "ViewFile" OR municode OR agenda OR minutes OR packet)'
-            site_bias = _build_planning_site_restrict(city=None, county=county)
-            query_fallback = f"{site_bias} {generic}"
-            raw = _google_cse_search(query_fallback, max_results=max_items, days=max(days, 730))
-            raw = _dedupe_by_url(raw)
-            if raw:
-                projects = _normalize(raw, None, county, generic, source_tier="fallback", is_planning=True)
-        else:
-            generic = f'Indiana {BASE_FACILITY_KEYWORDS} (announced OR expansion OR groundbreaking OR "now hiring")'
-            query_fallback = generic
-            raw = _google_cse_search(query_fallback, max_results=max_items, days=max(days, 730))
-            raw = _dedupe_by_url(raw)
-            if raw:
-                projects = _normalize(raw, None, None, generic, source_tier="fallback", is_planning=False)
-
-    if not projects:
+            q_local = _build_facility_query(user_q, city, county)
+            raw_local = _google_cse_search(q_local, max_results=max_items, days=days)
+    except CSEQuotaError as e:
+        log.warning("CSE quota error on local tier: %s", e)
         return []
 
-    # ---- Ranking ----
+    raw_local = _dedupe_by_url(raw_local)
+    projects = _normalize(raw_local, city, county, user_q, source_tier="local", is_planning=is_planning)
+    if projects:
+        return _rank_projects(projects)
+
+    # ---- Tier 2: statewide ----
+    # Only run statewide if we did NOT hit quota issues and local returned nothing.
+    try:
+        if is_planning:
+            site_bias = _build_planning_site_bias(None)
+            q_state = _build_planning_query(user_q, city=None, county=None)
+            raw_state = _google_cse_search(f"{site_bias} {q_state}", max_results=max_items, days=days)
+            raw_state = _dedupe_by_url(raw_state)
+            projects = _normalize(raw_state, None, None, user_q, source_tier="statewide", is_planning=True)
+        else:
+            q_state = _build_facility_query(user_q, city=None, county=None)
+            raw_state = _google_cse_search(q_state, max_results=max_items, days=days)
+            raw_state = _dedupe_by_url(raw_state)
+            projects = _normalize(raw_state, None, None, user_q, source_tier="statewide", is_planning=False)
+    except CSEQuotaError as e:
+        log.warning("CSE quota error on statewide tier: %s", e)
+        return []
+
+    if projects:
+        return _rank_projects(projects)
+
+    # ---- Tier 3: generic fallback ----
+    # Kept minimal to avoid quota burn.
+    try:
+        if is_planning:
+            generic = f'{(county or "Indiana")} {PLANNING_KEYWORDS} (industrial OR warehouse OR logistics OR manufacturing) (agenda OR minutes OR packet OR municode OR AgendaCenter OR ViewFile)'
+            site_bias = _build_planning_site_bias(county)
+            raw_fb = _google_cse_search(f"{site_bias} {generic}", max_results=max_items, days=max(days, 730))
+            raw_fb = _dedupe_by_url(raw_fb)
+            projects = _normalize(raw_fb, None, county, generic, source_tier="fallback", is_planning=True)
+        else:
+            generic = f'Indiana {BASE_FACILITY_KEYWORDS} (announced OR expansion OR groundbreaking OR "now hiring")'
+            raw_fb = _google_cse_search(generic, max_results=max_items, days=max(days, 730))
+            raw_fb = _dedupe_by_url(raw_fb)
+            projects = _normalize(raw_fb, None, None, generic, source_tier="fallback", is_planning=False)
+    except CSEQuotaError as e:
+        log.warning("CSE quota error on fallback tier: %s", e)
+        return []
+
+    return _rank_projects(projects) if projects else []
+
+
+def _rank_projects(projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     now = datetime.utcnow()
 
     def _sort_key(p: Dict[str, Any]) -> Tuple[int, int, int]:
         geo = int(p.get("geo_match_score") or 0)
         score = int(p.get("forklift_score") or 0)
-        # planning mode: boost industrial_signal_score
         bonus = int(p.get("industrial_signal_score") or 0)
         dt = p.get("raw_date")
         age_days = 9999
         if isinstance(dt, datetime):
             age_days = (now - dt).days
-        # Sort: higher geo, higher score, higher bonus, newer
         return (-geo, -(score * 10 + bonus), age_days)
 
     projects.sort(key=_sort_key)
-    return projects[:max_items]
+    return projects
+
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     if not items:
-        return "No web results were found for that location and timeframe. Try adjusting the date range or phrasing."
+        return (
+            "No results returned. If you saw a 429 in logs, you're rate-limited by Google CSE.\n"
+            "Fix: lower CSE_MAX_PAGES to 1, wait a bit, and/or increase your Google API quota/billing."
+        )
 
     lines: List[str] = []
     lines.append("Industrial / logistics results (web search hits):")
@@ -741,5 +790,6 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             lines.append(f"   URL: {url}")
 
     return "\n".join(lines)
+
 
 __all__ = ["search_indiana_developments", "render_developments_markdown"]
