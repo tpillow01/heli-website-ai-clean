@@ -3,12 +3,13 @@ indiana_intel.py
 
 Indiana developments / lead finder for Tynan / Heli AI.
 
-Responsibilities:
-- Take a natural-language question (e.g. "new warehouses in Boone County in the last 90 days")
-- Hit Google Custom Search JSON API (Programmable Search Engine) that is Indiana-biased
-- Pull back industrial / logistics / manufacturing / commercial facilities
-- Normalize results into simple dicts the chat layer can format
-- Provide a plain-text summary for debugging
+Fixes vs prior version:
+- Better geo extraction (prevents "Boone County in the last 180 days" from becoming a city)
+- County requests are enforced: results must mention county OR a major town in that county
+- Adds "new development" intent gate (filters generic "locations" / "careers" pages)
+- Stronger geo matching using county town aliases
+- Optional publish-date fill for missing dates (top few results only)
+- URL canonicalization + dedupe
 
 Environment variables required:
 - GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
@@ -32,10 +33,7 @@ import requests
 
 log = logging.getLogger("indiana_intel")
 if not log.handlers:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s:%(name)s:%(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 # ---------------------------------------------------------------------------
 # Config: Google CSE
@@ -63,8 +61,17 @@ BASE_KEYWORDS = (
     'OR "production plant" OR "assembly plant" OR "cold storage" OR facility)'
 )
 
+# County → major towns (used as acceptable geo matches when county requested)
+COUNTY_TOWNS: Dict[str, List[str]] = {
+    "boone": ["Lebanon", "Whitestown", "Zionsville", "Jamestown", "Thorntown"],
+    "hendricks": ["Plainfield", "Avon", "Brownsburg", "Danville", "Clayton", "Pittsboro"],
+    "hamilton": ["Fishers", "Carmel", "Noblesville", "Westfield"],
+    "marion": ["Indianapolis", "Speedway", "Lawrence", "Beech Grove"],
+    # add more as you like
+}
+
 # ---------------------------------------------------------------------------
-# Small helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -73,12 +80,6 @@ def _lower(s: Any) -> str:
 
 
 def _canonicalize_url(url: str) -> str:
-    """
-    Normalize URLs for dedupe:
-    - remove common tracking params
-    - remove fragments
-    - strip trailing slash
-    """
     try:
         u = urlparse(url)
         qs = [
@@ -106,30 +107,20 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Extract (city, county) from question text.
 
-    Fix vs your current version:
-    - Avoids capturing the entire remainder of the question as "city"
-    - Avoids treating "<County> County" as a city
+    Avoids capturing extra trailing phrases as city.
     """
     if not q:
         return (None, None)
 
     text = q.strip()
 
-    # County: e.g. "Boone County", "in Boone County"
+    # County: "Boone County"
     m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text)
     county = None
     if m_county:
         county = f"{m_county.group(1).strip()} County"
 
-    # City: ONLY capture a reasonable city phrase, and stop before common timeframe words
-    # Examples captured:
-    #   "in Plainfield"
-    #   "near Brownsburg, IN"
-    #   "around Lebanon Indiana"
-    #
-    # Examples NOT captured as city:
-    #   "in Boone County in the last 180 days"
-    #   "in Hendricks County last month"
+    # City: capture up to punctuation / end, but reject timeframe-y captures
     m_city = re.search(
         r"\b(?:in|around|near)\s+([A-Za-z][A-Za-z\s]{1,40}?)(?:,?\s*(?:IN|Indiana)\b|,|\?|\.|$)",
         text,
@@ -138,20 +129,12 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     city = None
     if m_city:
         raw = m_city.group(1).strip()
-
-        # If the "city" phrase contains obvious timeframe words, discard it
         if re.search(r"\b(last|past|days|months|weeks|years|since|recent)\b", raw, flags=re.I):
             raw = ""
-
-        # Strip "IN" or "Indiana" if present
         raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
-
-        # Don't treat "Boone County" as a city
         if re.search(r"\bCounty\b", raw, flags=re.I):
             raw = ""
-
         if raw:
-            # Keep it short and sane
             city = " ".join(raw.split()[:3]).strip()
 
     log.info("Geo hint extracted: city=%s county=%s", city, county)
@@ -168,27 +151,66 @@ _STOPWORDS = {
 }
 
 
+def _user_wants_new_devs(user_q: str) -> bool:
+    """
+    Determine if the question implies "new/announced/expanded" developments.
+    If yes, we enforce NEW_DEV_TERMS in the hit text to avoid generic location pages.
+    """
+    t = _lower(user_q)
+    triggers = [
+        "new", "announced", "announcement", "breaking ground", "groundbreaking",
+        "expansion", "expanded", "to build", "plans", "planning", "permit", "rezoning",
+        "spec building", "construction", "development",
+    ]
+    return any(x in t for x in triggers)
+
+
+def _county_key(county: Optional[str]) -> Optional[str]:
+    if not county:
+        return None
+    return county.split()[0].strip().lower()
+
+
+def _geo_terms(city: Optional[str], county: Optional[str]) -> List[str]:
+    """
+    Geo terms accepted for matching. If county is specified, include its major towns.
+    """
+    terms: List[str] = []
+    if county:
+        terms.append(county)
+        ck = _county_key(county)
+        if ck and ck in COUNTY_TOWNS:
+            terms.extend([f"{town}, IN" for town in COUNTY_TOWNS[ck]])
+            terms.extend(COUNTY_TOWNS[ck])
+    if city:
+        terms.append(city)
+        terms.append(f"{city}, IN")
+    # unique, preserve order
+    seen = set()
+    out = []
+    for x in terms:
+        x2 = x.strip()
+        if not x2:
+            continue
+        k = x2.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(x2)
+    return out
+
+
 def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str:
     """
-    Build a Google CSE query anchored on industrial/commercial keywords,
-    with optional city / county bias, plus a small keyword tail from the question.
-
-    Fix vs your current version:
-    - If both city+county exist, uses (county OR city) instead of ANDing both.
+    Build query with county/city geo terms.
+    If county is provided, include major towns as OR terms.
     """
     parts: List[str] = ["Indiana", BASE_KEYWORDS]
 
-    geo_terms: List[str] = []
-    if county:
-        geo_terms.append(f'"{county}"')
-    if city:
-        geo_terms.append(f'"{city}"')
-
-    if geo_terms:
-        if len(geo_terms) == 1:
-            parts.append(geo_terms[0])
-        else:
-            parts.append("(" + " OR ".join(geo_terms) + ")")
+    geo = _geo_terms(city, county)
+    if geo:
+        geo_q = " OR ".join([f'"{g}"' for g in geo[:10]])  # cap to keep query sane
+        parts.append(f"({geo_q})")
 
     cleaned = re.sub(r"[“”\"']", " ", user_q or "")
     tokens = re.findall(r"[A-Za-z0-9]+", cleaned)
@@ -206,11 +228,35 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
     return query
 
 
+def _parse_any_date(raw: str) -> Optional[datetime]:
+    if not raw:
+        return None
+    raw = raw.strip()
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        pass
+
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(raw[:25], fmt)
+        except Exception:
+            continue
+
+    m = re.search(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", raw)
+    if m:
+        try:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return datetime(y, mo, d)
+        except Exception:
+            return None
+    return None
+
+
 def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
-    """
-    Try to sniff out a publication/update date from Google CSE pagemap metatags.
-    Returns a datetime (UTC-naive) or None.
-    """
     pagemap = it.get("pagemap") or {}
     meta_list = pagemap.get("metatags") or []
     if not isinstance(meta_list, list):
@@ -236,58 +282,15 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
             continue
         for key in keys_to_try:
             if key in m and m[key]:
-                raw = str(m[key]).strip()
-                dt = _parse_any_date(raw)
+                dt = _parse_any_date(str(m[key]).strip())
                 if dt:
                     return dt
     return None
 
 
-def _parse_any_date(raw: str) -> Optional[datetime]:
-    """
-    Parse common date strings into UTC-naive datetime.
-    """
-    if not raw:
-        return None
-
-    raw = raw.strip()
-
-    # ISO-ish first
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
-    except Exception:
-        pass
-
-    # Common formats
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y"):
-        try:
-            dt = datetime.strptime(raw[:25], fmt)
-            return dt
-        except Exception:
-            continue
-
-    # Last resort: try to find YYYY-MM-DD inside
-    m = re.search(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", raw)
-    if m:
-        try:
-            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            return datetime(y, mo, d)
-        except Exception:
-            return None
-
-    return None
-
-
 def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
     """
-    Map a days window into Google CSE dateRestrict syntax.
-    - dN = last N days
-    - wN = last N weeks
-    - mN = last N months
-    - yN = last N years
+    Google CSE dateRestrict accepts: dN, wN, mN, yN.
     """
     if not days or days <= 0:
         return None
@@ -304,17 +307,8 @@ def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
 
 
 def _try_extract_date_from_html(url: str) -> Optional[datetime]:
-    """
-    Lightweight publish-date extraction by fetching the page and checking:
-    - meta article:published_time / og:published_time
-    - meta name=pubdate/date/datePublished
-    - <time datetime="...">
-
-    Only called for a limited number of top results to avoid being slow.
-    """
     if not url:
         return None
-
     try:
         resp = requests.get(url, headers=REQUEST_HEADERS, timeout=10, allow_redirects=True)
         if resp.status_code >= 400:
@@ -323,7 +317,6 @@ def _try_extract_date_from_html(url: str) -> Optional[datetime]:
     except Exception:
         return None
 
-    # Meta tags
     meta_patterns = [
         r'property=["\']article:published_time["\']\s+content=["\']([^"\']+)["\']',
         r'property=["\']og:published_time["\']\s+content=["\']([^"\']+)["\']',
@@ -339,7 +332,6 @@ def _try_extract_date_from_html(url: str) -> Optional[datetime]:
             if dt:
                 return dt
 
-    # <time datetime="...">
     m_time = re.search(r'<time[^>]+datetime=["\']([^"\']+)["\']', html, flags=re.I)
     if m_time:
         dt = _parse_any_date(m_time.group(1))
@@ -349,20 +341,7 @@ def _try_extract_date_from_html(url: str) -> Optional[datetime]:
     return None
 
 
-def _google_cse_search(
-    query: str,
-    max_results: int = 30,
-    days: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Wrapper around Google Custom Search JSON API.
-
-    Improvements:
-    - dateRestrict applied
-    - strict cutoff applied when dates are available
-    - optional page fetch for missing dates (top N only)
-    - dedupe by canonical URL
-    """
+def _google_cse_search(query: str, max_results: int = 30, days: Optional[int] = None) -> List[Dict[str, Any]]:
     if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
         log.warning(
             "GOOGLE_CSE_KEY or GOOGLE_CSE_CX not set or empty; returning empty result list. "
@@ -371,24 +350,20 @@ def _google_cse_search(
         return []
 
     date_restrict = _days_to_date_restrict(days)
-    cutoff = None
-    if days and days > 0:
-        cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = (datetime.utcnow() - timedelta(days=days)) if days and days > 0 else None
 
     base_params = {
         "key": GOOGLE_CSE_KEY,
         "cx": GOOGLE_CSE_CX,
         "q": query,
         "num": 10,
-        # NOTE: sort behavior depends on your PSE settings; leaving it enabled,
-        # but dateRestrict + our strict cutoff does the real work.
         "sort": "date",
     }
     if date_restrict:
         base_params["dateRestrict"] = date_restrict
 
     out: List[Dict[str, Any]] = []
-    seen_urls: set[str] = set()
+    seen: set[str] = set()
     start = 1
 
     while len(out) < max_results and start <= 91:
@@ -396,12 +371,7 @@ def _google_cse_search(
         params["start"] = start
 
         try:
-            resp = requests.get(
-                GOOGLE_CSE_ENDPOINT,
-                params=params,
-                headers=REQUEST_HEADERS,
-                timeout=10,
-            )
+            resp = requests.get(GOOGLE_CSE_ENDPOINT, params=params, headers=REQUEST_HEADERS, timeout=10)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -421,58 +391,46 @@ def _google_cse_search(
             snippet = it.get("snippet") or it.get("htmlSnippet") or ""
             url = it.get("link") or ""
             provider = it.get("displayLink") or ""
-
             if not url:
                 continue
 
             canon = _canonicalize_url(url)
-            if canon in seen_urls:
+            if canon in seen:
                 continue
-            seen_urls.add(canon)
+            seen.add(canon)
 
             dt = _parse_date_from_pagemap(it)
 
-            # Strict cutoff if we got a date
+            # strict cutoff if we have a date
             if cutoff and isinstance(dt, datetime) and dt < cutoff:
                 continue
 
-            out.append(
-                {
-                    "title": title,
-                    "snippet": snippet,
-                    "url": canon,
-                    "provider": provider,
-                    "date": dt,
-                }
-            )
-
+            out.append({"title": title, "snippet": snippet, "url": canon, "provider": provider, "date": dt})
             if len(out) >= max_results:
                 break
 
         if len(out) >= max_results:
             break
-
         start += 10
 
-    # If we have a cutoff and many items have no date, try to fill missing dates for top items
+    # Fill missing dates for a few results, then apply cutoff again
     if cutoff:
         missing = [i for i in out if not isinstance(i.get("date"), datetime)]
-        # Only fetch a small number to avoid slowing down the request
         for i in missing[:8]:
             fetched_dt = _try_extract_date_from_html(i.get("url") or "")
             if fetched_dt:
                 i["date"] = fetched_dt
 
-        # Apply strict cutoff again after filling dates
-        filtered: List[Dict[str, Any]] = []
+        out2: List[Dict[str, Any]] = []
         for i in out:
             dt = i.get("date")
             if isinstance(dt, datetime) and dt < cutoff:
                 continue
-            filtered.append(i)
-        out = filtered
+            out2.append(i)
+        out = out2
 
     return out
+
 
 # ---------------------------------------------------------------------------
 # Heuristics
@@ -503,37 +461,51 @@ _FORKLIFT_POSITIVE = [
     "third party logistics",
 ]
 
+# These terms indicate "actual development news", not generic service/location pages
+NEW_DEV_TERMS = [
+    "announced",
+    "announcement",
+    "breaking ground",
+    "groundbreaking",
+    "to build",
+    "plans to build",
+    "construction",
+    "expands",
+    "expansion",
+    "new facility",
+    "new plant",
+    "new distribution",
+    "new warehouse",
+    "site plan",
+    "rezoning",
+    "plan commission",
+    "permit",
+    "invest",
+    "investment",
+    "square feet",
+    "sq ft",
+    "jobs",
+]
+
 _PROJECT_NEGATIVE_TEXT = [
-    "visit hendricks county",
-    "visit indiana",
-    "visit our town",
+    "visit ",
     "tourism",
     "visitors bureau",
     "shopping center",
-    "outlet mall",
-    "premium outlets",
-    "outlets",
+    "outlet",
     "mall",
     "hotel",
     "resort",
     "casino",
-    "water park",
-    "amusement park",
     "museum",
     "library",
     "stadium",
     "arena",
     "sports complex",
-    "golf",
-    "park and recreation",
-    "parks and recreation",
-    "trailhead",
     "apartments",
-    "apartment complex",
     "housing development",
     "subdivision",
     "condominiums",
-    "condo",
     "senior living",
     "assisted living",
     "retirement community",
@@ -542,14 +514,17 @@ _PROJECT_NEGATIVE_TEXT = [
     "high school",
     "university",
     "college",
-    "campus",
     "hospital",
     "medical center",
     "clinic",
-    "behavioral health",
-    "mental health",
     "church",
     "ministry",
+    # common “not-new-dev” pages:
+    "our locations",
+    "locations",
+    "warehouse locations",
+    "service locations",
+    "contact us",
 ]
 
 _PROJECT_NEGATIVE_URL = [
@@ -562,7 +537,7 @@ _PROJECT_NEGATIVE_URL = [
 ]
 
 
-def _looks_like_facility_hit(title: str, snippet: str, url: str) -> bool:
+def _looks_like_facility_hit(title: str, snippet: str, url: str, require_new_dev: bool) -> bool:
     text = _lower(f"{title} {snippet}")
     url_l = _lower(url or "")
 
@@ -574,14 +549,17 @@ def _looks_like_facility_hit(title: str, snippet: str, url: str) -> bool:
         if neg in text:
             return False
 
-    has_positive = any(pos in text for pos in _FORKLIFT_POSITIVE)
-    if not has_positive:
+    if not any(pos in text for pos in _FORKLIFT_POSITIVE):
         return False
+
+    if require_new_dev:
+        if not any(t in text for t in NEW_DEV_TERMS):
+            return False
 
     return True
 
 
-def _compute_forklift_score(title: str, snippet: str, url: str) -> Tuple[int, str]:
+def _compute_forklift_score(title: str, snippet: str) -> Tuple[int, str]:
     text = _lower(f"{title} {snippet}")
     score = 0
 
@@ -591,7 +569,6 @@ def _compute_forklift_score(title: str, snippet: str, url: str) -> Tuple[int, st
 
     if re.search(r"\b\d{2,4}[,\d]{0,4}\s*(square[-\s]?feet|sq\.?\s*ft|sf)\b", text):
         score += 2
-
     if re.search(r"\b\d{2,5}\s+(new\s+)?jobs\b", text):
         score += 1
 
@@ -613,36 +590,21 @@ def _compute_forklift_score(title: str, snippet: str, url: str) -> Tuple[int, st
     return numeric, label_map.get(numeric, "Likely forklift-using facility")
 
 
-def _geo_match_scores(
-    title: str,
-    snippet: str,
-    city: Optional[str],
-    county: Optional[str],
-) -> Tuple[int, bool, bool]:
+def _geo_match_scores(title: str, snippet: str, geo_terms: List[str]) -> Tuple[int, bool]:
+    """
+    Score geo match based on whether ANY acceptable geo term appears.
+    """
     text = _lower(title + " " + snippet)
-    match_city = False
-    match_county = False
-
-    if county:
-        base = county.split()[0].lower()
-        if base and re.search(rf"\b{re.escape(base)}\b", text):
-            match_county = True
-        elif county.lower() in text:
-            match_county = True
-
-    if city:
-        c = city.lower()
-        if c and re.search(rf"\b{re.escape(c)}\b", text):
-            match_city = True
-
-    if match_city and match_county:
-        geo_score = 2
-    elif match_city or match_county:
-        geo_score = 1
-    else:
-        geo_score = 0
-
-    return geo_score, match_city, match_county
+    for term in geo_terms:
+        t = term.lower()
+        # word-ish boundary match for single words, substring for multiword phrases
+        if " " in t or "," in t:
+            if t in text:
+                return 2, True
+        else:
+            if re.search(rf"\b{re.escape(t)}\b", text):
+                return 2, True
+    return 0, False
 
 
 def _infer_project_type(title: str, snippet: str) -> str:
@@ -660,12 +622,14 @@ def _infer_project_type(title: str, snippet: str) -> str:
 
 def _normalize_projects(
     raw_items: List[Dict[str, Any]],
+    user_q: str,
     city: Optional[str],
     county: Optional[str],
-    user_q: str,
     source_tier: str,
 ) -> List[Dict[str, Any]]:
     original_area_label = county or city or "Indiana"
+    geo_terms = _geo_terms(city, county)
+    require_new_dev = _user_wants_new_devs(user_q)
 
     projects: List[Dict[str, Any]] = []
     for it in raw_items:
@@ -675,19 +639,18 @@ def _normalize_projects(
         provider = it.get("provider") or ""
         dt = it.get("date")
 
-        if not _looks_like_facility_hit(title, snippet, url):
+        if not _looks_like_facility_hit(title, snippet, url, require_new_dev=require_new_dev):
             continue
 
-        forklift_score, forklift_label = _compute_forklift_score(title, snippet, url)
-        geo_score, match_city, match_county = _geo_match_scores(title, snippet, city, county)
-        project_type = _infer_project_type(title, snippet)
+        forklift_score, forklift_label = _compute_forklift_score(title, snippet)
+        geo_score, geo_ok = _geo_match_scores(title, snippet, geo_terms)
 
-        if match_county:
-            location_label = county or "Indiana"
-        elif match_city:
-            location_label = city or "Indiana"
-        else:
-            location_label = "Indiana"
+        # If county was requested, enforce geo_ok (county OR town in county must be in title/snippet)
+        if county and not geo_ok:
+            continue
+
+        project_type = _infer_project_type(title, snippet)
+        location_label = county or city or "Indiana"
 
         timeline_year: Optional[int] = dt.year if isinstance(dt, datetime) else None
         timeline_stage = "announcement" if timeline_year else "not specified in snippet"
@@ -703,8 +666,6 @@ def _normalize_projects(
                 "forklift_score": forklift_score,
                 "forklift_label": forklift_label,
                 "geo_match_score": geo_score,
-                "match_city": match_city,
-                "match_county": match_county,
                 "sqft": None,
                 "jobs": None,
                 "investment": None,
@@ -720,73 +681,54 @@ def _normalize_projects(
 
     return projects
 
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-
-def search_indiana_developments(
-    user_q: str,
-    days: int = 365,
-    max_items: int = 30,
-) -> List[Dict[str, Any]]:
+def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 30) -> List[Dict[str, Any]]:
     """
     Main entrypoint.
 
-    Strategy (tiers):
-      1) "local":  city/county-aware query based on the user's question.
-      2) "statewide": same question, but without city/county constraint.
-      3) "fallback": county-aware generic search.
+    Important behavior change:
+    - If a COUNTY is requested, we do NOT return statewide substitutes.
+      We either return county-matching hits, or return [].
     """
     city, county = _extract_geo_hint(user_q)
 
-    projects: List[Dict[str, Any]] = []
-
-    # ── Tier 1: local ─────────────────────────────────────────────────────────
+    # Tier 1: local
     query_local = _build_query(user_q, city, county)
     raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
-    if raw_local:
-        projects = _normalize_projects(raw_local, city, county, user_q, source_tier="local")
+    projects = _normalize_projects(raw_local, user_q, city, county, source_tier="local") if raw_local else []
 
-    # ── Tier 2: statewide ─────────────────────────────────────────────────────
+    # If user asked for a county, do NOT “helpfully” replace with statewide noise
+    if county:
+        return _rank_projects(projects)[:max_items]
+
+    # Tier 2: statewide (only if no county specified)
     if not projects:
         log.info("No forklift-relevant local projects; trying statewide tier")
         query_statewide = _build_query(user_q, city=None, county=None)
         raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
         if raw_statewide:
-            projects = _normalize_projects(raw_statewide, None, None, user_q, source_tier="statewide")
+            projects = _normalize_projects(raw_statewide, user_q, None, None, source_tier="statewide")
 
-    # ── Tier 3: county-aware fallback ─────────────────────────────────────────
+    # Tier 3: fallback (only if no county specified)
     if not projects:
-        log.info("No forklift-relevant hits for user query; running county-aware fallback")
-        if county:
-            generic_q = (
-                f"new or expanded warehouses, distribution centers, logistics facilities, "
-                f"manufacturing plants, and industrial parks in and around {county}, Indiana "
-                f"in the last {days} days"
-            )
-            query_fallback = _build_query(generic_q, city=None, county=county)
-        else:
-            generic_q = (
-                f"new or expanded warehouses, distribution centers, logistics facilities, "
-                f"manufacturing plants, and industrial parks in Indiana in the last {days} days"
-            )
-            query_fallback = _build_query(generic_q, city=None, county=None)
-
+        log.info("No forklift-relevant hits for user query; running generic Indiana fallback")
+        generic_q = (
+            f"new or expanded warehouses, distribution centers, logistics facilities, "
+            f"manufacturing plants, and industrial parks in Indiana in the last {days} days"
+        )
+        query_fallback = _build_query(generic_q, city=None, county=None)
         raw_fallback = _google_cse_search(query_fallback, max_results=max_items, days=days)
         if raw_fallback:
-            projects = _normalize_projects(raw_fallback, None, county, generic_q, source_tier="fallback")
+            projects = _normalize_projects(raw_fallback, generic_q, None, None, source_tier="fallback")
 
-    if not projects:
-        return []
+    return _rank_projects(projects)[:max_items]
 
-    # ── If user asked for a county/city and we have any geo-matching hits, drop statewide noise ──
-    if county or city:
-        geo_hits = [p for p in projects if (p.get("geo_match_score") or 0) > 0]
-        if geo_hits:
-            projects = geo_hits
 
-    # ── Rank by geo match, forklift relevance, and recency ────────────────────
+def _rank_projects(projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     now = datetime.utcnow()
 
     def _sort_key(p: Dict[str, Any]) -> Tuple[int, int, int]:
@@ -799,14 +741,17 @@ def search_indiana_developments(
         return (-geo, -score, age_days)
 
     projects.sort(key=_sort_key)
-    return projects[:max_items]
+    return projects
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     if not items:
         return (
-            "No web results were found for that location and timeframe. "
-            "Try adjusting the date range or phrasing."
+            "No county-specific web hits were found for that location/timeframe.\n"
+            "Tip: try a slightly broader phrasing like:\n"
+            "- \"industrial park rezoning Boone County\" \n"
+            "- \"plan commission warehouse Lebanon IN\" \n"
+            "- \"spec building Whitestown\""
         )
 
     lines: List[str] = []
@@ -817,18 +762,14 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
         provider = item.get("provider") or ""
-        year = item.get("timeline_year")
-        stage = item.get("timeline_stage") or ""
         loc = item.get("location_label") or item.get("original_area_label") or "Indiana"
         ptype = item.get("project_type") or "Industrial / commercial project"
         forklift_score = item.get("forklift_score")
-        forklift_label = item.get("forklift_label") or ""
         geo_score = item.get("geo_match_score") or 0
         tier = item.get("source_tier") or "unknown"
         raw_date = item.get("raw_date")
 
         lines.append(f"{i}. {title} — {loc}")
-
         meta_bits = [ptype]
         if provider:
             meta_bits.append(provider)
@@ -836,20 +777,12 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             meta_bits.append(f"Forklift relevance {forklift_score}/5")
         if geo_score:
             meta_bits.append(f"Geo match {geo_score}/2")
-        if tier:
-            meta_bits.append(f"Source: {tier}")
         if isinstance(raw_date, datetime):
             meta_bits.append(f"Date: {raw_date.date().isoformat()}")
-        if stage:
-            if year:
-                meta_bits.append(f"{stage} ({year})")
-            else:
-                meta_bits.append(stage)
-        if forklift_label:
-            meta_bits.append(forklift_label)
+        if tier:
+            meta_bits.append(f"Source: {tier}")
 
-        if meta_bits:
-            lines.append("   " + " • ".join(meta_bits))
+        lines.append("   " + " • ".join(meta_bits))
         if snippet:
             lines.append(f"   Snippet: {snippet}")
         if url:
@@ -858,7 +791,4 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-__all__ = [
-    "search_indiana_developments",
-    "render_developments_markdown",
-]
+__all__ = ["search_indiana_developments", "render_developments_markdown"]
