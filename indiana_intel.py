@@ -613,62 +613,83 @@ def search_indiana_developments(
     """
     Main entrypoint.
 
-    Strategy (tiers):
-      1) local: city/county-aware industrial query
-      2) local_gov: county/city site-targeted plan commission / zoning docs (PDF-heavy)
-      3) statewide: broad Indiana industrial query (only if needed)
-      4) fallback: generic Indiana fallback
+    HARD RULE:
+    - If a COUNTY is requested, do NOT return statewide substitutes.
+      Return county-matching results only (or empty list).
     """
     city, county = _extract_geo_hint(user_q)
 
-    projects: List[Dict[str, Any]] = []
-
-    # ── Tier 1: local (news/business) ─────────────────────────────────────────
+    # ---- Tier 1: local (industrial/news style) ----
     query_local = _build_query(user_q, city, county)
     raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
-    if raw_local:
-        projects = _normalize_projects(raw_local, city, county, user_q, source_tier="local")
+    projects_local = _normalize_projects(raw_local, city, county, user_q, source_tier="local") if raw_local else []
 
-    # ── Tier 2: local government docs (agendas/minutes/cases) ─────────────────
-    if not projects:
-        log.info("No forklift-relevant local projects; trying local government tier")
-        q_gov = _build_local_gov_query(county=county, city=city)
-        if q_gov:
-            # PDFs are common; if your PSE indexes them, this is gold.
-            raw_gov = _google_cse_search(q_gov, max_results=max_items, days=days, file_type="pdf")
+    # ---- Tier 2: local government docs (agendas/minutes/cases) ----
+    projects_gov: List[Dict[str, Any]] = []
+    q_gov = _build_local_gov_query(county=county, city=city)
+    if q_gov:
+        raw_gov_pdf = _google_cse_search(q_gov, max_results=max_items, days=days, file_type="pdf")
+        if raw_gov_pdf:
+            projects_gov = _normalize_projects(raw_gov_pdf, city, county, user_q, source_tier="local_gov")
+
+        if not projects_gov:
+            raw_gov = _google_cse_search(q_gov, max_results=max_items, days=days, file_type=None)
             if raw_gov:
-                projects = _normalize_projects(raw_gov, city, county, user_q, source_tier="local_gov")
+                projects_gov = _normalize_projects(raw_gov, city, county, user_q, source_tier="local_gov")
 
-            # If pdf-only returns nothing, try without fileType restriction
-            if not projects:
-                raw_gov2 = _google_cse_search(q_gov, max_results=max_items, days=days, file_type=None)
-                if raw_gov2:
-                    projects = _normalize_projects(raw_gov2, city, county, user_q, source_tier="local_gov")
+    projects = projects_local + projects_gov
 
-    # ── Tier 3: statewide ─────────────────────────────────────────────────────
+    # ✅ HARD STOP: county requested → return ONLY county-specific results (or empty)
+    if county:
+        if not projects:
+            return []
+        now = datetime.utcnow()
+
+        def _sort_key(p: Dict[str, Any]) -> Tuple[int, int, int]:
+            geo = p.get("geo_match_score") or 0
+            score = p.get("forklift_score") or 0
+            dt = p.get("raw_date")
+            age_days = 9999
+            if isinstance(dt, datetime):
+                age_days = (now - dt).days
+            return (-geo, -score, age_days)
+
+        projects.sort(key=_sort_key)
+        return projects[:max_items]
+
+    # ---- If no county requested, allow broader tiers ----
+    if projects:
+        now = datetime.utcnow()
+
+        def _sort_key(p: Dict[str, Any]) -> Tuple[int, int, int]:
+            geo = p.get("geo_match_score") or 0
+            score = p.get("forklift_score") or 0
+            dt = p.get("raw_date")
+            age_days = 9999
+            if isinstance(dt, datetime):
+                age_days = (now - dt).days
+            return (-geo, -score, age_days)
+
+        projects.sort(key=_sort_key)
+        return projects[:max_items]
+
+    # Tier 3: statewide
+    query_statewide = _build_query(user_q, city=None, county=None)
+    raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
+    if raw_statewide:
+        projects = _normalize_projects(raw_statewide, None, None, user_q, source_tier="statewide")
+
+    # Tier 4: fallback
     if not projects:
-        log.info("No hits yet; trying statewide tier")
-        query_statewide = _build_query(user_q, city=None, county=None)
-        raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
-        if raw_statewide:
-            projects = _normalize_projects(raw_statewide, None, None, user_q, source_tier="statewide")
-
-    # ── Tier 4: fallback ──────────────────────────────────────────────────────
-    if not projects:
-        log.info("No hits; running fallback")
         generic_q = (
             "new or expanded warehouses, distribution centers, logistics facilities, "
             "manufacturing plants, and industrial parks in Indiana in the last few years"
         )
-        query_fallback = _build_query(generic_q, city=None, county=county)
+        query_fallback = _build_query(generic_q, city=None, county=None)
         raw_fallback = _google_cse_search(query_fallback, max_results=max_items, days=max(days, 730))
         if raw_fallback:
-            projects = _normalize_projects(raw_fallback, None, county, generic_q, source_tier="fallback")
+            projects = _normalize_projects(raw_fallback, None, None, generic_q, source_tier="fallback")
 
-    if not projects:
-        return []
-
-    # Rank by geo match, forklift relevance, and recency
     now = datetime.utcnow()
 
     def _sort_key(p: Dict[str, Any]) -> Tuple[int, int, int]:
