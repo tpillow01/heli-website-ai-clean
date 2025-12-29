@@ -3,21 +3,17 @@ indiana_intel.py
 
 Indiana developments / lead finder for Tynan / Heli AI.
 
-This version supports ALL Indiana counties without manually curating COUNTY_GOV_SITES.
-
-Key behaviors:
-- Detects ANY Indiana county name (all 92) even if user doesn't type the word "County".
-- Detects city even when query starts with "Whitestown IN ..." (no "in/near/around" needed).
-- If user specifies ANY location (city OR county), results are HARD-LOCKED:
-  you get only matching local/county results (or empty). No statewide filler lists.
-- Local-government tier (agendas/minutes/petitions) uses:
-  - Smart county domain guesses (e.g., co.<county>.in.us, <county>county.in.gov)
-  - Plus a broad Indiana gov fallback (site:*.in.gov OR site:*.in.us)
-- Keeps your output schema stable.
-
-Environment variables required:
-- GOOGLE_CSE_KEY : Google API key for Custom Search JSON API
-- GOOGLE_CSE_CX  : Programmable Search Engine ID (cx) configured for Indiana
+Fixes included (Dec 2025):
+- Works for ALL 92 Indiana counties.
+- If user specifies a CITY (e.g., Whitestown) with no county:
+  - Adds city-government domain candidates (e.g., whitestown.in.gov) into local-gov query.
+  - Optionally infers the county from the city via a quick CSE lookup (best-effort).
+- Geo-lock no longer depends only on title/snippet:
+  - Counts host/domain match as geo match (e.g., whitestown.in.gov implies Whitestown).
+- Local-government "agenda/minutes/petition" filter is more permissive:
+  - Accepts DocumentCenter/AgendaCenter/ViewFile/center.egov links and PDFs even if snippet is thin.
+- HARD RULE:
+  - If user asked for a specific city or county, do NOT return statewide filler.
 """
 
 from __future__ import annotations
@@ -56,7 +52,7 @@ REQUEST_HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# Indiana counties (92) — used for robust county detection
+# Indiana counties (92)
 # ---------------------------------------------------------------------------
 
 INDIANA_COUNTIES: List[str] = [
@@ -75,12 +71,10 @@ INDIANA_COUNTIES: List[str] = [
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (s or "").lower())).strip()
 
-# Map normalized forms to canonical display names
 _COUNTY_NORM_TO_CANON: Dict[str, str] = {}
 for c in INDIANA_COUNTIES:
     _COUNTY_NORM_TO_CANON[_norm(c)] = c
 
-# Support common alternate spellings
 _COUNTY_ALIASES: Dict[str, str] = {
     "st joseph": "St. Joseph",
     "saint joseph": "St. Joseph",
@@ -90,8 +84,6 @@ _COUNTY_ALIASES: Dict[str, str] = {
     "la grange": "LaGrange",
     "dekalb": "DeKalb",
     "de kalb": "DeKalb",
-    "daviess": "Daviess",
-    "kosciusko": "Kosciusko",
 }
 for k, v in _COUNTY_ALIASES.items():
     _COUNTY_NORM_TO_CANON[_norm(k)] = v
@@ -116,7 +108,7 @@ LOCAL_GOV_KEYWORDS = (
     '"development plan" OR "site plan" OR '
     '"primary plat" OR "secondary plat" OR '
     '"staff report" OR "public hearing" OR ordinance OR variance OR '
-    '"special exception" OR "zoning map" OR "rezone" OR "rezon*" OR '
+    '"special exception" OR "zoning map" OR "rezon*" OR '
     '"use variance" OR "development standards")'
 )
 
@@ -124,6 +116,11 @@ INDUSTRIAL_SOFT = (
     '(industrial OR warehouse OR "distribution" OR logistics OR manufacturing OR '
     '"cold storage" OR "spec building" OR "truck terminal" OR "industrial park")'
 )
+
+_LOCAL_GOV_URL_HINTS = [
+    "agendacenter", "documentcenter", "viewfile", "legistar", "center.egov",
+    "/documents/", "/wp-content/uploads/", "/minutes", "/agenda",
+]
 
 # ---------------------------------------------------------------------------
 # Filters / heuristics
@@ -135,7 +132,7 @@ _STOPWORDS = {
     "a","an","county","indiana","logistics","warehouse","warehouses","distribution","center",
     "centers","companies","coming","to","area","city","kind","sort","type","planned","plan",
     "announce","expanded","expansion","hiring","jobs","agenda","minutes","petition","rezoning",
-    "rezone","pud","site","development","permit","permits"
+    "rezone","pud","site","development","permit","permits","days","weeks","years","pdf"
 }
 
 _FORKLIFT_POSITIVE = [
@@ -148,35 +145,16 @@ _FORKLIFT_POSITIVE = [
     "cold storage","3pl","third-party logistics","third party logistics",
 ]
 
-_LOCAL_GOV_POSITIVE = [
-    "plan commission","area plan commission","board of zoning appeals","bza",
-    "agenda","minutes","docket","petition","rezoning","rezone","pud",
-    "development plan","site plan","primary plat","secondary plat",
-    "staff report","public hearing","variance","ordinance","special exception",
-]
-
 _PROJECT_NEGATIVE_URL = [
     "facebook.com","instagram.com","twitter.com","x.com","youtube.com","tripadvisor.com"
 ]
 
+# Keep this list conservative. Over-filtering is one reason you saw empty results.
 _PROJECT_NEGATIVE_TEXT = [
     "visit ","tourism","visitors bureau",
-    "shopping center","outlet","mall",
-    "hotel","resort","casino",
-    "museum","library","stadium","arena","sports complex",
     "apartments","housing development","subdivision","condominiums",
-    "senior living","assisted living","retirement community",
+    "senior living","assisted living",
     "elementary school","middle school","high school","university","college",
-    "hospital","medical center","clinic",
-    "church","ministry",
-
-    # non-lead pages
-    "our locations","warehouse locations","locations",
-    "careers","job openings","apply now",
-
-    # retail "factory" noise
-    "fudge","candy","general store","gift shop","souvenir",
-    "restaurant","brewery","distillery",
 ]
 
 # ---------------------------------------------------------------------------
@@ -201,16 +179,16 @@ def _canonicalize_url(url: str) -> str:
         return (url or "").rstrip("/")
 
 def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
+    """
+    Google CSE dateRestrict supports d, w, m, y.
+    """
     if not days or days <= 0:
         return None
     if days <= 31:
         return f"d{days}"
-    if days <= 180:
+    if days <= 365:
         weeks = max(1, int(round(days / 7)))
         return f"w{weeks}"
-    months = max(1, int(round(days / 30)))
-    if months <= 24:
-        return f"m{months}"
     years = max(1, int(round(days / 365)))
     return f"y{years}"
 
@@ -251,22 +229,17 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
 
     return None
 
+def _geo_lock_required(city: Optional[str], county: Optional[str]) -> bool:
+    return bool(city or county)
+
 # ---------------------------------------------------------------------------
-# County/city extraction (works for ALL counties)
+# County/city extraction
 # ---------------------------------------------------------------------------
 
 def _extract_county_from_text(q: str) -> Optional[str]:
-    """
-    Detect any Indiana county in the question.
-    Works with:
-    - "Boone County"
-    - "Boone"
-    - "St Joseph County" / "St. Joseph"
-    - "LaPorte" / "La Porte"
-    """
     t = _norm(q)
 
-    # 1) explicit "... county"
+    # explicit "... county"
     m = re.search(r"\b([a-z]+\s*[a-z]*)\s+county\b", t)
     if m:
         cand = _norm(m.group(1))
@@ -274,8 +247,7 @@ def _extract_county_from_text(q: str) -> Optional[str]:
         if canon:
             return f"{canon} County"
 
-    # 2) bare county name present anywhere (avoid accidental matches by requiring word boundaries)
-    # Scan longest-first so "st joseph" matches before "joseph"
+    # bare county name anywhere
     keys = sorted(_COUNTY_NORM_TO_CANON.keys(), key=len, reverse=True)
     for k in keys:
         if not k:
@@ -287,25 +259,17 @@ def _extract_county_from_text(q: str) -> Optional[str]:
     return None
 
 def _extract_city_from_text(q: str) -> Optional[str]:
-    """
-    More robust than before:
-    - Detects leading "Whitestown IN ..." or "Plainfield, Indiana ..."
-    - Detects "... in Whitestown ..." patterns
-    - Detects "... Whitestown IN ..." anywhere
-
-    (Still heuristic; city list is not required.)
-    """
     if not q:
         return None
 
-    # A) Leading: "Whitestown IN ..." or "Whitestown, IN ..."
+    # Leading "Whitestown IN ..."
     m0 = re.match(r"^\s*([A-Za-z][A-Za-z\s]{1,40}?)(?:,?\s*)(IN|Indiana)\b", q.strip(), flags=re.I)
     if m0:
         city = m0.group(1).strip()
         if "county" not in city.lower():
             return " ".join(city.split()[:3])
 
-    # B) Pattern: "in/near/around City, IN"
+    # "... in City, IN"
     m1 = re.search(
         r"\b(?:in|around|near)\s+([A-Za-z][A-Za-z\s]{1,40}?)(?:,?\s*)(IN|Indiana)\b",
         q,
@@ -316,73 +280,44 @@ def _extract_city_from_text(q: str) -> Optional[str]:
         if "county" not in city.lower():
             return " ".join(city.split()[:3])
 
-    # C) Pattern: "City, IN" anywhere
+    # "City, IN" anywhere
     m2 = re.search(r"\b([A-Za-z][A-Za-z\s]{1,40}?)(?:,?\s*)(IN|Indiana)\b", q, flags=re.I)
     if m2:
         city = m2.group(1).strip()
-        # Avoid grabbing entire sentence chunks
         if len(city.split()) <= 3 and "county" not in city.lower():
             return " ".join(city.split()[:3])
 
-    # D) Pattern: "in City" (without IN) — weaker, but helpful
+    # "... in City" (weak)
     m3 = re.search(r"\b(?:in|around|near)\s+([A-Za-z][A-Za-z\s]{1,30}?)(?:[,\?\.\!]|$)", q, flags=re.I)
     if m3:
         city = m3.group(1).strip()
-        # strip trailing time words
-        if re.search(r"\b(last|past|days|months|weeks|years|since|recent)\b", city, flags=re.I):
-            return None
         if "county" in city.lower():
+            return None
+        if re.search(r"\b(last|past|days|months|weeks|years|since|recent)\b", city, flags=re.I):
             return None
         return " ".join(city.split()[:3])
 
     return None
 
-def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
-    city = _extract_city_from_text(q)
-    county = _extract_county_from_text(q)
-
-    log.info("Geo hint: city=%s county=%s", city, county)
-    return (city, county)
-
-def _geo_lock_required(city: Optional[str], county: Optional[str]) -> bool:
-    # If user specified ANY location (city OR county), do NOT return statewide substitutes.
-    return bool(city or county)
-
-# ---------------------------------------------------------------------------
-# Domain guessing for ANY county
-# ---------------------------------------------------------------------------
-
 def _county_slug(county: str) -> str:
-    """
-    Convert "St. Joseph County" -> "stjoseph"
-    Convert "LaPorte County" -> "laporte"
-    """
     base = county.replace("County", "").strip()
     s = _norm(base).replace(" ", "")
     return s
 
-def _candidate_gov_sites(county: Optional[str]) -> List[str]:
-    """
-    Generate likely government domains for the county without manual mapping.
-    Covers the majority of Indiana counties.
-    Includes a few high-value exceptions/overrides.
-    """
+def _candidate_county_gov_sites(county: Optional[str]) -> List[str]:
     if not county:
         return []
-
     slug = _county_slug(county)
 
-    # Exceptions / extra useful domains
     overrides: Dict[str, List[str]] = {
         "marion": ["indy.gov", "indianapolis.in.gov"],
         "stjoseph": ["sjc.in.gov"],
     }
 
-    sites = []
+    sites: List[str] = []
     if slug in overrides:
         sites.extend(overrides[slug])
 
-    # Common patterns across Indiana counties
     sites.extend([
         f"co.{slug}.in.us",
         f"{slug}county.in.gov",
@@ -391,7 +326,6 @@ def _candidate_gov_sites(county: Optional[str]) -> List[str]:
         f"{slug}.in.us",
     ])
 
-    # de-dupe while preserving order
     out: List[str] = []
     seen = set()
     for s in sites:
@@ -402,8 +336,72 @@ def _candidate_gov_sites(county: Optional[str]) -> List[str]:
         out.append(s)
     return out
 
+def _city_slug(city: str) -> str:
+    return _norm(city).replace(" ", "")
+
+def _candidate_city_sites(city: Optional[str]) -> List[str]:
+    if not city:
+        return []
+    slug = _city_slug(city)
+    # Indiana municipalities commonly use cityname.in.gov
+    candidates = [
+        f"{slug}.in.gov",
+        f"{slug}.in.us",
+        f"townof{slug}.org",
+        f"townof{slug}.com",
+        f"cityof{slug}.org",
+        f"cityof{slug}.com",
+    ]
+    out: List[str] = []
+    seen = set()
+    for s in candidates:
+        s = s.strip().lower()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+def _infer_county_from_city_via_cse(city: str) -> Optional[str]:
+    """
+    Best-effort: use Google CSE to infer county from city when county not provided.
+    Example query: '"Whitestown" Indiana county'
+    Then scan title/snippet for any Indiana county name.
+    """
+    if not city or not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
+        return None
+
+    q = f"\"{city}\" Indiana county"
+    items = _google_cse_search(q, max_results=10, days=3650, file_type=None, _internal_call=True)
+
+    joined = " ".join([_lower(it.get("title", "")) + " " + _lower(it.get("snippet", "")) for it in items])
+    # look for "<County> County" or bare county name
+    for canon in INDIANA_COUNTIES:
+        c_norm = _norm(canon)
+        if re.search(rf"\b{re.escape(c_norm)}\s+county\b", _norm(joined)):
+            return f"{canon} County"
+        if re.search(rf"\b{re.escape(c_norm)}\b", _norm(joined)):
+            # Only accept bare county name if "county" is mentioned somewhere nearby
+            if " county" in _norm(joined):
+                return f"{canon} County"
+
+    return None
+
+def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
+    city = _extract_city_from_text(q)
+    county = _extract_county_from_text(q)
+
+    # If city exists and county missing, try to infer county (best-effort)
+    if city and not county:
+        inferred = _infer_county_from_city_via_cse(city)
+        if inferred:
+            county = inferred
+
+    log.info("Geo hint: city=%s county=%s", city, county)
+    return (city, county)
+
 # ---------------------------------------------------------------------------
-# Google CSE calls
+# Google CSE
 # ---------------------------------------------------------------------------
 
 def _google_cse_search(
@@ -411,6 +409,7 @@ def _google_cse_search(
     max_results: int = 30,
     days: Optional[int] = None,
     file_type: Optional[str] = None,
+    _internal_call: bool = False,
 ) -> List[Dict[str, Any]]:
     if not GOOGLE_CSE_KEY or not GOOGLE_CSE_CX:
         log.warning(
@@ -453,7 +452,9 @@ def _google_cse_search(
             break
 
         items = data.get("items", []) or []
-        log.info("Google CSE returned %s items at start=%s", len(items), start)
+        if not _internal_call:
+            log.info("Google CSE returned %s items at start=%s", len(items), start)
+
         if not items:
             break
 
@@ -497,11 +498,12 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
     parts: List[str] = ["Indiana", BASE_KEYWORDS]
 
     if county:
-        parts.append(f'"{county}"')
-        parts.append(f'"{county.replace(" County", "")}"')
+        parts.append(f"\"{county}\"")
+        parts.append(f"\"{county.replace(' County','')}\"")
+
     if city:
-        parts.append(f'"{city}"')
-        parts.append(f'"{city}, IN"')
+        parts.append(f"\"{city}\"")
+        parts.append(f"\"{city}, IN\"")
 
     cleaned = re.sub(r"[“”\"']", " ", user_q or "")
     tokens = re.findall(r"[A-Za-z0-9]+", cleaned)
@@ -511,25 +513,21 @@ def _build_query(user_q: str, city: Optional[str], county: Optional[str]) -> str
             continue
         extra_tokens.append(tok)
     if extra_tokens:
-        parts.append(" ".join(extra_tokens[:6]))
+        parts.append(" ".join(extra_tokens[:8]))
 
     q = " ".join(parts)
     log.info("Google CSE query: %s", q)
     return q
 
 def _build_local_gov_query(county: Optional[str], city: Optional[str]) -> str:
-    """
-    Local-government query:
-    - Use guessed county domains when county provided (covers MOST counties).
-    - Always include a broad Indiana gov fallback.
-    """
-    sites = _candidate_gov_sites(county)
+    county_sites = _candidate_county_gov_sites(county)
+    city_sites = _candidate_city_sites(city)
 
-    site_terms = []
-    for s in sites:
+    site_terms: List[str] = []
+    for s in county_sites + city_sites:
         site_terms.append(f"site:{s}")
 
-    # Broad fallback across Indiana government domains
+    # Broad Indiana government fallback
     site_terms.extend([
         "site:*.in.gov",
         "site:*.in.us",
@@ -541,16 +539,15 @@ def _build_local_gov_query(county: Optional[str], city: Optional[str]) -> str:
 
     geo_bits: List[str] = []
     if county:
-        geo_bits.append(f'"{county}"')
-        geo_bits.append(f'"{county.replace(" County", "")}"')
+        geo_bits.append(f"\"{county}\"")
+        geo_bits.append(f"\"{county.replace(' County','')}\"")
     if city:
-        geo_bits.append(f'"{city}"')
-        geo_bits.append(f'"{city}, IN"')
+        geo_bits.append(f"\"{city}\"")
+        geo_bits.append(f"\"{city}, IN\"")
 
     geo_clause = "(" + " OR ".join(geo_bits) + ")" if geo_bits else ""
 
-    # CivicPlus often uses "AgendaCenter" URLs; this boosts those
-    civicplus_hint = '("AgendaCenter" OR "ViewFile" OR "DocumentCenter" OR "Legistar" OR "minutes" OR "agenda")'
+    civicplus_hint = '("AgendaCenter" OR "ViewFile" OR "DocumentCenter" OR "minutes" OR "agenda" OR "packet")'
 
     q = f"{site_block} {LOCAL_GOV_KEYWORDS} {geo_clause} {INDUSTRIAL_SOFT} {civicplus_hint}".strip()
     log.info("Google CSE local-gov query: %s", q)
@@ -573,23 +570,25 @@ def _looks_like_hit(title: str, snippet: str, url: str, allow_local_gov: bool) -
             return False
 
     if allow_local_gov:
-        # For agendas/minutes/petitions, accept if it looks like a filing
-        return any(k in text for k in _LOCAL_GOV_POSITIVE)
+        # Accept if it looks like an agenda/minutes/petition OR the URL strongly suggests it
+        if any(h in url_l for h in _LOCAL_GOV_URL_HINTS):
+            return True
+        if re.search(r"\.(pdf|doc|docx)\b", url_l):
+            return True
+        # Otherwise require at least one civic keyword
+        return any(k in text for k in ("plan commission","area plan commission","board of zoning appeals","bza","agenda","minutes","petition","rezon","pud","site plan","development plan","staff report"))
 
-    # For news/business tier: require industrial facility keyword
+    # non-local-gov: require industrial facility keyword
     return any(pos in text for pos in _FORKLIFT_POSITIVE)
 
 def _compute_forklift_score(title: str, snippet: str) -> Tuple[int, str]:
     text = _lower(f"{title} {snippet}")
     score = 0
-
     for pos in _FORKLIFT_POSITIVE:
         if pos in text:
             score += 2
-
     if re.search(r"\b\d{2,4}[,\d]{0,4}\s*(square[-\s]?feet|sq\.?\s*ft|sf)\b", text):
         score += 2
-
     if re.search(r"\b\d{2,5}\s+(new\s+)?jobs\b", text):
         score += 1
 
@@ -610,22 +609,49 @@ def _compute_forklift_score(title: str, snippet: str) -> Tuple[int, str]:
     }
     return numeric, label_map.get(numeric, "Likely forklift-using facility")
 
-def _geo_match_scores(title: str, snippet: str, city: Optional[str], county: Optional[str]) -> Tuple[int, bool, bool]:
+def _host_contains(host: str, needle: str) -> bool:
+    if not host or not needle:
+        return False
+    h = _norm(host).replace(" ", "")
+    n = _norm(needle).replace(" ", "")
+    return bool(n) and (n in h)
+
+def _geo_match_scores(title: str, snippet: str, url: str, city: Optional[str], county: Optional[str]) -> Tuple[int, bool, bool]:
+    """
+    Geo match now considers:
+    - title/snippet mentions
+    - host/domain contains city or county slug (critical for agendas/minutes PDFs)
+    """
     text = _lower(title + " " + snippet)
+    host = ""
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        host = ""
 
     match_city = False
     match_county = False
 
     if county:
-        base = _lower(county.replace(" County", ""))
-        if base and re.search(rf"\b{re.escape(base)}\b", text):
+        base = county.replace(" County", "").strip()
+        base_l = base.lower()
+        if base_l and re.search(rf"\b{re.escape(base_l)}\b", text):
             match_county = True
-        elif _lower(county) in text:
+        if county.lower() in text:
+            match_county = True
+
+        # host-based county match
+        if _host_contains(host, base) or _host_contains(host, _county_slug(county)):
             match_county = True
 
     if city:
-        c = _lower(city)
-        if c and re.search(rf"\b{re.escape(c)}\b", text):
+        c = city.strip()
+        c_l = c.lower()
+        if c_l and re.search(rf"\b{re.escape(c_l)}\b", text):
+            match_city = True
+
+        # host-based city match
+        if _host_contains(host, c) or _host_contains(host, _city_slug(c)):
             match_city = True
 
     if match_city and match_county:
@@ -640,9 +666,7 @@ def _infer_project_type(title: str, snippet: str, allow_local_gov: bool) -> str:
     text = _lower(title + " " + snippet)
     if any(w in text for w in ("warehouse", "distribution center", "distribution facility", "fulfillment center")):
         return "warehouse / logistics facility"
-    if any(w in text for w in ("logistics hub", "logistics park", "logistics center", "logistics facility")):
-        return "warehouse / logistics facility"
-    if any(w in text for w in ("manufacturing plant", "manufacturing facility", "production plant", "assembly plant")):
+    if any(w in text for w in ("manufacturing plant", "manufacturing facility", "production plant", "assembly plant", "factory")):
         return "manufacturing plant"
     if any(w in text for w in ("industrial park", "business park", "industrial complex")):
         return "business / industrial park"
@@ -671,10 +695,10 @@ def _normalize_projects(
             continue
 
         forklift_score, forklift_label = _compute_forklift_score(title, snippet)
-        geo_score, match_city, match_county = _geo_match_scores(title, snippet, city, county)
+        geo_score, match_city, match_county = _geo_match_scores(title, snippet, url, city, county)
         project_type = _infer_project_type(title, snippet, allow_local_gov=allow_local_gov)
 
-        # HARD FILTER: if locked to a location, require a geo hit
+        # HARD FILTER: if user asked for a specific city/county, require geo match (now includes host-based matches)
         if locked and not (match_city or match_county):
             continue
 
@@ -730,13 +754,13 @@ def _rank_projects(projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 30) -> List[Dict[str, Any]]:
     """
-    Strategy:
-      1) local (industrial/news)
-      2) local_gov (plan commission/zoning, PDF-heavy)
-      3) statewide/fallback ONLY if no location was requested
+    Tiers:
+      1) local industrial/news
+      2) local_gov agendas/minutes/petitions (PDF-first)
+      3) statewide ONLY if user did NOT request a specific city/county
 
     HARD RULE:
-      If user asks about a specific city OR county, do NOT return statewide substitutes.
+      If user asked for a specific city or county, do NOT return statewide substitutes.
     """
     city, county = _extract_geo_hint(user_q)
     locked = _geo_lock_required(city, county)
@@ -745,7 +769,7 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 3
 
     # Tier 1: local industrial/news
     query_local = _build_query(user_q, city, county)
-    raw_local = _google_cse_search(query_local, max_results=max_items, days=days)
+    raw_local = _google_cse_search(query_local, max_results=max_items, days=days, file_type=None)
     if raw_local:
         projects.extend(_normalize_projects(raw_local, city, county, user_q, source_tier="local"))
 
@@ -755,32 +779,22 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 3
     if raw_gov_pdf:
         projects.extend(_normalize_projects(raw_gov_pdf, city, county, user_q, source_tier="local_gov"))
 
-    # then HTML gov pages
+    # If still nothing, try HTML gov pages
     if not projects:
         raw_gov = _google_cse_search(q_gov, max_results=max_items, days=days, file_type=None)
         if raw_gov:
             projects.extend(_normalize_projects(raw_gov, city, county, user_q, source_tier="local_gov"))
 
+    # If user specified location, return only location-locked results (could be empty)
     if locked:
         return _rank_projects(projects)[:max_items]
 
     # Tier 3: statewide (only if not locked)
     if not projects:
         query_statewide = _build_query(user_q, city=None, county=None)
-        raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days)
+        raw_statewide = _google_cse_search(query_statewide, max_results=max_items, days=days, file_type=None)
         if raw_statewide:
             projects = _normalize_projects(raw_statewide, None, None, user_q, source_tier="statewide")
-
-    # Tier 4: fallback (only if not locked)
-    if not projects:
-        generic_q = (
-            "new or expanded warehouses, distribution centers, logistics facilities, "
-            "manufacturing plants, and industrial parks in Indiana in the last few years"
-        )
-        query_fallback = _build_query(generic_q, city=None, county=None)
-        raw_fallback = _google_cse_search(query_fallback, max_results=max_items, days=max(days, 730))
-        if raw_fallback:
-            projects = _normalize_projects(raw_fallback, None, None, generic_q, source_tier="fallback")
 
     return _rank_projects(projects)[:max_items]
 
@@ -788,9 +802,10 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     if not items:
         return (
             "No location-specific results were found for that timeframe.\n"
-            "Tips:\n"
-            "- Include 'agenda minutes pdf' or 'petition rezoning' in the question\n"
-            "- Expand the day range (e.g., 365)\n"
+            "Try:\n"
+            "- Increase days to 730\n"
+            "- Use: agenda packet / staff report / docket / petition\n"
+            "- Provide county name if you only gave a city\n"
         )
 
     lines: List[str] = []
