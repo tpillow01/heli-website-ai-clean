@@ -903,6 +903,29 @@
                 <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
             </div>
 
+            <!-- ✅ Leasing (Used Equipment only): ONLY FPO + Cash -->
+            <div class="qr-group">
+                <label for="used_lease_type">Lease Type</label>
+                <div class="qr-hint">FPO or Cash</div>
+                <select id="used_lease_type" name="lease_type" class="qr-select" required>
+                    <option value="" disabled selected>Select lease type</option>
+                    <option value="FPO">FPO</option>
+                    <option value="Cash">Cash</option>
+                </select>
+            </div>
+
+            <div class="qr-group" id="used_annual_hours_group">
+                <label for="used_annual_hours">Annual Hours</label>
+                <div class="qr-hint">Required unless Cash</div>
+                <input type="number" id="used_annual_hours" name="annual_hours" class="qr-input" required />
+            </div>
+
+            <div class="qr-group" id="used_lease_term_group">
+                <label for="used_lease_term">Lease Term (Months)</label>
+                <div class="qr-hint">Required unless Cash</div>
+                <input type="number" id="used_lease_term" name="lease_term" class="qr-input" required />
+            </div>
+
             <div class="qr-group qr-group-full">
                 <label for="used_options_need">Options Need</label>
                 <input type="text" id="used_options_need" name="options_need" class="qr-input" />
@@ -1107,6 +1130,41 @@
         leaseType.addEventListener("change", update);
     })();
 
+    // -----------------------------
+    // 4B) Used Equipment leasing behavior:
+    //     - if Lease Type = Cash: hide Annual Hours + Lease Term
+    //     - else: show them + require them
+    // -----------------------------
+    (function wireUsedLeaseCash() {
+        const leaseType = document.getElementById("used_lease_type");
+        const leaseTerm = document.getElementById("used_lease_term");
+        const annualHours = document.getElementById("used_annual_hours");
+
+        if (!leaseType || !leaseTerm || !annualHours) return;
+
+        const leaseTermGroup = document.getElementById("used_lease_term_group") || leaseTerm.closest(".qr-group");
+        const annualHoursGroup = document.getElementById("used_annual_hours_group") || annualHours.closest(".qr-group");
+
+        function update() {
+            const isCash = (leaseType.value || "").trim().toLowerCase() === "cash";
+
+            if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+            if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
+
+            if (isCash) {
+                leaseTerm.removeAttribute("required");
+                annualHours.removeAttribute("required");
+                leaseTerm.value = "";
+                annualHours.value = "";
+            } else {
+                leaseTerm.setAttribute("required", "required");
+                annualHours.setAttribute("required", "required");
+            }
+        }
+
+        update();
+        leaseType.addEventListener("change", update);
+    })();
 
     // -----------------------------
     // 5) Mobile Share/Save behavior

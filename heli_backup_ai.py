@@ -3586,7 +3586,7 @@ def quote_request():
         )
 
     # -----------------------------
-    # USED EQUIPMENT (FIXED)
+    # USED EQUIPMENT (UPDATED + LEASING)
     # -----------------------------
     if request_type == "used_equipment":
         customer_name = (form.get("customer_name") or "").strip()
@@ -3611,13 +3611,21 @@ def quote_request():
         options_need = (form.get("options_need") or "").strip()
         additional_notes = (form.get("additional_notes") or "").strip()
 
+        # ✅ NEW: Leasing fields (Used Equipment only)
+        lease_type = (form.get("lease_type") or "").strip()
+        annual_hours = (form.get("annual_hours") or "").strip()
+        lease_term = (form.get("lease_term") or "").strip()
+
+        # ✅ Used Equipment: ONLY these options allowed
+        allowed_used_lease_types = {"FPO", "Cash"}
+
         errors = []
         if not customer_name:
             errors.append("Customer is required.")
         if not address:
             errors.append("Address is required.")
         if not city_state_zip:
-            errors.append("City and Zip Code is required.")
+            errors.append("City / State / Zip is required.")
         if not contact_name:
             errors.append("Contact Name is required.")
         if not model:
@@ -3629,6 +3637,23 @@ def quote_request():
         if not mast_type:
             errors.append("Mast Type is required.")
 
+        # ✅ Leasing validation
+        if not lease_type:
+            errors.append("Lease Type is required.")
+        elif lease_type not in allowed_used_lease_types:
+            errors.append("Lease Type must be FPO or Cash.")
+
+        # ✅ Cash: clear these fields; otherwise require them
+        if (lease_type or "").lower() == "cash":
+            annual_hours = ""
+            lease_term = ""
+        else:
+            if not annual_hours:
+                errors.append("Annual Hours is required unless Lease Type is Cash.")
+            if not lease_term:
+                errors.append("Lease Term is required unless Lease Type is Cash.")
+
+        # ✅ Electric validation
         is_electric = (fuel_type or "").lower() == "electric"
         if is_electric:
             if not battery_voltage:
@@ -3667,6 +3692,13 @@ def quote_request():
             "budget_price": budget_price,
             "options_need": options_need,
             "additional_notes": additional_notes,
+
+            # ✅ NEW: include leasing in PDF payload
+            "lease_type": lease_type,
+            "annual_hours": annual_hours,
+            "lease_term": lease_term,
+
+            # Internal fields on PDF (blank)
             "quote_number": "",
             "asset_number": "",
             "serial_number": "",
