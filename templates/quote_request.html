@@ -1076,7 +1076,7 @@
     // 4.5) Pay in Full behavior (Quote form)
     // - hide Lease Term + Annual Hours
     // -----------------------------
-    (function wirePayInFull() {
+    (function wireCash() {
         const leaseType = document.getElementById("lease_type");
         const leaseTerm = document.getElementById("lease_term");
         const annualHours = document.getElementById("annual_hours");
@@ -1087,12 +1087,12 @@
         const annualHoursGroup = annualHours.closest(".qr-group");
 
         function update() {
-            const isPayInFull = (leaseType.value || "").toLowerCase() === "pay in full";
+            const isCash = (leaseType.value || "").toLowerCase() === "cash";
 
-            if (leaseTermGroup) leaseTermGroup.style.display = isPayInFull ? "none" : "";
-            if (annualHoursGroup) annualHoursGroup.style.display = isPayInFull ? "none" : "";
+            if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+            if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
 
-            if (isPayInFull) {
+            if (isCash) {
                 leaseTerm.removeAttribute("required");
                 annualHours.removeAttribute("required");
                 leaseTerm.value = "";
@@ -1106,6 +1106,7 @@
         update();
         leaseType.addEventListener("change", update);
     })();
+
 
     // -----------------------------
     // 5) Mobile Share/Save behavior

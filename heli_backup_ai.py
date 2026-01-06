@@ -327,7 +327,7 @@ AUX_OPTIONS = ["2", "3", "4"]
 
 BATTERY_OPTIONS = ["None", "Lithium", "Lead Acid"]
 
-LEASE_TYPE_OPTIONS = ["FMV", "FPO", "Pay in Full"]
+LEASE_TYPE_OPTIONS = ["FMV", "FPO", "Cash"]
 
 # ------------------------------------------------------------------------------
 
@@ -3335,7 +3335,7 @@ def quote_request():
         lease_term = (form.get("lease_term") or "").strip()
 
         # ✅ Pay in Full: ignore these
-        if lease_type.lower() == "pay in full":
+        if lease_type.lower() == "Cash":
             annual_hours = ""
             lease_term = ""
 
