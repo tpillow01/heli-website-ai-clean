@@ -3263,34 +3263,6 @@ def find_brand_coverage_peers(heli_model: dict, max_rows: int = 10, per_brand: i
 @app.route("/quote-request", methods=["GET", "POST"])
 def quote_request():
     # -----------------------------
-    # GET: just render the page
-    # -----------------------------
-    if request.method == "GET":
-        return render_template(
-            "quote_request.html",
-            fuel_options=FUEL_OPTIONS,
-            mast_type_options=MAST_TYPE_OPTIONS,
-            tire_options=TIRE_OPTIONS,
-            yes_no_options=YES_NO_OPTIONS,
-            battery_options=BATTERY_OPTIONS,
-            lease_type_options=LEASE_TYPE_OPTIONS,
-        )
-
-    # -----------------------------
-    # POST: handle the submitted form
-    # -----------------------------
-    form = request.form
-
-    request_type = (form.get("request_type") or "").strip()
-    request_type = request_type.lower().replace(" ", "_")
-
-    # ✅ allow aliases so template changes don't break your backend
-    if request_type in {"used", "used_equipment_request", "used_request"}:
-        request_type = "used_equipment"
-
-@app.route("/quote-request", methods=["GET", "POST"])
-def quote_request():
-    # -----------------------------
     # Helpers (local to this route)
     # -----------------------------
     def _s(val) -> str:
