@@ -1072,6 +1072,41 @@
         sel.addEventListener("change", update);
     })();
 
+     // -----------------------------
+    // 4.5) Pay in Full behavior (Quote form)
+    // - hide Lease Term + Annual Hours
+    // -----------------------------
+    (function wirePayInFull() {
+        const leaseType = document.getElementById("lease_type");
+        const leaseTerm = document.getElementById("lease_term");
+        const annualHours = document.getElementById("annual_hours");
+
+        if (!leaseType || !leaseTerm || !annualHours) return;
+
+        const leaseTermGroup = leaseTerm.closest(".qr-group");
+        const annualHoursGroup = annualHours.closest(".qr-group");
+
+        function update() {
+            const isPayInFull = (leaseType.value || "").toLowerCase() === "pay in full";
+
+            if (leaseTermGroup) leaseTermGroup.style.display = isPayInFull ? "none" : "";
+            if (annualHoursGroup) annualHoursGroup.style.display = isPayInFull ? "none" : "";
+
+            if (isPayInFull) {
+                leaseTerm.removeAttribute("required");
+                annualHours.removeAttribute("required");
+                leaseTerm.value = "";
+                annualHours.value = "";
+            } else {
+                leaseTerm.setAttribute("required", "required");
+                annualHours.setAttribute("required", "required");
+            }
+        }
+
+        update();
+        leaseType.addEventListener("change", update);
+    })();
+
     // -----------------------------
     // 5) Mobile Share/Save behavior
     // -----------------------------
@@ -1151,6 +1186,7 @@
         });
     })();
 </script>
+
 
 </body>
 </html>

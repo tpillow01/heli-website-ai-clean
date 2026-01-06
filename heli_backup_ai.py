@@ -327,7 +327,7 @@ AUX_OPTIONS = ["2", "3", "4"]
 
 BATTERY_OPTIONS = ["None", "Lithium", "Lead Acid"]
 
-LEASE_TYPE_OPTIONS = ["FMV", "FPO"]
+LEASE_TYPE_OPTIONS = ["FMV", "FPO", "Pay in Full"]
 
 # ------------------------------------------------------------------------------
 
@@ -3266,416 +3266,433 @@ def quote_request():
         form = request.form
         request_type = (form.get("request_type") or "quote").strip().lower()
 
-        # -----------------------------
-        # QUOTE REQUEST (existing logic)
-        # -----------------------------
-        if request_type == "quote":
-            customer_name = form.get("customer_name", "").strip()
-            address = form.get("address", "").strip()
-            city_state_zip = form.get("city_state_zip", "").strip()
-            contact_name = form.get("contact_name", "").strip()
+    # -----------------------------
+    # QUOTE REQUEST (existing logic)
+    # -----------------------------
+    if request_type == "quote":
+        customer_name = form.get("customer_name", "").strip()
+        address = form.get("address", "").strip()
+        city_state_zip = form.get("city_state_zip", "").strip()
+        contact_name = form.get("contact_name", "").strip()
 
-            model = form.get("model", "").strip()
+        model = form.get("model", "").strip()
 
-            fuel_type = form.get("fuel_type", "").strip()
-            battery_voltage = form.get("battery_voltage", "").strip()
+        fuel_type = form.get("fuel_type", "").strip()
+        battery_voltage = form.get("battery_voltage", "").strip()
 
-            mast_ohl_mfh = form.get("mast_ohl_mfh", "").strip()
-            mast_type = form.get("mast_type", "").strip()
-            attachment = form.get("attachment", "").strip()
+        mast_ohl_mfh = form.get("mast_ohl_mfh", "").strip()
+        mast_type = form.get("mast_type", "").strip()
+        attachment = form.get("attachment", "").strip()
 
-            aux_valve = form.get("aux_valve", "").strip()
-            aux_hose = form.get("aux_hose", "").strip()
+        aux_valve = form.get("aux_valve", "").strip()
+        aux_hose = form.get("aux_hose", "").strip()
 
-            fork_type = form.get("fork_type", "").strip()
-            fork_length = form.get("fork_length", "").strip()
+        fork_type = form.get("fork_type", "").strip()
+        fork_length = form.get("fork_length", "").strip()
 
-            tires = form.get("tires", "").strip()
+        tires = form.get("tires", "").strip()
 
-            seat_suspension = form.get("seat_suspension", "").strip()
-            headlights = form.get("headlights", "").strip()
-            back_up_alarm = form.get("back_up_alarm", "").strip()
-            strobe = form.get("strobe", "").strip()
+        seat_suspension = form.get("seat_suspension", "").strip()
+        headlights = form.get("headlights", "").strip()
+        back_up_alarm = form.get("back_up_alarm", "").strip()
+        strobe = form.get("strobe", "").strip()
 
-            rear_work_light = form.get("rear_work_light", "").strip()
-            blue_light_front = form.get("blue_light_front", "").strip()
-            blue_light_rear = form.get("blue_light_rear", "").strip()
-            red_curtain_lights = form.get("red_curtain_lights", "").strip()
+        rear_work_light = form.get("rear_work_light", "").strip()
+        blue_light_front = form.get("blue_light_front", "").strip()
+        blue_light_rear = form.get("blue_light_rear", "").strip()
+        red_curtain_lights = form.get("red_curtain_lights", "").strip()
 
-            battery = form.get("battery", "").strip()
-            charger = form.get("charger", "").strip()
-            local_options = form.get("local_options", "").strip()
+        battery = form.get("battery", "").strip()
+        charger = form.get("charger", "").strip()
+        local_options = form.get("local_options", "").strip()
 
-            expected_delivery = form.get("expected_delivery", "-").strip() or "-"
+        expected_delivery = form.get("expected_delivery", "-").strip() or "-"
 
-            lease_type = form.get("lease_type", "").strip()
-            annual_hours = form.get("annual_hours", "").strip()
-            lease_term = form.get("lease_term", "").strip()
+        lease_type = form.get("lease_type", "").strip()
+        annual_hours = (form.get("annual_hours") or "").strip()
+        lease_term = (form.get("lease_term") or "").strip()
 
-            notes = form.get("notes", "").strip()
-            salesperson_name = form.get("salesperson_name", "").strip()
+        # ✅ Pay in Full: ignore these fields
+        if lease_type.lower() == "pay in full":
+            annual_hours = ""
+            lease_term = ""
 
-            errors = []
-            required_text_fields = [
-                ("Customer Name", customer_name),
-                ("Address", address),
-                ("City / State / Zip", city_state_zip),
-                ("Contact Name", contact_name),
-                ("Model", model),
-                ("Fuel", fuel_type),
-                ("Mast OHL / MFH", mast_ohl_mfh),
-                ("Mast Type", mast_type),
-                ("Attachment", attachment),
-                ("Auxiliary Control Valve", aux_valve),
-                ("Fork Type", fork_type),
-                ("Fork Length", fork_length),
-                ("Tire", tires),
-                ("Salesperson Name", salesperson_name),
-            ]
-            for label, value in required_text_fields:
-                if not value:
-                    errors.append(f"{label} is required.")
+        # ✅ FIX: Pay in Full hides these fields on the frontend; make backend accept blanks
+        annual_hours = (form.get("annual_hours") or "").strip()
+        lease_term = (form.get("lease_term") or "").strip()
+        if lease_type.lower() == "pay in full":
+            annual_hours = ""
+            lease_term = ""
 
-            if fuel_type == "Electric":
-                if not battery_voltage:
-                    errors.append("Battery voltage is required for Electric trucks.")
-                if not battery or battery.lower() in {"n/a", "none", ""}:
-                    errors.append("Battery type is required for Electric trucks.")
-                charger = "Standard"
-            else:
-                if not battery:
-                    battery = "None"
-                if not battery_voltage:
-                    battery_voltage = "N/A"
-                if not charger:
-                    charger = "None"
+        notes = form.get("notes", "").strip()
+        salesperson_name = form.get("salesperson_name", "").strip()
 
-            if aux_valve and not aux_hose:
-                aux_hose = aux_valve
+        errors = []
+        required_text_fields = [
+            ("Customer Name", customer_name),
+            ("Address", address),
+            ("City / State / Zip", city_state_zip),
+            ("Contact Name", contact_name),
+            ("Model", model),
+            ("Fuel", fuel_type),
+            ("Mast OHL / MFH", mast_ohl_mfh),
+            ("Mast Type", mast_type),
+            ("Attachment", attachment),
+            ("Auxiliary Control Valve", aux_valve),
+            ("Fork Type", fork_type),
+            ("Fork Length", fork_length),
+            ("Tire", tires),
+            ("Salesperson Name", salesperson_name),
+        ]
+        for label, value in required_text_fields:
+            if not value:
+                errors.append(f"{label} is required.")
 
-            if errors:
-                for e in errors:
-                    flash(e, "error")
-                return render_template(
-                    "quote_request.html",
-                    fuel_options=FUEL_OPTIONS,
-                    mast_type_options=MAST_TYPE_OPTIONS,
-                    tire_options=TIRE_OPTIONS,
-                    yes_no_options=YES_NO_OPTIONS,
-                    battery_options=BATTERY_OPTIONS,
-                    lease_type_options=LEASE_TYPE_OPTIONS,
-                )
+        if fuel_type == "Electric":
+            if not battery_voltage:
+                errors.append("Battery voltage is required for Electric trucks.")
+            if not battery or battery.lower() in {"n/a", "none", ""}:
+                errors.append("Battery type is required for Electric trucks.")
+            charger = "Standard"
+        else:
+            if not battery:
+                battery = "None"
+            if not battery_voltage:
+                battery_voltage = "N/A"
+            if not charger:
+                charger = "None"
 
-            fuel_voltage = fuel_type
-            if battery_voltage and battery_voltage != "N/A":
-                fuel_voltage = f"{fuel_type} / {battery_voltage}"
+        if aux_valve and not aux_hose:
+            aux_hose = aux_valve
 
-            form_data = {
-                "customer_name": customer_name,
-                "address": address,
-                "city_state_zip": city_state_zip,
-                "contact_name": contact_name,
-                "model": model,
-                "fuel_voltage": fuel_voltage,
-                "mast_ohl_mfh": mast_ohl_mfh,
-                "mast_type": mast_type,
-                "attachment": attachment,
-                "aux_valve": aux_valve,
-                "aux_hose": aux_hose,
-                "fork_type": fork_type,
-                "fork_length": fork_length,
-                "tires": tires,
-                "seat_suspension": seat_suspension,
-                "headlights": headlights,
-                "back_up_alarm": back_up_alarm,
-                "strobe": strobe,
-                "rear_work_light": rear_work_light,
-                "blue_light_front": blue_light_front,
-                "blue_light_rear": blue_light_rear,
-                "red_curtain_lights": red_curtain_lights,
-                "battery": battery,
-                "charger": charger,
-                "local_options": local_options,
-                "expected_delivery": expected_delivery or "-",
-                "lease_type": lease_type,
-                "annual_hours": annual_hours,
-                "lease_term": lease_term,
-                "notes": notes,
-                "salesperson_name": salesperson_name,
-            }
-
-            pdf_bytes = build_request_pdf(form_data, "quote")
-            if not pdf_bytes:
-                flash("PDF generation failed (empty PDF). Check server logs.", "error")
-                return render_template(
-                    "quote_request.html",
-                    fuel_options=FUEL_OPTIONS,
-                    mast_type_options=MAST_TYPE_OPTIONS,
-                    tire_options=TIRE_OPTIONS,
-                    yes_no_options=YES_NO_OPTIONS,
-                    battery_options=BATTERY_OPTIONS,
-                    lease_type_options=LEASE_TYPE_OPTIONS,
-                )
-
-            safe_customer = (customer_name or "customer").replace(" ", "_")
-            filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-
-            return send_file(
-                io.BytesIO(pdf_bytes),
-                mimetype="application/pdf",
-                as_attachment=True,
-                download_name=filename,
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
             )
 
-        # -----------------------------
-        # DEMO / RENTAL
-        # -----------------------------
-        if request_type in {"demo", "rental"}:
-            ordered_by = (form.get("ordered_by") or "").strip()
-            company_name = (form.get("company_name") or "").strip()
-            ship_to_address = (form.get("ship_to_address") or "").strip()
-            contact_name = (form.get("contact_name") or "").strip()
-            phone = (form.get("phone") or "").strip()
-            bill_to_address = (form.get("bill_to_address") or "").strip()
+        fuel_voltage = fuel_type
+        if battery_voltage and battery_voltage != "N/A":
+            fuel_voltage = f"{fuel_type} / {battery_voltage}"
 
-            cartage = (form.get("cartage") or "").strip()
+        form_data = {
+            "customer_name": customer_name,
+            "address": address,
+            "city_state_zip": city_state_zip,
+            "contact_name": contact_name,
+            "model": model,
+            "fuel_voltage": fuel_voltage,
+            "mast_ohl_mfh": mast_ohl_mfh,
+            "mast_type": mast_type,
+            "attachment": attachment,
+            "aux_valve": aux_valve,
+            "aux_hose": aux_hose,
+            "fork_type": fork_type,
+            "fork_length": fork_length,
+            "tires": tires,
+            "seat_suspension": seat_suspension,
+            "headlights": headlights,
+            "back_up_alarm": back_up_alarm,
+            "strobe": strobe,
+            "rear_work_light": rear_work_light,
+            "blue_light_front": blue_light_front,
+            "blue_light_rear": blue_light_rear,
+            "red_curtain_lights": red_curtain_lights,
+            "battery": battery,
+            "charger": charger,
+            "local_options": local_options,
+            "expected_delivery": expected_delivery or "-",
+            "lease_type": lease_type,
+            "annual_hours": annual_hours,
+            "lease_term": lease_term,
+            "notes": notes,
+            "salesperson_name": salesperson_name,
+        }
 
-            company_phone_fax = (form.get("company_phone_fax") or "").strip()
-            po_number = (form.get("po_number") or "").strip()
-            quantity = (form.get("quantity") or "").strip()
-            description_model = (form.get("description_model") or "").strip()
-            rate = (form.get("rate") or "").strip()
-            freight_charges = (form.get("freight_charges") or "").strip()
-
-            fork_length = (form.get("fork_length") or "").strip()
-            lbr = (form.get("lbr") or "").strip()
-            side_shifter = (form.get("side_shifter") or "").strip()
-            backup_alarm = (form.get("backup_alarm") or "").strip()
-            headlights = (form.get("headlights") or "").strip()  # labeled "Work Lights" on PDF
-            tires = (form.get("tires") or "").strip()
-
-            power_type = (form.get("power_type") or "").strip()
-            need_lp_tank = (form.get("need_lp_tank") or "").strip()
-
-            mast_height = (form.get("mast_height") or "").strip()
-            mast_type = (form.get("mast_type") or "").strip()
-
-            connector = (form.get("connector") or "").strip()
-            need_charger = (form.get("need_charger") or "").strip()
-            input_volts = (form.get("input_volts") or "").strip()
-            phase = (form.get("phase") or "").strip()
-
-            special_instructions = (form.get("special_instructions") or "").strip()
-
-            errors = []
-            if not ordered_by:
-                errors.append("Ordered By is required.")
-            if not company_name:
-                errors.append("Company Name is required.")
-            if not ship_to_address:
-                errors.append("Ship To Address is required.")
-            if not contact_name:
-                errors.append("Contact Name is required.")
-            if not description_model:
-                errors.append("Description / Model is required.")
-            if not mast_height:
-                errors.append("Mast Height is required.")
-            if not mast_type:
-                errors.append("Mast Type is required.")
-
-            if (power_type or "").lower() == "electric":
-                need_lp_tank = ""
-            else:
-                connector = ""
-                need_charger = ""
-                input_volts = ""
-                phase = ""
-
-            if errors:
-                for e in errors:
-                    flash(e, "error")
-                return render_template(
-                    "quote_request.html",
-                    fuel_options=FUEL_OPTIONS,
-                    mast_type_options=MAST_TYPE_OPTIONS,
-                    tire_options=TIRE_OPTIONS,
-                    yes_no_options=YES_NO_OPTIONS,
-                    battery_options=BATTERY_OPTIONS,
-                    lease_type_options=LEASE_TYPE_OPTIONS,
-                )
-
-            form_data = {
-                "ordered_by": ordered_by,
-                "company_name": company_name,
-                "ship_to_address": ship_to_address,
-                "contact_name": contact_name,
-                "phone": phone,
-                "bill_to_address": bill_to_address,
-                "cartage": cartage,
-                "company_phone_fax": company_phone_fax,
-                "po_number": po_number,
-                "quantity": quantity,
-                "description_model": description_model,
-                "rate": rate,
-                "freight_charges": freight_charges,
-                "fork_length": fork_length,
-                "lbr": lbr,
-                "side_shifter": side_shifter,
-                "backup_alarm": backup_alarm,
-                "headlights": headlights,
-                "tires": tires,
-                "power_type": power_type,
-                "need_lp_tank": need_lp_tank,
-                "mast_height": mast_height,
-                "mast_type": mast_type,
-                "connector": connector,
-                "need_charger": need_charger,
-                "input_volts": input_volts,
-                "phase": phase,
-                "special_instructions": special_instructions,
-            }
-
-            pdf_bytes = build_request_pdf(form_data, request_type)
-            if not pdf_bytes:
-                flash("PDF generation failed (empty PDF). Check server logs.", "error")
-                return render_template(
-                    "quote_request.html",
-                    fuel_options=FUEL_OPTIONS,
-                    mast_type_options=MAST_TYPE_OPTIONS,
-                    tire_options=TIRE_OPTIONS,
-                    yes_no_options=YES_NO_OPTIONS,
-                    battery_options=BATTERY_OPTIONS,
-                    lease_type_options=LEASE_TYPE_OPTIONS,
-                )
-
-            safe_company = (company_name or "company").replace(" ", "_")
-            filename = f"heli_{request_type}_request_{safe_company}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-
-            return send_file(
-                io.BytesIO(pdf_bytes),
-                mimetype="application/pdf",
-                as_attachment=True,
-                download_name=filename,
+        pdf_bytes = build_request_pdf(form_data, "quote")
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
             )
 
-        # -----------------------------
-        # USED EQUIPMENT (NEW)
-        # -----------------------------
-        if request_type == "used":
-            customer_name = (form.get("customer_name") or "").strip()
-            address = (form.get("address") or "").strip()
-            city_zip_code = (form.get("city_zip_code") or "").strip()
-            contact_name = (form.get("contact_name") or "").strip()
+        safe_customer = (customer_name or "customer").replace(" ", "_")
+        filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
-            model = (form.get("model") or "").strip()
-            fuel_type = (form.get("fuel_type") or "").strip()
-
-            battery_voltage = (form.get("battery_voltage") or "").strip()
-            line_voltage = (form.get("line_voltage") or "").strip()
-
-            mast_height = (form.get("mast_height") or "").strip()
-            mast_type = (form.get("mast_type") or "").strip()
-
-            fork_size = (form.get("fork_size") or "").strip()
-            budget_price = (form.get("budget_price") or "").strip()
-            options_need = (form.get("options_need") or "").strip()
-            additional_notes = (form.get("additional_notes") or "").strip()
-
-            errors = []
-            if not customer_name:
-                errors.append("Customer is required.")
-            if not address:
-                errors.append("Address is required.")
-            if not city_zip_code:
-                errors.append("City and Zip Code is required.")
-            if not contact_name:
-                errors.append("Contact Name is required.")
-            if not model:
-                errors.append("Model is required.")
-            if not fuel_type:
-                errors.append("Fuel Type is required.")
-            if not mast_height:
-                errors.append("Mast Height is required.")
-            if not mast_type:
-                errors.append("Mast Type is required.")
-
-            is_electric = (fuel_type or "").lower() == "electric"
-            if is_electric:
-                if not battery_voltage:
-                    errors.append("Electric 36/48 Volt is required for Electric.")
-                if not line_voltage:
-                    errors.append("Line Voltage is required for Electric.")
-            else:
-                battery_voltage = ""
-                line_voltage = ""
-
-            if errors:
-                for e in errors:
-                    flash(e, "error")
-                return render_template(
-                    "quote_request.html",
-                    fuel_options=FUEL_OPTIONS,
-                    mast_type_options=MAST_TYPE_OPTIONS,
-                    tire_options=TIRE_OPTIONS,
-                    yes_no_options=YES_NO_OPTIONS,
-                    battery_options=BATTERY_OPTIONS,
-                    lease_type_options=LEASE_TYPE_OPTIONS,
-                )
-
-            # Internal info must appear on PDF, but NOT on online form (blank rows)
-            form_data = {
-                "customer_name": customer_name,
-                "address": address,
-                "city_zip_code": city_zip_code,
-                "contact_name": contact_name,
-                "model": model,
-                "fuel_type": fuel_type,
-                "battery_voltage": battery_voltage,
-                "line_voltage": line_voltage,
-                "mast_height": mast_height,
-                "mast_type": mast_type,
-                "fork_size": fork_size,
-                "budget_price": budget_price,
-                "options_need": options_need,
-                "additional_notes": additional_notes,
-                "quote_number": "",
-                "asset_number": "",
-                "serial_number": "",
-            }
-
-            pdf_bytes = build_request_pdf(form_data, "used")
-            if not pdf_bytes:
-                flash("PDF generation failed (empty PDF). Check server logs.", "error")
-                return render_template(
-                    "quote_request.html",
-                    fuel_options=FUEL_OPTIONS,
-                    mast_type_options=MAST_TYPE_OPTIONS,
-                    tire_options=TIRE_OPTIONS,
-                    yes_no_options=YES_NO_OPTIONS,
-                    battery_options=BATTERY_OPTIONS,
-                    lease_type_options=LEASE_TYPE_OPTIONS,
-                )
-
-            safe_customer = (customer_name or "customer").replace(" ", "_")
-            filename = f"used_equipment_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-
-            return send_file(
-                io.BytesIO(pdf_bytes),
-                mimetype="application/pdf",
-                as_attachment=True,
-                download_name=filename,
-            )
-
-        flash("Unknown request type submitted. Please try again.", "error")
-        return render_template(
-            "quote_request.html",
-            fuel_options=FUEL_OPTIONS,
-            mast_type_options=MAST_TYPE_OPTIONS,
-            tire_options=TIRE_OPTIONS,
-            yes_no_options=YES_NO_OPTIONS,
-            battery_options=BATTERY_OPTIONS,
-            lease_type_options=LEASE_TYPE_OPTIONS,
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
         )
+
+    # -----------------------------
+    # DEMO / RENTAL
+    # -----------------------------
+    if request_type in {"demo", "rental"}:
+        ordered_by = (form.get("ordered_by") or "").strip()
+        company_name = (form.get("company_name") or "").strip()
+        ship_to_address = (form.get("ship_to_address") or "").strip()
+        contact_name = (form.get("contact_name") or "").strip()
+        phone = (form.get("phone") or "").strip()
+        bill_to_address = (form.get("bill_to_address") or "").strip()
+
+        cartage = (form.get("cartage") or "").strip()
+
+        company_phone_fax = (form.get("company_phone_fax") or "").strip()
+        po_number = (form.get("po_number") or "").strip()
+        quantity = (form.get("quantity") or "").strip()
+        description_model = (form.get("description_model") or "").strip()
+        rate = (form.get("rate") or "").strip()
+        freight_charges = (form.get("freight_charges") or "").strip()
+
+        fork_length = (form.get("fork_length") or "").strip()
+        lbr = (form.get("lbr") or "").strip()
+        side_shifter = (form.get("side_shifter") or "").strip()
+        backup_alarm = (form.get("backup_alarm") or "").strip()
+        headlights = (form.get("headlights") or "").strip()
+        tires = (form.get("tires") or "").strip()
+
+        power_type = (form.get("power_type") or "").strip()
+        need_lp_tank = (form.get("need_lp_tank") or "").strip()
+
+        mast_height = (form.get("mast_height") or "").strip()
+        mast_type = (form.get("mast_type") or "").strip()
+
+        connector = (form.get("connector") or "").strip()
+        need_charger = (form.get("need_charger") or "").strip()
+        input_volts = (form.get("input_volts") or "").strip()
+        phase = (form.get("phase") or "").strip()
+
+        special_instructions = (form.get("special_instructions") or "").strip()
+
+        errors = []
+        if not ordered_by:
+            errors.append("Ordered By is required.")
+        if not company_name:
+            errors.append("Company Name is required.")
+        if not ship_to_address:
+            errors.append("Ship To Address is required.")
+        if not contact_name:
+            errors.append("Contact Name is required.")
+        if not description_model:
+            errors.append("Description / Model is required.")
+        if not mast_height:
+            errors.append("Mast Height is required.")
+        if not mast_type:
+            errors.append("Mast Type is required.")
+
+        if (power_type or "").lower() == "electric":
+            need_lp_tank = ""
+        else:
+            connector = ""
+            need_charger = ""
+            input_volts = ""
+            phase = ""
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
+            )
+
+        form_data = {
+            "ordered_by": ordered_by,
+            "company_name": company_name,
+            "ship_to_address": ship_to_address,
+            "contact_name": contact_name,
+            "phone": phone,
+            "bill_to_address": bill_to_address,
+            "cartage": cartage,
+            "company_phone_fax": company_phone_fax,
+            "po_number": po_number,
+            "quantity": quantity,
+            "description_model": description_model,
+            "rate": rate,
+            "freight_charges": freight_charges,
+            "fork_length": fork_length,
+            "lbr": lbr,
+            "side_shifter": side_shifter,
+            "backup_alarm": backup_alarm,
+            "headlights": headlights,
+            "tires": tires,
+            "power_type": power_type,
+            "need_lp_tank": need_lp_tank,
+            "mast_height": mast_height,
+            "mast_type": mast_type,
+            "connector": connector,
+            "need_charger": need_charger,
+            "input_volts": input_volts,
+            "phase": phase,
+            "special_instructions": special_instructions,
+        }
+
+        pdf_bytes = build_request_pdf(form_data, request_type)
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
+            )
+
+        safe_company = (company_name or "company").replace(" ", "_")
+        filename = f"heli_{request_type}_request_{safe_company}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    # -----------------------------
+    # USED EQUIPMENT (FIXED)
+    # -----------------------------
+    # ✅ Accept both "used" and "used_equipment" (and "used_equipment_request") so template changes never break you again
+    if request_type in {"used", "used_equipment", "used_equipment_request"}:
+        customer_name = (form.get("customer_name") or "").strip()
+        address = (form.get("address") or "").strip()
+
+        # ✅ FIX: your form submits name="city_state_zip" (NOT city_zip_code)
+        city_state_zip = (form.get("city_state_zip") or "").strip()
+
+        contact_name = (form.get("contact_name") or "").strip()
+
+        model = (form.get("model") or "").strip()
+        fuel_type = (form.get("fuel_type") or "").strip()
+
+        battery_voltage = (form.get("battery_voltage") or "").strip()
+        line_voltage = (form.get("line_voltage") or "").strip()
+
+        mast_height = (form.get("mast_height") or "").strip()
+        mast_type = (form.get("mast_type") or "").strip()
+
+        fork_size = (form.get("fork_size") or "").strip()
+        budget_price = (form.get("budget_price") or "").strip()
+        options_need = (form.get("options_need") or "").strip()
+        additional_notes = (form.get("additional_notes") or "").strip()
+
+        errors = []
+        if not customer_name:
+            errors.append("Customer is required.")
+        if not address:
+            errors.append("Address is required.")
+        if not city_state_zip:
+            errors.append("City and Zip Code is required.")
+        if not contact_name:
+            errors.append("Contact Name is required.")
+        if not model:
+            errors.append("Model is required.")
+        if not fuel_type:
+            errors.append("Fuel Type is required.")
+        if not mast_height:
+            errors.append("Mast Height is required.")
+        if not mast_type:
+            errors.append("Mast Type is required.")
+
+        is_electric = (fuel_type or "").lower() == "electric"
+        if is_electric:
+            if not battery_voltage:
+                errors.append("Electric Voltage is required for Electric.")
+            if not line_voltage:
+                errors.append("Line Voltage is required for Electric.")
+        else:
+            battery_voltage = ""
+            line_voltage = ""
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
+            )
+
+        form_data = {
+            "customer_name": customer_name,
+            "address": address,
+            "city_state_zip": city_state_zip,   # ✅ consistent key
+            "contact_name": contact_name,
+            "model": model,
+            "fuel_type": fuel_type,
+            "battery_voltage": battery_voltage,
+            "line_voltage": line_voltage,
+            "mast_height": mast_height,
+            "mast_type": mast_type,
+            "fork_size": fork_size,
+            "budget_price": budget_price,
+            "options_need": options_need,
+            "additional_notes": additional_notes,
+            "quote_number": "",
+            "asset_number": "",
+            "serial_number": "",
+        }
+
+        # ✅ FIX: tell PDF builder "used" (matches your build_request_pdf implementation)
+        pdf_bytes = build_request_pdf(form_data, "used")
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return render_template(
+                "quote_request.html",
+                fuel_options=FUEL_OPTIONS,
+                mast_type_options=MAST_TYPE_OPTIONS,
+                tire_options=TIRE_OPTIONS,
+                yes_no_options=YES_NO_OPTIONS,
+                battery_options=BATTERY_OPTIONS,
+                lease_type_options=LEASE_TYPE_OPTIONS,
+            )
+
+        safe_customer = (customer_name or "customer").replace(" ", "_")
+        filename = f"used_equipment_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    flash("Unknown request type submitted. Please try again.", "error")
+    return render_template(
+        "quote_request.html",
+        fuel_options=FUEL_OPTIONS,
+        mast_type_options=MAST_TYPE_OPTIONS,
+        tire_options=TIRE_OPTIONS,
+        yes_no_options=YES_NO_OPTIONS,
+        battery_options=BATTERY_OPTIONS,
+        lease_type_options=LEASE_TYPE_OPTIONS,
+    )
+
 
     return render_template(
         "quote_request.html",
