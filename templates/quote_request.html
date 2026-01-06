@@ -806,7 +806,7 @@
             </div>
 
 <!-- ========================= -->
-<!-- USED EQUIPMENT (NEW)      -->
+<!-- USED EQUIPMENT (FIXED)    -->
 <!-- ========================= -->
 <div id="form_wrap_used" class="request-form-wrap" style="display:none;">
     <form id="usedRequestForm"
@@ -814,10 +814,11 @@
           action="{{ url_for('quote_request') }}"
           class="quote-request-form"
           novalidate
-          data-request-type="used"
+          data-request-type="used_equipment"
           data-pdf-title="Used Equipment Request">
 
-        <input type="hidden" name="request_type" value="used" />
+        <!-- ✅ FIX: backend-safe request_type so Flask/PDF route hits the correct branch -->
+        <input type="hidden" name="request_type" value="used_equipment" />
 
         <div class="quote-request-grid">
 
@@ -833,7 +834,6 @@
 
             <div class="qr-group">
                 <label for="used_city_zip">City and Zip Code</label>
-                <!-- ✅ IMPORTANT: name must match your route/PDF -->
                 <input type="text" id="used_city_zip" name="city_state_zip" class="qr-input" required />
             </div>
 
@@ -859,7 +859,7 @@
                 </select>
             </div>
 
-            <!-- ✅ Electric-only fields (ONLY these two groups are hidden) -->
+            <!-- Electric-only fields -->
             <div class="qr-group" id="used_voltage_group" style="display:none;">
                 <label for="used_voltage">Electric Voltage</label>
                 <select id="used_voltage" name="battery_voltage" class="qr-select">
@@ -877,7 +877,7 @@
                 <input type="text" id="used_line_voltage" name="line_voltage" class="qr-input" />
             </div>
 
-            <!-- ✅ Always visible fields -->
+            <!-- Always visible fields -->
             <div class="qr-group">
                 <label for="used_mast_height">Mast Height</label>
                 <input type="text" id="used_mast_height" name="mast_height" class="qr-input" required />
@@ -913,9 +913,6 @@
                 <textarea id="used_additional_notes" name="additional_notes" class="qr-textarea"></textarea>
             </div>
 
-            <!-- Internal info NOT shown on form (per your request).
-                 It WILL appear on the PDF as blank rows. -->
-
         </div>
 
         <div class="qr-actions">
@@ -924,13 +921,6 @@
             </button>
         </div>
     </form>
-</div>
-
-
-        </section>
-    </div>
-</main>
-
 </div>
 
 <script>
