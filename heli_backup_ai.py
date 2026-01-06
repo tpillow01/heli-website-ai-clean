@@ -3288,85 +3288,161 @@ def quote_request():
     if request_type in {"used", "used_equipment_request", "used_request"}:
         request_type = "used_equipment"
 
+@app.route("/quote-request", methods=["GET", "POST"])
+def quote_request():
     # -----------------------------
-    # QUOTE REQUEST (existing logic) ✅ updated for Pay in Full
+    # Helpers (local to this route)
+    # -----------------------------
+    def _s(val) -> str:
+        return (val or "").strip()
+
+    def _choice(val, default="N/A") -> str:
+        """
+        For dropdowns where you want an explicit N/A option.
+        Treat empty/placeholder as N/A so PDFs stay clean.
+        """
+        v = _s(val)
+        if v in {"", "—", "-"}:
+            return default
+        return v
+
+    def _is_missing_strict(val) -> bool:
+        """For fields that MUST be a real value (not blank, not N/A)."""
+        v = _s(val)
+        return v == "" or v.lower() in {"n/a", "na"}
+
+    # -----------------------------
+    # GET: render the page
+    # -----------------------------
+    if request.method == "GET":
+        return render_template(
+            "quote_request.html",
+            fuel_options=FUEL_OPTIONS,
+            mast_type_options=MAST_TYPE_OPTIONS,
+            tire_options=TIRE_OPTIONS,
+            yes_no_options=YES_NO_OPTIONS,
+            battery_options=BATTERY_OPTIONS,
+            lease_type_options=LEASE_TYPE_OPTIONS,
+        )
+
+    # -----------------------------
+    # POST: handle the submitted form
+    # -----------------------------
+    form = request.form
+
+    request_type = _s(form.get("request_type")).lower().replace(" ", "_")
+
+    # ✅ allow aliases so template changes don't break your backend
+    if request_type in {"used", "used_equipment_request", "used_request"}:
+        request_type = "used_equipment"
+
+    if not request_type:
+        flash("Missing request type. Please try again.", "error")
+        return render_template(
+            "quote_request.html",
+            fuel_options=FUEL_OPTIONS,
+            mast_type_options=MAST_TYPE_OPTIONS,
+            tire_options=TIRE_OPTIONS,
+            yes_no_options=YES_NO_OPTIONS,
+            battery_options=BATTERY_OPTIONS,
+            lease_type_options=LEASE_TYPE_OPTIONS,
+        )
+
+    # -----------------------------
+    # QUOTE REQUEST
     # -----------------------------
     if request_type == "quote":
-        customer_name = form.get("customer_name", "").strip()
-        address = form.get("address", "").strip()
-        city_state_zip = form.get("city_state_zip", "").strip()
-        contact_name = form.get("contact_name", "").strip()
+        customer_name = _s(form.get("customer_name"))
+        address = _s(form.get("address"))
+        city_state_zip = _s(form.get("city_state_zip"))
+        contact_name = _s(form.get("contact_name"))
 
-        model = form.get("model", "").strip()
+        model = _s(form.get("model"))
 
-        fuel_type = form.get("fuel_type", "").strip()
-        battery_voltage = form.get("battery_voltage", "").strip()
+        # STRICT dropdown (do NOT allow N/A)
+        fuel_type = _s(form.get("fuel_type"))
+        battery_voltage = _s(form.get("battery_voltage"))
 
-        mast_ohl_mfh = form.get("mast_ohl_mfh", "").strip()
-        mast_type = form.get("mast_type", "").strip()
-        attachment = form.get("attachment", "").strip()
+        mast_ohl_mfh = _s(form.get("mast_ohl_mfh"))
 
-        aux_valve = form.get("aux_valve", "").strip()
-        aux_hose = form.get("aux_hose", "").strip()
+        # STRICT dropdown (do NOT allow N/A)
+        mast_type = _s(form.get("mast_type"))
 
-        fork_type = form.get("fork_type", "").strip()
-        fork_length = form.get("fork_length", "").strip()
+        attachment = _s(form.get("attachment"))
 
-        tires = form.get("tires", "").strip()
+        # These are dropdowns where you want N/A allowed
+        aux_valve = _choice(form.get("aux_valve"))
+        aux_hose = _choice(form.get("aux_hose"))
 
-        seat_suspension = form.get("seat_suspension", "").strip()
-        headlights = form.get("headlights", "").strip()
-        back_up_alarm = form.get("back_up_alarm", "").strip()
-        strobe = form.get("strobe", "").strip()
+        fork_type = _s(form.get("fork_type"))
+        fork_length = _s(form.get("fork_length"))
 
-        rear_work_light = form.get("rear_work_light", "").strip()
-        blue_light_front = form.get("blue_light_front", "").strip()
-        blue_light_rear = form.get("blue_light_rear", "").strip()
-        red_curtain_lights = form.get("red_curtain_lights", "").strip()
+        # Dropdown where you want N/A allowed (if you add N/A in HTML)
+        tires = _choice(form.get("tires"))
 
-        battery = form.get("battery", "").strip()
-        charger = form.get("charger", "").strip()
-        local_options = form.get("local_options", "").strip()
+        seat_suspension = _choice(form.get("seat_suspension"))
+        headlights = _choice(form.get("headlights"))
+        back_up_alarm = _choice(form.get("back_up_alarm"))
+        strobe = _choice(form.get("strobe"))
 
-        expected_delivery = form.get("expected_delivery", "-").strip() or "-"
+        rear_work_light = _choice(form.get("rear_work_light"))
+        blue_light_front = _choice(form.get("blue_light_front"))
+        blue_light_rear = _choice(form.get("blue_light_rear"))
+        red_curtain_lights = _choice(form.get("red_curtain_lights"))
 
-        lease_type = form.get("lease_type", "").strip()
-        annual_hours = (form.get("annual_hours") or "").strip()
-        lease_term = (form.get("lease_term") or "").strip()
+        # Battery dropdown: still validated specially for Electric below
+        battery = _s(form.get("battery"))
 
-        # ✅ Pay in Full: ignore these
-        if lease_type.lower() == "Cash":
+        charger = _s(form.get("charger"))
+        local_options = _s(form.get("local_options"))
+
+        expected_delivery = _s(form.get("expected_delivery")) or "-"
+
+        # Lease Type: if you add N/A to the dropdown, keep it STRICT here
+        lease_type = _s(form.get("lease_type"))
+        annual_hours = _s(form.get("annual_hours"))
+        lease_term = _s(form.get("lease_term"))
+
+        # ✅ Cash: ignore these fields (server-side)
+        if (lease_type or "").strip().lower() == "cash":
             annual_hours = ""
             lease_term = ""
 
-        notes = form.get("notes", "").strip()
-        salesperson_name = form.get("salesperson_name", "").strip()
+        notes = _s(form.get("notes"))
+        salesperson_name = _s(form.get("salesperson_name"))
 
         errors = []
+
+        # Strict required text fields
         required_text_fields = [
             ("Customer Name", customer_name),
             ("Address", address),
             ("City / State / Zip", city_state_zip),
             ("Contact Name", contact_name),
             ("Model", model),
-            ("Fuel", fuel_type),
             ("Mast OHL / MFH", mast_ohl_mfh),
-            ("Mast Type", mast_type),
             ("Attachment", attachment),
-            ("Auxiliary Control Valve", aux_valve),
             ("Fork Type", fork_type),
             ("Fork Length", fork_length),
-            ("Tire", tires),
             ("Salesperson Name", salesperson_name),
         ]
         for label, value in required_text_fields:
             if not value:
                 errors.append(f"{label} is required.")
 
+        # Strict required dropdowns (do NOT allow N/A)
+        if _is_missing_strict(fuel_type):
+            errors.append("Fuel is required.")
+        if _is_missing_strict(mast_type):
+            errors.append("Mast Type is required.")
+        if _is_missing_strict(lease_type):
+            errors.append("Lease Type is required.")
+
+        # Electric-specific validation
         if fuel_type == "Electric":
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
-            if not battery or battery.lower() in {"n/a", "none", ""}:
+            if not battery or battery.lower() in {"n/a", "na", "none", ""}:
                 errors.append("Battery type is required for Electric trucks.")
             charger = "Standard"
         else:
@@ -3377,7 +3453,8 @@ def quote_request():
             if not charger:
                 charger = "None"
 
-        if aux_valve and not aux_hose:
+        # If aux valve selected but hose is N/A, mirror it
+        if aux_valve and aux_valve != "N/A" and (aux_hose in {"", "N/A"}):
             aux_hose = aux_valve
 
         if errors:
@@ -3458,41 +3535,45 @@ def quote_request():
     # DEMO / RENTAL
     # -----------------------------
     if request_type in {"demo", "rental"}:
-        ordered_by = (form.get("ordered_by") or "").strip()
-        company_name = (form.get("company_name") or "").strip()
-        ship_to_address = (form.get("ship_to_address") or "").strip()
-        contact_name = (form.get("contact_name") or "").strip()
-        phone = (form.get("phone") or "").strip()
-        bill_to_address = (form.get("bill_to_address") or "").strip()
+        ordered_by = _s(form.get("ordered_by"))
+        company_name = _s(form.get("company_name"))
+        ship_to_address = _s(form.get("ship_to_address"))
+        contact_name = _s(form.get("contact_name"))
+        phone = _s(form.get("phone"))
+        bill_to_address = _s(form.get("bill_to_address"))
 
-        cartage = (form.get("cartage") or "").strip()
+        # dropdown where N/A allowed if you add it
+        cartage = _choice(form.get("cartage"))
 
-        company_phone_fax = (form.get("company_phone_fax") or "").strip()
-        po_number = (form.get("po_number") or "").strip()
-        quantity = (form.get("quantity") or "").strip()
-        description_model = (form.get("description_model") or "").strip()
-        rate = (form.get("rate") or "").strip()
-        freight_charges = (form.get("freight_charges") or "").strip()
+        company_phone_fax = _s(form.get("company_phone_fax"))
+        po_number = _s(form.get("po_number"))
+        quantity = _s(form.get("quantity"))
+        description_model = _s(form.get("description_model"))
 
-        fork_length = (form.get("fork_length") or "").strip()
-        lbr = (form.get("lbr") or "").strip()
-        side_shifter = (form.get("side_shifter") or "").strip()
-        backup_alarm = (form.get("backup_alarm") or "").strip()
-        headlights = (form.get("headlights") or "").strip()
-        tires = (form.get("tires") or "").strip()
+        # dropdown where N/A allowed if you add it
+        rate = _choice(form.get("rate"))
 
-        power_type = (form.get("power_type") or "").strip()
-        need_lp_tank = (form.get("need_lp_tank") or "").strip()
+        freight_charges = _s(form.get("freight_charges"))
 
-        mast_height = (form.get("mast_height") or "").strip()
-        mast_type = (form.get("mast_type") or "").strip()
+        fork_length = _s(form.get("fork_length"))
+        lbr = _choice(form.get("lbr"))
+        side_shifter = _choice(form.get("side_shifter"))
+        backup_alarm = _choice(form.get("backup_alarm"))
+        headlights = _choice(form.get("headlights"))
+        tires = _choice(form.get("tires"))
 
-        connector = (form.get("connector") or "").strip()
-        need_charger = (form.get("need_charger") or "").strip()
-        input_volts = (form.get("input_volts") or "").strip()
-        phase = (form.get("phase") or "").strip()
+        power_type = _s(form.get("power_type"))
+        need_lp_tank = _choice(form.get("need_lp_tank"))
 
-        special_instructions = (form.get("special_instructions") or "").strip()
+        mast_height = _s(form.get("mast_height"))
+        mast_type = _s(form.get("mast_type"))  # STRICT required
+
+        connector = _s(form.get("connector"))
+        need_charger = _choice(form.get("need_charger"))
+        input_volts = _s(form.get("input_volts"))
+        phase = _s(form.get("phase"))
+
+        special_instructions = _s(form.get("special_instructions"))
 
         errors = []
         if not ordered_by:
@@ -3507,14 +3588,14 @@ def quote_request():
             errors.append("Description / Model is required.")
         if not mast_height:
             errors.append("Mast Height is required.")
-        if not mast_type:
+        if _is_missing_strict(mast_type):
             errors.append("Mast Type is required.")
 
         if (power_type or "").lower() == "electric":
-            need_lp_tank = ""
+            need_lp_tank = "N/A"
         else:
             connector = ""
-            need_charger = ""
+            need_charger = "N/A"
             input_volts = ""
             phase = ""
 
@@ -3589,34 +3670,34 @@ def quote_request():
     # USED EQUIPMENT (UPDATED + LEASING)
     # -----------------------------
     if request_type == "used_equipment":
-        customer_name = (form.get("customer_name") or "").strip()
-        address = (form.get("address") or "").strip()
+        customer_name = _s(form.get("customer_name"))
+        address = _s(form.get("address"))
+        city_state_zip = _s(form.get("city_state_zip"))
+        contact_name = _s(form.get("contact_name"))
 
-        # ✅ FIX: your form uses name="city_state_zip"
-        city_state_zip = (form.get("city_state_zip") or "").strip()
+        model = _s(form.get("model"))
 
-        contact_name = (form.get("contact_name") or "").strip()
+        # STRICT dropdown
+        fuel_type = _s(form.get("fuel_type"))
 
-        model = (form.get("model") or "").strip()
-        fuel_type = (form.get("fuel_type") or "").strip()
+        battery_voltage = _s(form.get("battery_voltage"))
+        line_voltage = _s(form.get("line_voltage"))
 
-        battery_voltage = (form.get("battery_voltage") or "").strip()
-        line_voltage = (form.get("line_voltage") or "").strip()
+        mast_height = _s(form.get("mast_height"))
 
-        mast_height = (form.get("mast_height") or "").strip()
-        mast_type = (form.get("mast_type") or "").strip()
+        # STRICT dropdown
+        mast_type = _s(form.get("mast_type"))
 
-        fork_size = (form.get("fork_size") or "").strip()
-        budget_price = (form.get("budget_price") or "").strip()
-        options_need = (form.get("options_need") or "").strip()
-        additional_notes = (form.get("additional_notes") or "").strip()
+        fork_size = _s(form.get("fork_size"))
+        budget_price = _s(form.get("budget_price"))
+        options_need = _s(form.get("options_need"))
+        additional_notes = _s(form.get("additional_notes"))
 
-        # ✅ NEW: Leasing fields (Used Equipment only)
-        lease_type = (form.get("lease_type") or "").strip()
-        annual_hours = (form.get("annual_hours") or "").strip()
-        lease_term = (form.get("lease_term") or "").strip()
+        # Leasing fields (Used Equipment only)
+        lease_type = _s(form.get("lease_type"))
+        annual_hours = _s(form.get("annual_hours"))
+        lease_term = _s(form.get("lease_term"))
 
-        # ✅ Used Equipment: ONLY these options allowed
         allowed_used_lease_types = {"FPO", "Cash"}
 
         errors = []
@@ -3630,20 +3711,21 @@ def quote_request():
             errors.append("Contact Name is required.")
         if not model:
             errors.append("Model is required.")
-        if not fuel_type:
+
+        if _is_missing_strict(fuel_type):
             errors.append("Fuel Type is required.")
         if not mast_height:
             errors.append("Mast Height is required.")
-        if not mast_type:
+        if _is_missing_strict(mast_type):
             errors.append("Mast Type is required.")
 
-        # ✅ Leasing validation
-        if not lease_type:
+        # Leasing validation
+        if _is_missing_strict(lease_type):
             errors.append("Lease Type is required.")
         elif lease_type not in allowed_used_lease_types:
             errors.append("Lease Type must be FPO or Cash.")
 
-        # ✅ Cash: clear these fields; otherwise require them
+        # Cash: clear these fields; otherwise require them
         if (lease_type or "").lower() == "cash":
             annual_hours = ""
             lease_term = ""
@@ -3653,10 +3735,10 @@ def quote_request():
             if not lease_term:
                 errors.append("Lease Term is required unless Lease Type is Cash.")
 
-        # ✅ Electric validation
+        # Electric validation
         is_electric = (fuel_type or "").lower() == "electric"
         if is_electric:
-            if not battery_voltage:
+            if not battery_voltage or battery_voltage.lower() in {"n/a", "na"}:
                 errors.append("Electric Voltage is required for Electric.")
             if not line_voltage:
                 errors.append("Line Voltage is required for Electric.")
@@ -3692,13 +3774,9 @@ def quote_request():
             "budget_price": budget_price,
             "options_need": options_need,
             "additional_notes": additional_notes,
-
-            # ✅ NEW: include leasing in PDF payload
             "lease_type": lease_type,
             "annual_hours": annual_hours,
             "lease_term": lease_term,
-
-            # Internal fields on PDF (blank)
             "quote_number": "",
             "asset_number": "",
             "serial_number": "",

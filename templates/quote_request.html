@@ -124,6 +124,7 @@
                             <div class="qr-hint">LPG, Diesel, Electric, or Dual Fuel</div>
                             <select id="fuel_type" name="fuel_type" class="qr-select" required>
                                 <option value="" disabled selected>Select fuel type</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in fuel_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -147,6 +148,7 @@
                             <div class="qr-hint">Simplex, Duplex, Triplex, or Quad</div>
                             <select id="mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -163,6 +165,7 @@
                             <label for="aux_valve">Auxiliary Control Valve</label>
                             <select id="aux_valve" name="aux_valve" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 <option value="2">2</option>
                                 <option value="3">3</option>
                                 <option value="4">4</option>
@@ -173,6 +176,7 @@
                             <label for="aux_hose">Auxiliary Hose Take Up</label>
                             <select id="aux_hose" name="aux_hose" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 <option value="2">2</option>
                                 <option value="3">3</option>
                                 <option value="4">4</option>
@@ -199,6 +203,7 @@
                             </div>
                             <select id="tires" name="tires" class="qr-select" required>
                                 <option value="" disabled selected>Select tires</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -209,6 +214,7 @@
                             <label for="seat_suspension">Seat Suspension</label>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -219,6 +225,7 @@
                             <label for="headlights">Front Work Lights</label>
                             <select id="headlights" name="headlights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -229,6 +236,7 @@
                             <label for="back_up_alarm">Backup Alarm</label>
                             <select id="back_up_alarm" name="back_up_alarm" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -239,6 +247,7 @@
                             <label for="strobe">Strobe</label>
                             <select id="strobe" name="strobe" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -249,6 +258,7 @@
                             <label for="rear_work_light">Rear Work Light</label>
                             <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -260,6 +270,7 @@
                             <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_front" name="blue_light_front" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -271,6 +282,7 @@
                             <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_rear" name="blue_light_rear" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -282,6 +294,7 @@
                             <div class="qr-hint">Additional charge if yes</div>
                             <select id="red_curtain_lights" name="red_curtain_lights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -293,6 +306,7 @@
                             <div class="qr-hint">Lithium, Lead Acid, None, etc.</div>
                             <select id="battery" name="battery" class="qr-select" required>
                                 <option value="" disabled selected>Select battery</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in battery_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -319,7 +333,7 @@
 
                         <div class="qr-group">
                             <label for="lease_type">Lease Type</label>
-                            <div class="qr-hint">FMV or FPO</div>
+                            <div class="qr-hint">FMV, FPO or Cash</div>
                             <select id="lease_type" name="lease_type" class="qr-select" required>
                                 <option value="" disabled selected>Select lease type</option>
                                 {% for option in lease_type_options %}
@@ -439,6 +453,7 @@
                             <label for="demo_rate">Rate</label>
                             <select id="demo_rate" name="rate" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
@@ -460,6 +475,7 @@
                             <label for="demo_lbr">LBR</label>
                             <select id="demo_lbr" name="lbr" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -470,6 +486,7 @@
                             <label for="demo_side_shifter">Side Shifter</label>
                             <select id="demo_side_shifter" name="side_shifter" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -480,6 +497,7 @@
                             <label for="demo_backup_alarm">Back-up Alarm</label>
                             <select id="demo_backup_alarm" name="backup_alarm" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -490,6 +508,7 @@
                             <label for="demo_work_lights">Work Lights</label>
                             <select id="demo_work_lights" name="headlights" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -500,6 +519,7 @@
                             <label for="demo_tires">Tires</label>
                             <select id="demo_tires" name="tires" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -510,6 +530,7 @@
                             <label for="demo_power_type">LP or Gas / Electric</label>
                             <select id="demo_power_type" name="power_type" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 <option value="LP or Gas">LP or Gas</option>
                                 <option value="Electric">Electric</option>
                             </select>
@@ -519,6 +540,7 @@
                             <label for="demo_need_lp_tank">Need LP Tank</label>
                             <select id="demo_need_lp_tank" name="need_lp_tank" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -534,6 +556,7 @@
                             <label for="demo_mast_type">Mast Type</label>
                             <select id="demo_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -551,6 +574,7 @@
                                     <label for="demo_need_charger">Need Charger</label>
                                     <select id="demo_need_charger" name="need_charger" class="qr-select">
                                         <option value="" selected>—</option>
+                                        <option value="N/A">N/A</option>
                                         {% for option in yes_no_options %}
                                             <option value="{{ option }}">{{ option }}</option>
                                         {% endfor %}
@@ -661,6 +685,7 @@
                             <label for="rental_rate">Rate</label>
                             <select id="rental_rate" name="rate" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
@@ -682,6 +707,7 @@
                             <label for="rental_lbr">LBR</label>
                             <select id="rental_lbr" name="lbr" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -692,6 +718,7 @@
                             <label for="rental_side_shifter">Side Shifter</label>
                             <select id="rental_side_shifter" name="side_shifter" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -702,6 +729,7 @@
                             <label for="rental_backup_alarm">Back-up Alarm</label>
                             <select id="rental_backup_alarm" name="backup_alarm" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -712,6 +740,7 @@
                             <label for="rental_work_lights">Work Lights</label>
                             <select id="rental_work_lights" name="headlights" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -722,6 +751,7 @@
                             <label for="rental_tires">Tires</label>
                             <select id="rental_tires" name="tires" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -732,6 +762,7 @@
                             <label for="rental_power_type">LP or Gas / Electric</label>
                             <select id="rental_power_type" name="power_type" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 <option value="LP or Gas">LP or Gas</option>
                                 <option value="Electric">Electric</option>
                             </select>
@@ -741,6 +772,7 @@
                             <label for="rental_need_lp_tank">Need LP Tank</label>
                             <select id="rental_need_lp_tank" name="need_lp_tank" class="qr-select">
                                 <option value="" selected>—</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -756,6 +788,7 @@
                             <label for="rental_mast_type">Mast Type</label>
                             <select id="rental_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -773,6 +806,7 @@
                                     <label for="rental_need_charger">Need Charger</label>
                                     <select id="rental_need_charger" name="need_charger" class="qr-select">
                                         <option value="" selected>—</option>
+                                        <option value="N/A">N/A</option>
                                         {% for option in yes_no_options %}
                                             <option value="{{ option }}">{{ option }}</option>
                                         {% endfor %}
@@ -1096,7 +1130,7 @@
     })();
 
      // -----------------------------
-    // 4.5) Pay in Full behavior (Quote form)
+    // 4.5) Cash behavior (Quote form)
     // - hide Lease Term + Annual Hours
     // -----------------------------
     (function wireCash() {
@@ -1245,7 +1279,6 @@
         });
     })();
 </script>
-
 
 </body>
 </html>
