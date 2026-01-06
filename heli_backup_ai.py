@@ -3262,12 +3262,34 @@ def find_brand_coverage_peers(heli_model: dict, max_rows: int = 10, per_brand: i
 
 @app.route("/quote-request", methods=["GET", "POST"])
 def quote_request():
-    if request.method == "POST":
-        form = request.form
-        request_type = (form.get("request_type") or "quote").strip().lower()
+    # -----------------------------
+    # GET: just render the page
+    # -----------------------------
+    if request.method == "GET":
+        return render_template(
+            "quote_request.html",
+            fuel_options=FUEL_OPTIONS,
+            mast_type_options=MAST_TYPE_OPTIONS,
+            tire_options=TIRE_OPTIONS,
+            yes_no_options=YES_NO_OPTIONS,
+            battery_options=BATTERY_OPTIONS,
+            lease_type_options=LEASE_TYPE_OPTIONS,
+        )
 
     # -----------------------------
-    # QUOTE REQUEST (existing logic)
+    # POST: handle the submitted form
+    # -----------------------------
+    form = request.form
+
+    request_type = (form.get("request_type") or "").strip()
+    request_type = request_type.lower().replace(" ", "_")
+
+    # ✅ allow aliases so template changes don't break your backend
+    if request_type in {"used", "used_equipment_request", "used_request"}:
+        request_type = "used_equipment"
+
+    # -----------------------------
+    # QUOTE REQUEST (existing logic) ✅ updated for Pay in Full
     # -----------------------------
     if request_type == "quote":
         customer_name = form.get("customer_name", "").strip()
@@ -3312,14 +3334,7 @@ def quote_request():
         annual_hours = (form.get("annual_hours") or "").strip()
         lease_term = (form.get("lease_term") or "").strip()
 
-        # ✅ Pay in Full: ignore these fields
-        if lease_type.lower() == "pay in full":
-            annual_hours = ""
-            lease_term = ""
-
-        # ✅ FIX: Pay in Full hides these fields on the frontend; make backend accept blanks
-        annual_hours = (form.get("annual_hours") or "").strip()
-        lease_term = (form.get("lease_term") or "").strip()
+        # ✅ Pay in Full: ignore these
         if lease_type.lower() == "pay in full":
             annual_hours = ""
             lease_term = ""
@@ -3573,12 +3588,11 @@ def quote_request():
     # -----------------------------
     # USED EQUIPMENT (FIXED)
     # -----------------------------
-    # ✅ Accept both "used" and "used_equipment" (and "used_equipment_request") so template changes never break you again
-    if request_type in {"used", "used_equipment", "used_equipment_request"}:
+    if request_type == "used_equipment":
         customer_name = (form.get("customer_name") or "").strip()
         address = (form.get("address") or "").strip()
 
-        # ✅ FIX: your form submits name="city_state_zip" (NOT city_zip_code)
+        # ✅ FIX: your form uses name="city_state_zip"
         city_state_zip = (form.get("city_state_zip") or "").strip()
 
         contact_name = (form.get("contact_name") or "").strip()
@@ -3641,7 +3655,7 @@ def quote_request():
         form_data = {
             "customer_name": customer_name,
             "address": address,
-            "city_state_zip": city_state_zip,   # ✅ consistent key
+            "city_state_zip": city_state_zip,
             "contact_name": contact_name,
             "model": model,
             "fuel_type": fuel_type,
@@ -3658,7 +3672,6 @@ def quote_request():
             "serial_number": "",
         }
 
-        # ✅ FIX: tell PDF builder "used" (matches your build_request_pdf implementation)
         pdf_bytes = build_request_pdf(form_data, "used")
         if not pdf_bytes:
             flash("PDF generation failed (empty PDF). Check server logs.", "error")
@@ -3683,17 +3696,6 @@ def quote_request():
         )
 
     flash("Unknown request type submitted. Please try again.", "error")
-    return render_template(
-        "quote_request.html",
-        fuel_options=FUEL_OPTIONS,
-        mast_type_options=MAST_TYPE_OPTIONS,
-        tire_options=TIRE_OPTIONS,
-        yes_no_options=YES_NO_OPTIONS,
-        battery_options=BATTERY_OPTIONS,
-        lease_type_options=LEASE_TYPE_OPTIONS,
-    )
-
-
     return render_template(
         "quote_request.html",
         fuel_options=FUEL_OPTIONS,
