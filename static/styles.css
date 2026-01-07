@@ -753,3 +753,24 @@ body.quote-request-page .qr-actions .primary-button {
   .quote-request-page .qr-brand-heli{ font-size:22px; }
   .quote-request-page .qr-brand-tabs{ gap:16px; flex-wrap:wrap; }
 }
+
+/* ============================= */
+/* Quote Request - Field Errors  */
+/* ============================= */
+
+.qr-group-invalid label {
+  color: #ff4d4d;
+}
+
+.qr-invalid {
+  border: 2px solid #cc0000 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(204, 0, 0, 0.25) !important;
+}
+
+.qr-error-msg {
+  margin-top: 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ff4d4d;
+}

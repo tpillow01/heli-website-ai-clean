@@ -124,7 +124,6 @@
                             <div class="qr-hint">LPG, Diesel, Electric, or Dual Fuel</div>
                             <select id="fuel_type" name="fuel_type" class="qr-select" required>
                                 <option value="" disabled selected>Select fuel type</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in fuel_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -139,7 +138,7 @@
 
                         <div class="qr-group">
                             <label for="mast_ohl_mfh">Mast OHL / MFH</label>
-                            <div class="qr-hint">Enter maximum fork height</div>
+                            <div class="qr-hint">Enter lowered and maximum fork height</div>
                             <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh" class="qr-input" required />
                         </div>
 
@@ -148,7 +147,6 @@
                             <div class="qr-hint">Simplex, Duplex, Triplex, or Quad</div>
                             <select id="mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -165,7 +163,6 @@
                             <label for="aux_valve">Auxiliary Control Valve</label>
                             <select id="aux_valve" name="aux_valve" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 <option value="2">2</option>
                                 <option value="3">3</option>
                                 <option value="4">4</option>
@@ -176,7 +173,6 @@
                             <label for="aux_hose">Auxiliary Hose Take Up</label>
                             <select id="aux_hose" name="aux_hose" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 <option value="2">2</option>
                                 <option value="3">3</option>
                                 <option value="4">4</option>
@@ -203,7 +199,6 @@
                             </div>
                             <select id="tires" name="tires" class="qr-select" required>
                                 <option value="" disabled selected>Select tires</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -214,7 +209,6 @@
                             <label for="seat_suspension">Seat Suspension</label>
                             <select id="seat_suspension" name="seat_suspension" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -225,7 +219,6 @@
                             <label for="headlights">Front Work Lights</label>
                             <select id="headlights" name="headlights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -236,7 +229,6 @@
                             <label for="back_up_alarm">Backup Alarm</label>
                             <select id="back_up_alarm" name="back_up_alarm" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -247,7 +239,6 @@
                             <label for="strobe">Strobe</label>
                             <select id="strobe" name="strobe" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -258,7 +249,6 @@
                             <label for="rear_work_light">Rear Work Light</label>
                             <select id="rear_work_light" name="rear_work_light" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -270,7 +260,6 @@
                             <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_front" name="blue_light_front" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -282,7 +271,6 @@
                             <div class="qr-hint">Additional charge if yes</div>
                             <select id="blue_light_rear" name="blue_light_rear" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -294,7 +282,6 @@
                             <div class="qr-hint">Additional charge if yes</div>
                             <select id="red_curtain_lights" name="red_curtain_lights" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -306,7 +293,6 @@
                             <div class="qr-hint">Lithium, Lead Acid, None, etc.</div>
                             <select id="battery" name="battery" class="qr-select" required>
                                 <option value="" disabled selected>Select battery</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in battery_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -333,7 +319,7 @@
 
                         <div class="qr-group">
                             <label for="lease_type">Lease Type</label>
-                            <div class="qr-hint">FMV, FPO or Cash</div>
+                            <div class="qr-hint">FMV or FPO or Cash</div>
                             <select id="lease_type" name="lease_type" class="qr-select" required>
                                 <option value="" disabled selected>Select lease type</option>
                                 {% for option in lease_type_options %}
@@ -453,7 +439,6 @@
                             <label for="demo_rate">Rate</label>
                             <select id="demo_rate" name="rate" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
@@ -475,7 +460,6 @@
                             <label for="demo_lbr">LBR</label>
                             <select id="demo_lbr" name="lbr" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -486,7 +470,6 @@
                             <label for="demo_side_shifter">Side Shifter</label>
                             <select id="demo_side_shifter" name="side_shifter" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -497,7 +480,6 @@
                             <label for="demo_backup_alarm">Back-up Alarm</label>
                             <select id="demo_backup_alarm" name="backup_alarm" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -508,7 +490,6 @@
                             <label for="demo_work_lights">Work Lights</label>
                             <select id="demo_work_lights" name="headlights" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -519,7 +500,6 @@
                             <label for="demo_tires">Tires</label>
                             <select id="demo_tires" name="tires" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -530,7 +510,6 @@
                             <label for="demo_power_type">LP or Gas / Electric</label>
                             <select id="demo_power_type" name="power_type" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 <option value="LP or Gas">LP or Gas</option>
                                 <option value="Electric">Electric</option>
                             </select>
@@ -540,7 +519,6 @@
                             <label for="demo_need_lp_tank">Need LP Tank</label>
                             <select id="demo_need_lp_tank" name="need_lp_tank" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -556,7 +534,6 @@
                             <label for="demo_mast_type">Mast Type</label>
                             <select id="demo_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -574,7 +551,6 @@
                                     <label for="demo_need_charger">Need Charger</label>
                                     <select id="demo_need_charger" name="need_charger" class="qr-select">
                                         <option value="" selected>—</option>
-                                        <option value="N/A">N/A</option>
                                         {% for option in yes_no_options %}
                                             <option value="{{ option }}">{{ option }}</option>
                                         {% endfor %}
@@ -685,7 +661,6 @@
                             <label for="rental_rate">Rate</label>
                             <select id="rental_rate" name="rate" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
@@ -707,7 +682,6 @@
                             <label for="rental_lbr">LBR</label>
                             <select id="rental_lbr" name="lbr" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -718,7 +692,6 @@
                             <label for="rental_side_shifter">Side Shifter</label>
                             <select id="rental_side_shifter" name="side_shifter" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -729,7 +702,6 @@
                             <label for="rental_backup_alarm">Back-up Alarm</label>
                             <select id="rental_backup_alarm" name="backup_alarm" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -740,7 +712,6 @@
                             <label for="rental_work_lights">Work Lights</label>
                             <select id="rental_work_lights" name="headlights" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -751,7 +722,6 @@
                             <label for="rental_tires">Tires</label>
                             <select id="rental_tires" name="tires" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -762,7 +732,6 @@
                             <label for="rental_power_type">LP or Gas / Electric</label>
                             <select id="rental_power_type" name="power_type" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 <option value="LP or Gas">LP or Gas</option>
                                 <option value="Electric">Electric</option>
                             </select>
@@ -772,7 +741,6 @@
                             <label for="rental_need_lp_tank">Need LP Tank</label>
                             <select id="rental_need_lp_tank" name="need_lp_tank" class="qr-select">
                                 <option value="" selected>—</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -788,7 +756,6 @@
                             <label for="rental_mast_type">Mast Type</label>
                             <select id="rental_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -806,7 +773,6 @@
                                     <label for="rental_need_charger">Need Charger</label>
                                     <select id="rental_need_charger" name="need_charger" class="qr-select">
                                         <option value="" selected>—</option>
-                                        <option value="N/A">N/A</option>
                                         {% for option in yes_no_options %}
                                             <option value="{{ option }}">{{ option }}</option>
                                         {% endfor %}
@@ -839,148 +805,336 @@
                 </form>
             </div>
 
-<!-- ========================= -->
-<!-- USED EQUIPMENT (FIXED)    -->
-<!-- ========================= -->
-<div id="form_wrap_used" class="request-form-wrap" style="display:none;">
-    <form id="usedRequestForm"
-          method="post"
-          action="{{ url_for('quote_request') }}"
-          class="quote-request-form"
-          novalidate
-          data-request-type="used_equipment"
-          data-pdf-title="Used Equipment Request">
+            <!-- ========================= -->
+            <!-- USED EQUIPMENT (FIXED)    -->
+            <!-- ========================= -->
+            <div id="form_wrap_used" class="request-form-wrap" style="display:none;">
+                <form id="usedRequestForm"
+                      method="post"
+                      action="{{ url_for('quote_request') }}"
+                      class="quote-request-form"
+                      novalidate
+                      data-request-type="used_equipment"
+                      data-pdf-title="Used Equipment Request">
 
-        <!-- ✅ FIX: backend-safe request_type so Flask/PDF route hits the correct branch -->
-        <input type="hidden" name="request_type" value="used_equipment" />
+                    <input type="hidden" name="request_type" value="used_equipment" />
 
-        <div class="quote-request-grid">
+                    <div class="quote-request-grid">
 
-            <div class="qr-group qr-group-full">
-                <label for="used_customer_name">Customer</label>
-                <input type="text" id="used_customer_name" name="customer_name" class="qr-input" required />
+                        <div class="qr-group qr-group-full">
+                            <label for="used_customer_name">Customer</label>
+                            <input type="text" id="used_customer_name" name="customer_name" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_address">Address</label>
+                            <input type="text" id="used_address" name="address" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_city_zip">City and Zip Code</label>
+                            <input type="text" id="used_city_zip" name="city_state_zip" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_contact_name">Contact Name</label>
+                            <input type="text" id="used_contact_name" name="contact_name" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_model">Model</label>
+                            <input type="text" id="used_model" name="model" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_fuel_type">Fuel Type</label>
+                            <div class="qr-hint">Select LP, Gas, Diesel, or Electric</div>
+                            <select id="used_fuel_type" name="fuel_type" class="qr-select" required>
+                                <option value="" disabled selected>Select</option>
+                                <option value="LP">LP</option>
+                                <option value="Gas">Gas</option>
+                                <option value="Diesel">Diesel</option>
+                                <option value="Electric">Electric</option>
+                            </select>
+                        </div>
+
+                        <div class="qr-group" id="used_voltage_group" style="display:none;">
+                            <label for="used_voltage">Electric Voltage</label>
+                            <select id="used_voltage" name="battery_voltage" class="qr-select">
+                                <option value="" selected>—</option>
+                                <option value="12V">12V</option>
+                                <option value="24V">24V</option>
+                                <option value="36V">36V</option>
+                                <option value="48V">48V</option>
+                                <option value="80V">80V</option>
+                            </select>
+                        </div>
+
+                        <div class="qr-group" id="used_line_voltage_group" style="display:none;">
+                            <label for="used_line_voltage">Line Voltage</label>
+                            <input type="text" id="used_line_voltage" name="line_voltage" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_mast_height">Mast Height</label>
+                            <input type="text" id="used_mast_height" name="mast_height" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_mast_type">Mast Type</label>
+                            <select id="used_mast_type" name="mast_type" class="qr-select" required>
+                                <option value="" disabled selected>Select mast type</option>
+                                {% for option in mast_type_options %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_fork_size">Fork Size</label>
+                            <input type="text" id="used_fork_size" name="fork_size" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_budget_price">Customer Budget</label>
+                            <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group">
+                            <label for="used_lease_type">Lease Type</label>
+                            <div class="qr-hint">FPO or Cash</div>
+                            <select id="used_lease_type" name="lease_type" class="qr-select" required>
+                                <option value="" disabled selected>Select lease type</option>
+                                <option value="FPO">FPO</option>
+                                <option value="Cash">Cash</option>
+                            </select>
+                        </div>
+
+                        <div class="qr-group" id="used_annual_hours_group">
+                            <label for="used_annual_hours">Annual Hours</label>
+                            <div class="qr-hint">Required unless Cash</div>
+                            <input type="number" id="used_annual_hours" name="annual_hours" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group" id="used_lease_term_group">
+                            <label for="used_lease_term">Lease Term (Months)</label>
+                            <div class="qr-hint">Required unless Cash</div>
+                            <input type="number" id="used_lease_term" name="lease_term" class="qr-input" required />
+                        </div>
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_options_need">Options Need</label>
+                            <input type="text" id="used_options_need" name="options_need" class="qr-input" />
+                        </div>
+
+                        <div class="qr-group qr-group-full">
+                            <label for="used_additional_notes">Additional Notes</label>
+                            <textarea id="used_additional_notes" name="additional_notes" class="qr-textarea"></textarea>
+                        </div>
+
+                    </div>
+
+                    <div class="qr-actions">
+                        <button type="submit" class="primary-button">
+                            Generate Used Equipment Request PDF
+                        </button>
+                    </div>
+                </form>
             </div>
-
-            <div class="qr-group qr-group-full">
-                <label for="used_address">Address</label>
-                <input type="text" id="used_address" name="address" class="qr-input" required />
-            </div>
-
-            <div class="qr-group">
-                <label for="used_city_zip">City and Zip Code</label>
-                <input type="text" id="used_city_zip" name="city_state_zip" class="qr-input" required />
-            </div>
-
-            <div class="qr-group">
-                <label for="used_contact_name">Contact Name</label>
-                <input type="text" id="used_contact_name" name="contact_name" class="qr-input" required />
-            </div>
-
-            <div class="qr-group">
-                <label for="used_model">Model</label>
-                <input type="text" id="used_model" name="model" class="qr-input" required />
-            </div>
-
-            <div class="qr-group">
-                <label for="used_fuel_type">Fuel Type</label>
-                <div class="qr-hint">Select LP, Gas, Diesel, or Electric</div>
-                <select id="used_fuel_type" name="fuel_type" class="qr-select" required>
-                    <option value="" disabled selected>Select</option>
-                    <option value="LP">LP</option>
-                    <option value="Gas">Gas</option>
-                    <option value="Diesel">Diesel</option>
-                    <option value="Electric">Electric</option>
-                </select>
-            </div>
-
-            <!-- Electric-only fields -->
-            <div class="qr-group" id="used_voltage_group" style="display:none;">
-                <label for="used_voltage">Electric Voltage</label>
-                <select id="used_voltage" name="battery_voltage" class="qr-select">
-                    <option value="" selected>—</option>
-                    <option value="12V">12V</option>
-                    <option value="24V">24V</option>
-                    <option value="36V">36V</option>
-                    <option value="48V">48V</option>
-                    <option value="80V">80V</option>
-                </select>
-            </div>
-
-            <div class="qr-group" id="used_line_voltage_group" style="display:none;">
-                <label for="used_line_voltage">Line Voltage</label>
-                <input type="text" id="used_line_voltage" name="line_voltage" class="qr-input" />
-            </div>
-
-            <!-- Always visible fields -->
-            <div class="qr-group">
-                <label for="used_mast_height">Mast Height</label>
-                <input type="text" id="used_mast_height" name="mast_height" class="qr-input" required />
-            </div>
-
-            <div class="qr-group">
-                <label for="used_mast_type">Mast Type</label>
-                <select id="used_mast_type" name="mast_type" class="qr-select" required>
-                    <option value="" disabled selected>Select mast type</option>
-                    {% for option in mast_type_options %}
-                        <option value="{{ option }}">{{ option }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="qr-group">
-                <label for="used_fork_size">Fork Size</label>
-                <input type="text" id="used_fork_size" name="fork_size" class="qr-input" />
-            </div>
-
-            <div class="qr-group">
-                <label for="used_budget_price">Customer Budget</label>
-                <input type="text" id="used_budget_price" name="budget_price" class="qr-input" />
-            </div>
-
-            <!-- ✅ Leasing (Used Equipment only): ONLY FPO + Cash -->
-            <div class="qr-group">
-                <label for="used_lease_type">Lease Type</label>
-                <div class="qr-hint">FPO or Cash</div>
-                <select id="used_lease_type" name="lease_type" class="qr-select" required>
-                    <option value="" disabled selected>Select lease type</option>
-                    <option value="FPO">FPO</option>
-                    <option value="Cash">Cash</option>
-                </select>
-            </div>
-
-            <div class="qr-group" id="used_annual_hours_group">
-                <label for="used_annual_hours">Annual Hours</label>
-                <div class="qr-hint">Required unless Cash</div>
-                <input type="number" id="used_annual_hours" name="annual_hours" class="qr-input" required />
-            </div>
-
-            <div class="qr-group" id="used_lease_term_group">
-                <label for="used_lease_term">Lease Term (Months)</label>
-                <div class="qr-hint">Required unless Cash</div>
-                <input type="number" id="used_lease_term" name="lease_term" class="qr-input" required />
-            </div>
-
-            <div class="qr-group qr-group-full">
-                <label for="used_options_need">Options Need</label>
-                <input type="text" id="used_options_need" name="options_need" class="qr-input" />
-            </div>
-
-            <div class="qr-group qr-group-full">
-                <label for="used_additional_notes">Additional Notes</label>
-                <textarea id="used_additional_notes" name="additional_notes" class="qr-textarea"></textarea>
-            </div>
-
-        </div>
-
-        <div class="qr-actions">
-            <button type="submit" class="primary-button">
-                Generate Used Equipment Request PDF
-            </button>
-        </div>
-    </form>
-</div>
 
 <script>
+    // ==========================================================
+    // A) Field highlighting + "don't wipe" behavior
+    //    - Client-side validation (highlights missed fields)
+    //    - Session autosave (keeps data even if page refreshes)
+    // ==========================================================
+
+    function isVisible(el) {
+        if (!el) return false;
+        // Hidden by display:none anywhere up the tree
+        if (el.offsetParent === null) return false;
+        // Hidden by type=hidden or disabled
+        if (el.type === "hidden" || el.disabled) return false;
+        return true;
+    }
+
+    function groupFor(el) {
+        if (!el) return null;
+        return el.closest(".qr-group") || null;
+    }
+
+    function clearFieldError(el) {
+        if (!el) return;
+        el.classList.remove("qr-invalid");
+        el.removeAttribute("aria-invalid");
+        const g = groupFor(el);
+        if (!g) return;
+        g.classList.remove("qr-group-invalid");
+        const msg = g.querySelector(".qr-error-msg");
+        if (msg) msg.remove();
+    }
+
+    function setFieldError(el, message) {
+        if (!el) return;
+        el.classList.add("qr-invalid");
+        el.setAttribute("aria-invalid", "true");
+        const g = groupFor(el);
+        if (g) {
+            g.classList.add("qr-group-invalid");
+            // Add message only once
+            if (!g.querySelector(".qr-error-msg")) {
+                const div = document.createElement("div");
+                div.className = "qr-error-msg";
+                div.textContent = message || "This field is required.";
+                g.appendChild(div);
+            }
+        }
+    }
+
+    function clearFormErrors(form) {
+        if (!form) return;
+        const fields = form.querySelectorAll("input, select, textarea");
+        fields.forEach(clearFieldError);
+    }
+
+    function isEmptyValue(el) {
+        if (!el) return true;
+        if (el.tagName === "SELECT") {
+            const v = (el.value || "").trim();
+            return v === "";
+        }
+        return ((el.value || "").trim() === "");
+    }
+
+    function validateForm(form) {
+        if (!form) return true;
+
+        clearFormErrors(form);
+
+        const requiredFields = Array.from(form.querySelectorAll("input[required], select[required], textarea[required]"))
+            .filter(isVisible);
+
+        const invalid = [];
+
+        requiredFields.forEach(el => {
+            // ignore hidden electric blocks etc (handled by isVisible + required toggles you already do)
+            if (isEmptyValue(el)) {
+                invalid.push(el);
+                setFieldError(el, "Required");
+            }
+        });
+
+        if (invalid.length) {
+            const first = invalid[0];
+            // Scroll into view and focus
+            try {
+                first.scrollIntoView({ behavior: "smooth", block: "center" });
+            } catch (e) {}
+            setTimeout(() => {
+                try { first.focus({ preventScroll: true }); } catch (e) {}
+            }, 250);
+            return false;
+        }
+
+        return true;
+    }
+
+    function storageKeyForForm(form) {
+        const t = (form?.dataset?.requestType || "").trim() || "unknown";
+        return `qr_draft_${t}`;
+    }
+
+    function saveDraft(form) {
+        try {
+            const key = storageKeyForForm(form);
+            const data = {};
+            const els = form.querySelectorAll("input, select, textarea");
+            els.forEach(el => {
+                if (!el.name) return;
+                if (el.type === "password" || el.type === "file") return;
+                if (el.type === "checkbox") data[el.name] = !!el.checked;
+                else if (el.type === "radio") {
+                    if (el.checked) data[el.name] = el.value;
+                } else {
+                    data[el.name] = el.value;
+                }
+            });
+            sessionStorage.setItem(key, JSON.stringify(data));
+        } catch (e) {
+            // ignore storage errors
+        }
+    }
+
+    function restoreDraft(form) {
+        try {
+            const key = storageKeyForForm(form);
+            const raw = sessionStorage.getItem(key);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            const els = form.querySelectorAll("input, select, textarea");
+            els.forEach(el => {
+                if (!el.name) return;
+                if (!(el.name in data)) return;
+
+                if (el.type === "checkbox") {
+                    el.checked = !!data[el.name];
+                } else if (el.type === "radio") {
+                    el.checked = (data[el.name] === el.value);
+                } else {
+                    // only set if currently empty (prevents clobbering)
+                    if ((el.value || "") === "") el.value = data[el.name];
+                }
+            });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    function clearDraft(form) {
+        try {
+            sessionStorage.removeItem(storageKeyForForm(form));
+        } catch (e) {}
+    }
+
+    function wireAutosave(form) {
+        if (!form) return;
+
+        // Restore on load
+        restoreDraft(form);
+
+        // Save on every change/input
+        const handler = () => saveDraft(form);
+        form.addEventListener("input", handler);
+        form.addEventListener("change", handler);
+
+        // As user fixes fields, remove red highlight immediately
+        form.addEventListener("input", (e) => {
+            if (!e.target) return;
+            clearFieldError(e.target);
+        });
+        form.addEventListener("change", (e) => {
+            if (!e.target) return;
+            clearFieldError(e.target);
+        });
+    }
+
+    // Wire autosave for all forms
+    const allForms = document.querySelectorAll("form.quote-request-form");
+    allForms.forEach(wireAutosave);
+
+    // Desktop behavior: prevent submit if missing required
+    // (keeps user on page with highlights, no wipe)
+    allForms.forEach((form) => {
+        form.addEventListener("submit", (e) => {
+            // If mobile fetch handler is active, it will also run; validation should block both
+            if (!validateForm(form)) {
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }
+        }, true);
+    });
+
     // -----------------------------
     // 1) Switch between forms
     // -----------------------------
@@ -1003,18 +1157,22 @@
             wrapDemo.style.display = "block";
             pageTitle.textContent = "HELI Demo Request";
             pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+            restoreDraft(document.getElementById("demoRequestForm"));
         } else if (type === "rental") {
             wrapRental.style.display = "block";
             pageTitle.textContent = "HELI Rental Request";
             pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+            restoreDraft(document.getElementById("rentalRequestForm"));
         } else if (type === "used") {
             wrapUsed.style.display = "block";
             pageTitle.textContent = "Used Equipment Request";
             pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+            restoreDraft(document.getElementById("usedRequestForm"));
         } else {
             wrapQuote.style.display = "block";
             pageTitle.textContent = "HELI Quote Request";
             pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+            restoreDraft(document.getElementById("quoteRequestForm"));
         }
     }
 
@@ -1040,6 +1198,7 @@
             voltageGroup.style.display = 'none';
             voltageInput.removeAttribute('required');
             voltageInput.value = '';
+            clearFieldError(voltageInput);
         }
     }
 
@@ -1050,8 +1209,6 @@
 
     // -----------------------------
     // 3) Demo/Rental power type behavior
-    //    - show electric block when Electric
-    //    - hide "Need LP Tank" when Electric
     // -----------------------------
     function wirePowerTypeBehavior(selectId, electricBlockId, lpGroupId) {
         const sel = document.getElementById(selectId);
@@ -1066,6 +1223,7 @@
             inputs.forEach(el => {
                 if (el.tagName === "SELECT") el.selectedIndex = 0;
                 else el.value = "";
+                clearFieldError(el);
             });
         }
 
@@ -1091,9 +1249,7 @@
     wirePowerTypeBehavior("rental_power_type", "rental_electric_block", "rental_need_lp_tank_group");
 
     // -----------------------------
-    // 4) Used Equipment fuel behavior:
-    //    - if Electric: show Voltage + Line Voltage
-    //    - else: hide both
+    // 4) Used Equipment fuel behavior
     // -----------------------------
     (function wireUsedElectric() {
         const sel = document.getElementById("used_fuel_type");
@@ -1114,6 +1270,7 @@
                 else {
                     iVolt.removeAttribute("required");
                     iVolt.selectedIndex = 0;
+                    clearFieldError(iVolt);
                 }
             }
             if (iLine) {
@@ -1121,6 +1278,7 @@
                 else {
                     iLine.removeAttribute("required");
                     iLine.value = "";
+                    clearFieldError(iLine);
                 }
             }
         }
@@ -1129,9 +1287,8 @@
         sel.addEventListener("change", update);
     })();
 
-     // -----------------------------
+    // -----------------------------
     // 4.5) Cash behavior (Quote form)
-    // - hide Lease Term + Annual Hours
     // -----------------------------
     (function wireCash() {
         const leaseType = document.getElementById("lease_type");
@@ -1154,6 +1311,8 @@
                 annualHours.removeAttribute("required");
                 leaseTerm.value = "";
                 annualHours.value = "";
+                clearFieldError(leaseTerm);
+                clearFieldError(annualHours);
             } else {
                 leaseTerm.setAttribute("required", "required");
                 annualHours.setAttribute("required", "required");
@@ -1165,9 +1324,7 @@
     })();
 
     // -----------------------------
-    // 4B) Used Equipment leasing behavior:
-    //     - if Lease Type = Cash: hide Annual Hours + Lease Term
-    //     - else: show them + require them
+    // 4B) Used Equipment Cash behavior
     // -----------------------------
     (function wireUsedLeaseCash() {
         const leaseType = document.getElementById("used_lease_type");
@@ -1190,6 +1347,8 @@
                 annualHours.removeAttribute("required");
                 leaseTerm.value = "";
                 annualHours.value = "";
+                clearFieldError(leaseTerm);
+                clearFieldError(annualHours);
             } else {
                 leaseTerm.setAttribute("required", "required");
                 annualHours.setAttribute("required", "required");
@@ -1201,7 +1360,9 @@
     })();
 
     // -----------------------------
-    // 5) Mobile Share/Save behavior
+    // 5) Mobile Share/Save behavior (UPDATED)
+    //    - Validates first
+    //    - If server returns HTML, show a friendly message and render it
     // -----------------------------
     (function () {
         const hint = document.getElementById("mobileSaveHint");
@@ -1217,6 +1378,12 @@
         const forms = document.querySelectorAll("form.quote-request-form");
         forms.forEach((form) => {
             form.addEventListener("submit", async (e) => {
+                // If invalid, block submit and keep data (no wipe)
+                if (!validateForm(form)) {
+                    e.preventDefault();
+                    return;
+                }
+
                 e.preventDefault();
 
                 const btn = form.querySelector("button[type='submit']");
@@ -1240,9 +1407,14 @@
 
                     const contentType = (res.headers.get("content-type") || "").toLowerCase();
 
+                    // If not PDF, it usually means validation error or redirect -> HTML
                     if (!res.ok || !contentType.includes("application/pdf")) {
-                        const msg = await res.text().catch(() => "");
-                        throw new Error(msg || `PDF generation failed (${res.status}).`);
+                        const html = await res.text().catch(() => "");
+                        // Render returned HTML so user sees server-side errors (instead of raw HTML alert)
+                        document.open();
+                        document.write(html);
+                        document.close();
+                        return;
                     }
 
                     const blob = await res.blob();
@@ -1253,6 +1425,9 @@
                     const filename = match ? match[1] : defaultName;
 
                     const file = new File([blob], filename, { type: "application/pdf" });
+
+                    // Success: clear draft + reset form (optional)
+                    clearDraft(form);
 
                     if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
                         await navigator.share({
@@ -1268,14 +1443,14 @@
                     setTimeout(() => URL.revokeObjectURL(url), 30000);
 
                 } catch (err) {
-                    alert(err?.message || "Failed to generate/share the PDF.");
+                    alert("Failed to generate/share the PDF. Please check required fields or try again.");
                 } finally {
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = originalText;
                     }
                 }
-            });
+            }, true);
         });
     })();
 </script>
