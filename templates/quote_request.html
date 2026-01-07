@@ -195,7 +195,7 @@
                             <label for="tires">Tire</label>
                             <div class="qr-hint">
                                 Cushion Standard, Cushion Non Marking, Cushion Non Marking Traction,
-                                Smooth, Solid Pneumatic, Pneumatic
+                                Smooth, Solid Pneumatic, Pneumatic, Polyurethane
                             </div>
                             <select id="tires" name="tires" class="qr-select" required>
                                 <option value="" disabled selected>Select tires</option>
@@ -1180,6 +1180,8 @@
         requestTypeSelect.addEventListener("change", () => setActiveForm(requestTypeSelect.value));
         setActiveForm(requestTypeSelect.value);
     }
+
+
 
     // -----------------------------
     // 2) Quote Fuel -> Battery Voltage requirement

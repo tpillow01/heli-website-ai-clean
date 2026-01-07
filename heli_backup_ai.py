@@ -317,6 +317,7 @@ TIRE_OPTIONS = [
     "Smooth",
     "Solid Pneumatic",
     "Pneumatic",
+    "Polyurethane" ,
 ]
 
 # no tire compound anymore
