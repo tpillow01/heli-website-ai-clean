@@ -1181,8 +1181,71 @@
         setActiveForm(requestTypeSelect.value);
     }
 
+    if (requestTypeSelect) {
+    requestTypeSelect.addEventListener("change", () => setActiveForm(requestTypeSelect.value));
+    setActiveForm(requestTypeSelect.value);
+}
 
+// -----------------------------
+// 1.5) Add "N/A" option to dropdowns (client-side)
+//     - Adds N/A to every <select> in all forms
+//     - EXCEPT lease type selects + request type select
+//     - Also excludes fuel + mast type selects (keeps your electric/mast logic clean)
+// -----------------------------
+(function addNAtoDropdowns() {
+    const EXCLUDE_IDS = new Set([
+        // Request type selector (top)
+        "request_type_select",
 
+        // Lease types (we dealt with these earlier)
+        "lease_type",
+        "used_lease_type",
+
+        // Fuel selects (keep electric logic clean)
+        "fuel_type",
+        "used_fuel_type",
+
+        // Mast type selects (generally should be real, not N/A)
+        "mast_type",
+        "demo_mast_type",
+        "rental_mast_type",
+        "used_mast_type",
+    ]);
+
+    function ensureNA(selectEl) {
+        if (!selectEl || selectEl.tagName !== "SELECT") return;
+        if (EXCLUDE_IDS.has(selectEl.id)) return;
+
+        // already has N/A?
+        const hasNA = Array.from(selectEl.options).some(
+            o => (o.value || "").trim().toLowerCase() === "n/a" || (o.text || "").trim().toLowerCase() === "n/a"
+        );
+        if (hasNA) return;
+
+        const opt = document.createElement("option");
+        opt.value = "N/A";
+        opt.textContent = "N/A";
+
+        // If the first option is a disabled placeholder, insert right after it
+        const first = selectEl.options[0];
+        if (first && first.disabled) {
+            // insert after placeholder
+            if (selectEl.options.length > 1) {
+                selectEl.insertBefore(opt, selectEl.options[1]);
+            } else {
+                selectEl.appendChild(opt);
+            }
+        } else {
+            // otherwise just append at top
+            selectEl.insertBefore(opt, selectEl.options[0] || null);
+        }
+    }
+
+    // Add N/A to all dropdowns inside all request forms
+    const selects = document.querySelectorAll("form.quote-request-form select");
+    selects.forEach(ensureNA);
+})();
+    
     // -----------------------------
     // 2) Quote Fuel -> Battery Voltage requirement
     // -----------------------------
