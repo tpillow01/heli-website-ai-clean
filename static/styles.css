@@ -759,3 +759,22 @@ body.quote-request-page .qr-actions .primary-button{
   font-weight:700;
   color:#ff4d4d;
 }
+
+/* Fix: prevent browser default purple/underline in header nav links */
+.top-header a,
+.top-header a:visited {
+  color: #111;
+  text-decoration: none;
+}
+
+.top-header a:hover {
+  color: #b30000;
+}
+
+.tabs a,
+.tabs a:visited {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 800;
+}
+

@@ -3284,55 +3284,33 @@ def quote_request():
         v = _s(val)
         return v == "" or v.lower() in {"n/a", "na"}
 
-    def _render_page():
+    def _render_with_lists():
+        # Ensure Mast Type list includes N/A (for the Quote Request mast type dropdown)
+        mast_opts = list(MAST_TYPE_OPTIONS)
+        if not any(str(o).strip().lower() in {"n/a", "na"} for o in mast_opts):
+            mast_opts.append("N/A")
+
+        # Battery dropdown must NOT include N/A (or placeholder dashes)
+        battery_opts = [
+            o for o in BATTERY_OPTIONS
+            if str(o).strip().lower() not in {"n/a", "na", "—", "-"}
+        ]
+
         return render_template(
             "quote_request.html",
             fuel_options=FUEL_OPTIONS,
-            mast_type_options=MAST_TYPE_OPTIONS,
+            mast_type_options=mast_opts,
             tire_options=TIRE_OPTIONS,
             yes_no_options=YES_NO_OPTIONS,
-            battery_options=BATTERY_OPTIONS,
+            battery_options=battery_opts,
             lease_type_options=LEASE_TYPE_OPTIONS,
         )
-
-    def _send_pdf(pdf_bytes: bytes, filename: str):
-        """
-        Desktop: attachment download.
-        Mobile/PWA fetch: inline so the OS viewer shows Share/Save controls.
-        """
-        if not pdf_bytes:
-            flash("PDF generation failed (empty PDF). Check server logs.", "error")
-            return _render_page()
-
-        is_fetch = (request.headers.get("X-Requested-With", "").lower() == "fetch")
-        accept = (request.headers.get("Accept", "") or "").lower()
-        wants_pdf = "application/pdf" in accept
-
-        # If JS fetch is requesting a PDF, return inline for best mobile behavior
-        as_attach = not (is_fetch and wants_pdf)
-
-        resp = send_file(
-            io.BytesIO(pdf_bytes),
-            mimetype="application/pdf",
-            as_attachment=as_attach,
-            download_name=filename,
-        )
-
-        # Ensure filename is present even for inline (helps iOS/Android)
-        resp.headers["Content-Disposition"] = (
-            f'inline; filename="{filename}"' if not as_attach else f'attachment; filename="{filename}"'
-        )
-
-        # Helps prevent weird caching behavior on iOS PWAs
-        resp.headers["Cache-Control"] = "no-store"
-
-        return resp
 
     # -----------------------------
     # GET: render the page
     # -----------------------------
     if request.method == "GET":
-        return _render_page()
+        return _render_with_lists()
 
     # -----------------------------
     # POST: handle the submitted form
@@ -3340,13 +3318,13 @@ def quote_request():
     form = request.form
     request_type = _s(form.get("request_type")).lower().replace(" ", "_")
 
-    # allow aliases so template changes don't break backend
+    # allow aliases so template changes don't break your backend
     if request_type in {"used", "used_equipment_request", "used_request"}:
         request_type = "used_equipment"
 
     if not request_type:
         flash("Missing request type. Please try again.", "error")
-        return _render_page()
+        return _render_with_lists()
 
     # -----------------------------
     # QUOTE REQUEST
@@ -3356,20 +3334,25 @@ def quote_request():
         address = _s(form.get("address"))
         city_state_zip = _s(form.get("city_state_zip"))
         contact_name = _s(form.get("contact_name"))
+
         model = _s(form.get("model"))
 
         # STRICT dropdown (do NOT allow N/A)
         fuel_type = _s(form.get("fuel_type"))
+
+        # Electric-only
         battery_voltage = _s(form.get("battery_voltage"))
 
+        # Mast + attachment
         mast_ohl_mfh = _s(form.get("mast_ohl_mfh"))
 
-        # STRICT dropdown (do NOT allow N/A)
+        # Mast Type: REQUIRED, but NOW allowed to be "N/A"
         mast_type = _s(form.get("mast_type"))
+        mast_type_is_na = (mast_type or "").strip().lower() in {"n/a", "na"}
 
         attachment = _s(form.get("attachment"))
 
-        # Dropdowns where you want N/A allowed
+        # These are dropdowns where you want N/A allowed
         aux_valve = _choice(form.get("aux_valve"))
         aux_hose = _choice(form.get("aux_hose"))
 
@@ -3377,31 +3360,27 @@ def quote_request():
         fork_length = _s(form.get("fork_length"))
 
         tires = _choice(form.get("tires"))
-
         seat_suspension = _choice(form.get("seat_suspension"))
         headlights = _choice(form.get("headlights"))
         back_up_alarm = _choice(form.get("back_up_alarm"))
         strobe = _choice(form.get("strobe"))
-
         rear_work_light = _choice(form.get("rear_work_light"))
         blue_light_front = _choice(form.get("blue_light_front"))
         blue_light_rear = _choice(form.get("blue_light_rear"))
         red_curtain_lights = _choice(form.get("red_curtain_lights"))
 
-        # Battery dropdown: validated specially for Electric below
+        # Battery dropdown: must not be N/A (and your list is filtered on GET)
         battery = _s(form.get("battery"))
-
         charger = _s(form.get("charger"))
-        local_options = _s(form.get("local_options"))
 
+        local_options = _s(form.get("local_options"))
         expected_delivery = _s(form.get("expected_delivery")) or "-"
 
-        # Lease Type is STRICT
+        # Lease
         lease_type = _s(form.get("lease_type"))
         annual_hours = _s(form.get("annual_hours"))
         lease_term = _s(form.get("lease_term"))
 
-        # Cash: ignore these fields
         if (lease_type or "").strip().lower() == "cash":
             annual_hours = ""
             lease_term = ""
@@ -3411,55 +3390,73 @@ def quote_request():
 
         errors = []
 
+        # Required text fields (dynamic based on Mast Type)
         required_text_fields = [
             ("Customer Name", customer_name),
             ("Address", address),
             ("City / State / Zip", city_state_zip),
             ("Contact Name", contact_name),
             ("Model", model),
-            ("Mast OHL / MFH", mast_ohl_mfh),
             ("Attachment", attachment),
             ("Fork Type", fork_type),
             ("Fork Length", fork_length),
+            ("Local Options", local_options),
+            ("Notes", notes),
             ("Salesperson Name", salesperson_name),
         ]
+
+        # Mast OHL/MFH is required unless Mast Type is N/A
+        if not mast_type_is_na:
+            required_text_fields.append(("Mast OHL / MFH", mast_ohl_mfh))
+
         for label, value in required_text_fields:
             if not value:
                 errors.append(f"{label} is required.")
 
+        # Strict required dropdowns (do NOT allow N/A)
         if _is_missing_strict(fuel_type):
             errors.append("Fuel is required.")
-        if _is_missing_strict(mast_type):
+
+        # Mast Type is required, but N/A IS allowed now
+        if not mast_type:
             errors.append("Mast Type is required.")
+
         if _is_missing_strict(lease_type):
             errors.append("Lease Type is required.")
 
-        # Electric-specific validation
-        if fuel_type == "Electric":
+        # If Mast Type is N/A, force dependent mast/aux fields to N/A (server-side safety)
+        if mast_type_is_na:
+            mast_ohl_mfh = "N/A"
+            aux_valve = "N/A"
+            aux_hose = "N/A"
+
+        # Electric-specific validation + non-electric behavior
+        is_electric = (fuel_type or "").strip().lower() == "electric"
+
+        if is_electric:
             if not battery_voltage:
                 errors.append("Battery voltage is required for Electric trucks.")
-            if not battery or battery.lower() in {"n/a", "na", "none", ""}:
+            if not battery or battery.strip().lower() in {"none", ""}:
                 errors.append("Battery type is required for Electric trucks.")
             charger = "Standard"
         else:
-            if not battery:
-                battery = "None"
-            if not battery_voltage:
-                battery_voltage = "N/A"
-            if not charger:
-                charger = "None"
+            # Requirement: if LPG / Dual Fuel / Diesel selected -> Battery + Charger ignored
+            # (Also covers any non-electric fuel safely)
+            battery_voltage = "N/A"
+            battery = "None"
+            charger = "None"
 
-        # If aux valve selected but hose is N/A, mirror it
-        if aux_valve and aux_valve != "N/A" and (aux_hose in {"", "N/A"}):
+        # If aux valve selected but hose is N/A, mirror it (only if mast type is NOT N/A)
+        if not mast_type_is_na and aux_valve and aux_valve != "N/A" and (aux_hose in {"", "N/A"}):
             aux_hose = aux_valve
 
         if errors:
             for e in errors:
                 flash(e, "error")
-            return _render_page()
+            return _render_with_lists()
 
         fuel_voltage = fuel_type
-        if battery_voltage and battery_voltage != "N/A":
+        if battery_voltage and battery_voltage != "N/A" and is_electric:
             fuel_voltage = f"{fuel_type} / {battery_voltage}"
 
         form_data = {
@@ -3497,11 +3494,19 @@ def quote_request():
         }
 
         pdf_bytes = build_request_pdf(form_data, "quote")
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return _render_with_lists()
 
         safe_customer = (customer_name or "customer").replace(" ", "_")
         filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
-        return _send_pdf(pdf_bytes, filename)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
 
     # -----------------------------
     # DEMO / RENTAL
@@ -3515,14 +3520,12 @@ def quote_request():
         bill_to_address = _s(form.get("bill_to_address"))
 
         cartage = _choice(form.get("cartage"))
-
         company_phone_fax = _s(form.get("company_phone_fax"))
         po_number = _s(form.get("po_number"))
         quantity = _s(form.get("quantity"))
         description_model = _s(form.get("description_model"))
 
         rate = _choice(form.get("rate"))
-
         freight_charges = _s(form.get("freight_charges"))
 
         fork_length = _s(form.get("fork_length"))
@@ -3572,7 +3575,7 @@ def quote_request():
         if errors:
             for e in errors:
                 flash(e, "error")
-            return _render_page()
+            return _render_with_lists()
 
         form_data = {
             "ordered_by": ordered_by,
@@ -3606,10 +3609,19 @@ def quote_request():
         }
 
         pdf_bytes = build_request_pdf(form_data, request_type)
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return _render_with_lists()
+
         safe_company = (company_name or "company").replace(" ", "_")
         filename = f"heli_{request_type}_request_{safe_company}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
-        return _send_pdf(pdf_bytes, filename)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
 
     # -----------------------------
     # USED EQUIPMENT
@@ -3619,9 +3631,11 @@ def quote_request():
         address = _s(form.get("address"))
         city_state_zip = _s(form.get("city_state_zip"))
         contact_name = _s(form.get("contact_name"))
+
         model = _s(form.get("model"))
 
         fuel_type = _s(form.get("fuel_type"))  # STRICT dropdown
+
         battery_voltage = _s(form.get("battery_voltage"))
         line_voltage = _s(form.get("line_voltage"))
 
@@ -3650,6 +3664,7 @@ def quote_request():
             errors.append("Contact Name is required.")
         if not model:
             errors.append("Model is required.")
+
         if _is_missing_strict(fuel_type):
             errors.append("Fuel Type is required.")
         if not mast_height:
@@ -3684,7 +3699,7 @@ def quote_request():
         if errors:
             for e in errors:
                 flash(e, "error")
-            return _render_page()
+            return _render_with_lists()
 
         form_data = {
             "customer_name": customer_name,
@@ -3710,13 +3725,22 @@ def quote_request():
         }
 
         pdf_bytes = build_request_pdf(form_data, "used")
+        if not pdf_bytes:
+            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+            return _render_with_lists()
+
         safe_customer = (customer_name or "customer").replace(" ", "_")
         filename = f"used_equipment_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
-        return _send_pdf(pdf_bytes, filename)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
 
     flash("Unknown request type submitted. Please try again.", "error")
-    return _render_page()
+    return _render_with_lists()
 
 @app.get("/api/competitor_peers")
 def api_competitor_peers():
