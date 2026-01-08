@@ -8,6 +8,32 @@
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='qrbrand2_forms_v3_used') }}">
+
+    <!-- =========================================================
+         SINGLE DROPDOWN ARROW FIX (prevents "double arrows")
+         - Removes native select arrow + overrides any CSS arrows
+         - Adds one consistent SVG arrow
+       ========================================================= -->
+    <style>
+        .quote-request-page select.qr-select{
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+
+            /* One arrow only (overrides any prior background arrows) */
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24'%3E%3Cpath fill='%236b6b6b' d='M7 10l5 5l5-5z'/%3E%3C/svg%3E") !important;
+            background-repeat: no-repeat !important;
+            background-position: right 14px center !important;
+            background-size: 14px 14px !important;
+
+            padding-right: 44px !important;
+        }
+
+        /* Old IE/Edge legacy */
+        .quote-request-page select.qr-select::-ms-expand{
+            display:none;
+        }
+    </style>
 </head>
 
 <body class="quote-request-page">
@@ -74,7 +100,7 @@
             </div>
 
             <!-- ========================= -->
-            <!-- QUOTE REQUEST (EXISTING)  -->
+            <!-- QUOTE REQUEST             -->
             <!-- ========================= -->
             <div id="form_wrap_quote" class="request-form-wrap">
                 <form id="quoteRequestForm"
@@ -136,7 +162,7 @@
                             <input type="text" id="battery_voltage" name="battery_voltage" class="qr-input" />
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="mast_ohl_mfh_group">
                             <label for="mast_ohl_mfh">Mast OHL / MFH</label>
                             <div class="qr-hint">Enter lowered and maximum fork height</div>
                             <input type="text" id="mast_ohl_mfh" name="mast_ohl_mfh" class="qr-input" required />
@@ -147,8 +173,13 @@
                             <div class="qr-hint">Simplex, Duplex, Triplex, or Quad</div>
                             <select id="mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <!-- #2 Add N/A -->
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% set opt = option|string %}
+                                    {% if opt|trim|lower not in ['n/a', 'na', '-', '—'] %}
+                                        <option value="{{ opt }}">{{ opt }}</option>
+                                    {% endif %}
                                 {% endfor %}
                             </select>
                         </div>
@@ -159,7 +190,7 @@
                             <input type="text" id="attachment" name="attachment" class="qr-input" required />
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="aux_valve_group">
                             <label for="aux_valve">Auxiliary Control Valve</label>
                             <select id="aux_valve" name="aux_valve" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
@@ -169,7 +200,7 @@
                             </select>
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="aux_hose_group">
                             <label for="aux_hose">Auxiliary Hose Take Up</label>
                             <select id="aux_hose" name="aux_hose" class="qr-select" required>
                                 <option value="" disabled selected>Select</option>
@@ -288,18 +319,22 @@
                             </select>
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="battery_group">
                             <label for="battery">Battery</label>
                             <div class="qr-hint">Lithium, Lead Acid, None, etc.</div>
                             <select id="battery" name="battery" class="qr-select" required>
                                 <option value="" disabled selected>Select battery</option>
                                 {% for option in battery_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% set opt = option|string %}
+                                    <!-- #4 Remove N/A and dash-like options -->
+                                    {% if opt|trim|lower not in ['n/a', 'na', '-', '—'] %}
+                                        <option value="{{ opt }}">{{ opt }}</option>
+                                    {% endif %}
                                 {% endfor %}
                             </select>
                         </div>
 
-                        <div class="qr-group">
+                        <div class="qr-group" id="charger_group">
                             <label for="charger">Charger</label>
                             <div class="qr-hint">Standard if the truck is electric; otherwise type "None"</div>
                             <input type="text" id="charger" name="charger" class="qr-input" required />
@@ -362,7 +397,7 @@
             </div>
 
             <!-- ========================= -->
-            <!-- DEMO REQUEST (UPDATED)    -->
+            <!-- DEMO REQUEST              -->
             <!-- ========================= -->
             <div id="form_wrap_demo" class="request-form-wrap" style="display:none;">
                 <form id="demoRequestForm"
@@ -419,7 +454,8 @@
                         <div class="qr-group">
                             <label for="demo_cartage">Cartage</label>
                             <select id="demo_cartage" name="cartage" class="qr-select">
-                                <option value="" selected>—</option>
+                                <!-- #6 remove dash; use N/A -->
+                                <option value="N/A" selected>N/A</option>
                                 <option value="Dock">Dock</option>
                                 <option value="Ground">Ground</option>
                             </select>
@@ -438,7 +474,8 @@
                         <div class="qr-group">
                             <label for="demo_rate">Rate</label>
                             <select id="demo_rate" name="rate" class="qr-select">
-                                <option value="" selected>—</option>
+                                <!-- #6 remove dash; use N/A -->
+                                <option value="N/A" selected>N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
@@ -459,7 +496,7 @@
                         <div class="qr-group" id="demo_lbr_group">
                             <label for="demo_lbr">LBR</label>
                             <select id="demo_lbr" name="lbr" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -469,7 +506,7 @@
                         <div class="qr-group">
                             <label for="demo_side_shifter">Side Shifter</label>
                             <select id="demo_side_shifter" name="side_shifter" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -479,7 +516,7 @@
                         <div class="qr-group">
                             <label for="demo_backup_alarm">Back-up Alarm</label>
                             <select id="demo_backup_alarm" name="backup_alarm" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -489,7 +526,7 @@
                         <div class="qr-group">
                             <label for="demo_work_lights">Work Lights</label>
                             <select id="demo_work_lights" name="headlights" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -499,7 +536,7 @@
                         <div class="qr-group">
                             <label for="demo_tires">Tires</label>
                             <select id="demo_tires" name="tires" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -509,7 +546,7 @@
                         <div class="qr-group">
                             <label for="demo_power_type">LP or Gas / Electric</label>
                             <select id="demo_power_type" name="power_type" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 <option value="LP or Gas">LP or Gas</option>
                                 <option value="Electric">Electric</option>
                             </select>
@@ -518,7 +555,7 @@
                         <div class="qr-group" id="demo_need_lp_tank_group">
                             <label for="demo_need_lp_tank">Need LP Tank</label>
                             <select id="demo_need_lp_tank" name="need_lp_tank" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -534,8 +571,13 @@
                             <label for="demo_mast_type">Mast Type</label>
                             <select id="demo_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <!-- #2 Add N/A -->
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% set opt = option|string %}
+                                    {% if opt|trim|lower not in ['n/a', 'na', '-', '—'] %}
+                                        <option value="{{ opt }}">{{ opt }}</option>
+                                    {% endif %}
                                 {% endfor %}
                             </select>
                         </div>
@@ -550,7 +592,7 @@
                                 <div class="qr-group">
                                     <label for="demo_need_charger">Need Charger</label>
                                     <select id="demo_need_charger" name="need_charger" class="qr-select">
-                                        <option value="" selected>—</option>
+                                        <option value="N/A" selected>N/A</option>
                                         {% for option in yes_no_options %}
                                             <option value="{{ option }}">{{ option }}</option>
                                         {% endfor %}
@@ -584,7 +626,7 @@
             </div>
 
             <!-- ========================= -->
-            <!-- RENTAL REQUEST (UPDATED)  -->
+            <!-- RENTAL REQUEST            -->
             <!-- ========================= -->
             <div id="form_wrap_rental" class="request-form-wrap" style="display:none;">
                 <form id="rentalRequestForm"
@@ -631,7 +673,7 @@
                         <div class="qr-group">
                             <label for="rental_cartage">Cartage</label>
                             <select id="rental_cartage" name="cartage" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 <option value="Dock">Dock</option>
                                 <option value="Ground">Ground</option>
                             </select>
@@ -660,7 +702,7 @@
                         <div class="qr-group">
                             <label for="rental_rate">Rate</label>
                             <select id="rental_rate" name="rate" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
@@ -681,7 +723,7 @@
                         <div class="qr-group" id="rental_lbr_group">
                             <label for="rental_lbr">LBR</label>
                             <select id="rental_lbr" name="lbr" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -691,7 +733,7 @@
                         <div class="qr-group">
                             <label for="rental_side_shifter">Side Shifter</label>
                             <select id="rental_side_shifter" name="side_shifter" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -701,7 +743,7 @@
                         <div class="qr-group">
                             <label for="rental_backup_alarm">Back-up Alarm</label>
                             <select id="rental_backup_alarm" name="backup_alarm" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -711,7 +753,7 @@
                         <div class="qr-group">
                             <label for="rental_work_lights">Work Lights</label>
                             <select id="rental_work_lights" name="headlights" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -721,7 +763,7 @@
                         <div class="qr-group">
                             <label for="rental_tires">Tires</label>
                             <select id="rental_tires" name="tires" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in tire_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -731,7 +773,7 @@
                         <div class="qr-group">
                             <label for="rental_power_type">LP or Gas / Electric</label>
                             <select id="rental_power_type" name="power_type" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 <option value="LP or Gas">LP or Gas</option>
                                 <option value="Electric">Electric</option>
                             </select>
@@ -740,7 +782,7 @@
                         <div class="qr-group" id="rental_need_lp_tank_group">
                             <label for="rental_need_lp_tank">Need LP Tank</label>
                             <select id="rental_need_lp_tank" name="need_lp_tank" class="qr-select">
-                                <option value="" selected>—</option>
+                                <option value="N/A" selected>N/A</option>
                                 {% for option in yes_no_options %}
                                     <option value="{{ option }}">{{ option }}</option>
                                 {% endfor %}
@@ -756,8 +798,13 @@
                             <label for="rental_mast_type">Mast Type</label>
                             <select id="rental_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <!-- #2 Add N/A -->
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% set opt = option|string %}
+                                    {% if opt|trim|lower not in ['n/a', 'na', '-', '—'] %}
+                                        <option value="{{ opt }}">{{ opt }}</option>
+                                    {% endif %}
                                 {% endfor %}
                             </select>
                         </div>
@@ -772,7 +819,7 @@
                                 <div class="qr-group">
                                     <label for="rental_need_charger">Need Charger</label>
                                     <select id="rental_need_charger" name="need_charger" class="qr-select">
-                                        <option value="" selected>—</option>
+                                        <option value="N/A" selected>N/A</option>
                                         {% for option in yes_no_options %}
                                             <option value="{{ option }}">{{ option }}</option>
                                         {% endfor %}
@@ -806,7 +853,7 @@
             </div>
 
             <!-- ========================= -->
-            <!-- USED EQUIPMENT (FIXED)    -->
+            <!-- USED EQUIPMENT            -->
             <!-- ========================= -->
             <div id="form_wrap_used" class="request-form-wrap" style="display:none;">
                 <form id="usedRequestForm"
@@ -861,7 +908,8 @@
                         <div class="qr-group" id="used_voltage_group" style="display:none;">
                             <label for="used_voltage">Electric Voltage</label>
                             <select id="used_voltage" name="battery_voltage" class="qr-select">
-                                <option value="" selected>—</option>
+                                <!-- #6 remove dash; use N/A -->
+                                <option value="N/A" selected>N/A</option>
                                 <option value="12V">12V</option>
                                 <option value="24V">24V</option>
                                 <option value="36V">36V</option>
@@ -884,8 +932,13 @@
                             <label for="used_mast_type">Mast Type</label>
                             <select id="used_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
+                                <!-- #2 Add N/A -->
+                                <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
-                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% set opt = option|string %}
+                                    {% if opt|trim|lower not in ['n/a', 'na', '-', '—'] %}
+                                        <option value="{{ opt }}">{{ opt }}</option>
+                                    {% endif %}
                                 {% endfor %}
                             </select>
                         </div>
@@ -942,583 +995,578 @@
                 </form>
             </div>
 
-<script>
-    // ==========================================================
-    // A) Field highlighting + "don't wipe" behavior
-    //    - Client-side validation (highlights missed fields)
-    //    - Session autosave (keeps data even if page refreshes)
-    // ==========================================================
-
-    function isVisible(el) {
-        if (!el) return false;
-        // Hidden by display:none anywhere up the tree
-        if (el.offsetParent === null) return false;
-        // Hidden by type=hidden or disabled
-        if (el.type === "hidden" || el.disabled) return false;
-        return true;
-    }
-
-    function groupFor(el) {
-        if (!el) return null;
-        return el.closest(".qr-group") || null;
-    }
-
-    function clearFieldError(el) {
-        if (!el) return;
-        el.classList.remove("qr-invalid");
-        el.removeAttribute("aria-invalid");
-        const g = groupFor(el);
-        if (!g) return;
-        g.classList.remove("qr-group-invalid");
-        const msg = g.querySelector(".qr-error-msg");
-        if (msg) msg.remove();
-    }
-
-    function setFieldError(el, message) {
-        if (!el) return;
-        el.classList.add("qr-invalid");
-        el.setAttribute("aria-invalid", "true");
-        const g = groupFor(el);
-        if (g) {
-            g.classList.add("qr-group-invalid");
-            // Add message only once
-            if (!g.querySelector(".qr-error-msg")) {
-                const div = document.createElement("div");
-                div.className = "qr-error-msg";
-                div.textContent = message || "This field is required.";
-                g.appendChild(div);
-            }
-        }
-    }
-
-    function clearFormErrors(form) {
-        if (!form) return;
-        const fields = form.querySelectorAll("input, select, textarea");
-        fields.forEach(clearFieldError);
-    }
-
-    function isEmptyValue(el) {
-        if (!el) return true;
-        if (el.tagName === "SELECT") {
-            const v = (el.value || "").trim();
-            return v === "";
-        }
-        return ((el.value || "").trim() === "");
-    }
-
-    function validateForm(form) {
-        if (!form) return true;
-
-        clearFormErrors(form);
-
-        const requiredFields = Array.from(form.querySelectorAll("input[required], select[required], textarea[required]"))
-            .filter(isVisible);
-
-        const invalid = [];
-
-        requiredFields.forEach(el => {
-            // ignore hidden electric blocks etc (handled by isVisible + required toggles you already do)
-            if (isEmptyValue(el)) {
-                invalid.push(el);
-                setFieldError(el, "Required");
-            }
-        });
-
-        if (invalid.length) {
-            const first = invalid[0];
-            // Scroll into view and focus
-            try {
-                first.scrollIntoView({ behavior: "smooth", block: "center" });
-            } catch (e) {}
-            setTimeout(() => {
-                try { first.focus({ preventScroll: true }); } catch (e) {}
-            }, 250);
-            return false;
-        }
-
-        return true;
-    }
-
-    function storageKeyForForm(form) {
-        const t = (form?.dataset?.requestType || "").trim() || "unknown";
-        return `qr_draft_${t}`;
-    }
-
-    function saveDraft(form) {
-        try {
-            const key = storageKeyForForm(form);
-            const data = {};
-            const els = form.querySelectorAll("input, select, textarea");
-            els.forEach(el => {
-                if (!el.name) return;
-                if (el.type === "password" || el.type === "file") return;
-                if (el.type === "checkbox") data[el.name] = !!el.checked;
-                else if (el.type === "radio") {
-                    if (el.checked) data[el.name] = el.value;
-                } else {
-                    data[el.name] = el.value;
-                }
-            });
-            sessionStorage.setItem(key, JSON.stringify(data));
-        } catch (e) {
-            // ignore storage errors
-        }
-    }
-
-    function restoreDraft(form) {
-        try {
-            const key = storageKeyForForm(form);
-            const raw = sessionStorage.getItem(key);
-            if (!raw) return;
-            const data = JSON.parse(raw);
-            const els = form.querySelectorAll("input, select, textarea");
-            els.forEach(el => {
-                if (!el.name) return;
-                if (!(el.name in data)) return;
-
-                if (el.type === "checkbox") {
-                    el.checked = !!data[el.name];
-                } else if (el.type === "radio") {
-                    el.checked = (data[el.name] === el.value);
-                } else {
-                    // only set if currently empty (prevents clobbering)
-                    if ((el.value || "") === "") el.value = data[el.name];
-                }
-            });
-        } catch (e) {
-            // ignore
-        }
-    }
-
-    function clearDraft(form) {
-        try {
-            sessionStorage.removeItem(storageKeyForForm(form));
-        } catch (e) {}
-    }
-
-    function wireAutosave(form) {
-        if (!form) return;
-
-        // Restore on load
-        restoreDraft(form);
-
-        // Save on every change/input
-        const handler = () => saveDraft(form);
-        form.addEventListener("input", handler);
-        form.addEventListener("change", handler);
-
-        // As user fixes fields, remove red highlight immediately
-        form.addEventListener("input", (e) => {
-            if (!e.target) return;
-            clearFieldError(e.target);
-        });
-        form.addEventListener("change", (e) => {
-            if (!e.target) return;
-            clearFieldError(e.target);
-        });
-    }
-
-    // Wire autosave for all forms
-    const allForms = document.querySelectorAll("form.quote-request-form");
-    allForms.forEach(wireAutosave);
-
-    // Desktop behavior: prevent submit if missing required
-    // (keeps user on page with highlights, no wipe)
-    allForms.forEach((form) => {
-        form.addEventListener("submit", (e) => {
-            // If mobile fetch handler is active, it will also run; validation should block both
-            if (!validateForm(form)) {
-                e.preventDefault();
-                e.stopPropagation();
-                return false;
-            }
-        }, true);
-    });
-
-    // -----------------------------
-    // 1) Switch between forms
-    // -----------------------------
-    const requestTypeSelect = document.getElementById("request_type_select");
-    const wrapQuote  = document.getElementById("form_wrap_quote");
-    const wrapDemo   = document.getElementById("form_wrap_demo");
-    const wrapRental = document.getElementById("form_wrap_rental");
-    const wrapUsed   = document.getElementById("form_wrap_used");
-
-    const pageTitle = document.getElementById("pageTitle");
-    const pageSubtitle = document.getElementById("pageSubtitle");
-
-    function setActiveForm(type) {
-        wrapQuote.style.display  = "none";
-        wrapDemo.style.display   = "none";
-        wrapRental.style.display = "none";
-        wrapUsed.style.display   = "none";
-
-        if (type === "demo") {
-            wrapDemo.style.display = "block";
-            pageTitle.textContent = "HELI Demo Request";
-            pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
-            restoreDraft(document.getElementById("demoRequestForm"));
-        } else if (type === "rental") {
-            wrapRental.style.display = "block";
-            pageTitle.textContent = "HELI Rental Request";
-            pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
-            restoreDraft(document.getElementById("rentalRequestForm"));
-        } else if (type === "used") {
-            wrapUsed.style.display = "block";
-            pageTitle.textContent = "Used Equipment Request";
-            pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
-            restoreDraft(document.getElementById("usedRequestForm"));
-        } else {
-            wrapQuote.style.display = "block";
-            pageTitle.textContent = "HELI Quote Request";
-            pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
-            restoreDraft(document.getElementById("quoteRequestForm"));
-        }
-    }
-
-    if (requestTypeSelect) {
-        requestTypeSelect.addEventListener("change", () => setActiveForm(requestTypeSelect.value));
-        setActiveForm(requestTypeSelect.value);
-    }
-
-    if (requestTypeSelect) {
-    requestTypeSelect.addEventListener("change", () => setActiveForm(requestTypeSelect.value));
-    setActiveForm(requestTypeSelect.value);
-}
-
-// -----------------------------
-// 1.5) Add "N/A" option to dropdowns (client-side)
-//     - Adds N/A to every <select> in all forms
-//     - EXCEPT lease type selects + request type select
-//     - Also excludes fuel + mast type selects (keeps your electric/mast logic clean)
-// -----------------------------
-(function addNAtoDropdowns() {
-    const EXCLUDE_IDS = new Set([
-        // Request type selector (top)
-        "request_type_select",
-
-        // Lease types (we dealt with these earlier)
-        "lease_type",
-        "used_lease_type",
-
-        // Fuel selects (keep electric logic clean)
-        "fuel_type",
-        "used_fuel_type",
-
-        // Mast type selects (generally should be real, not N/A)
-        "mast_type",
-        "demo_mast_type",
-        "rental_mast_type",
-        "used_mast_type",
-    ]);
-
-    function ensureNA(selectEl) {
-        if (!selectEl || selectEl.tagName !== "SELECT") return;
-        if (EXCLUDE_IDS.has(selectEl.id)) return;
-
-        // already has N/A?
-        const hasNA = Array.from(selectEl.options).some(
-            o => (o.value || "").trim().toLowerCase() === "n/a" || (o.text || "").trim().toLowerCase() === "n/a"
-        );
-        if (hasNA) return;
-
-        const opt = document.createElement("option");
-        opt.value = "N/A";
-        opt.textContent = "N/A";
-
-        // If the first option is a disabled placeholder, insert right after it
-        const first = selectEl.options[0];
-        if (first && first.disabled) {
-            // insert after placeholder
-            if (selectEl.options.length > 1) {
-                selectEl.insertBefore(opt, selectEl.options[1]);
-            } else {
-                selectEl.appendChild(opt);
-            }
-        } else {
-            // otherwise just append at top
-            selectEl.insertBefore(opt, selectEl.options[0] || null);
-        }
-    }
-
-    // Add N/A to all dropdowns inside all request forms
-    const selects = document.querySelectorAll("form.quote-request-form select");
-    selects.forEach(ensureNA);
-})();
-    
-    // -----------------------------
-    // 2) Quote Fuel -> Battery Voltage requirement
-    // -----------------------------
-    const fuelSelect = document.getElementById('fuel_type');
-    const voltageGroup = document.getElementById('battery_voltage_group');
-    const voltageInput = document.getElementById('battery_voltage');
-
-    function updateVoltageVisibility() {
-        if (!fuelSelect || !voltageGroup || !voltageInput) return;
-        const isElectric = fuelSelect.value === 'Electric';
-        if (isElectric) {
-            voltageGroup.style.display = 'block';
-            voltageInput.setAttribute('required', 'required');
-        } else {
-            voltageGroup.style.display = 'none';
-            voltageInput.removeAttribute('required');
-            voltageInput.value = '';
-            clearFieldError(voltageInput);
-        }
-    }
-
-    if (fuelSelect) {
-        updateVoltageVisibility();
-        fuelSelect.addEventListener('change', updateVoltageVisibility);
-    }
-
-    // -----------------------------
-    // 3) Demo/Rental power type behavior
-    // -----------------------------
-    function wirePowerTypeBehavior(selectId, electricBlockId, lpGroupId) {
-        const sel = document.getElementById(selectId);
-        const electricBlock = document.getElementById(electricBlockId);
-        const lpGroup = document.getElementById(lpGroupId);
-
-        if (!sel) return;
-
-        function clearInputs(container) {
-            if (!container) return;
-            const inputs = container.querySelectorAll("input, select, textarea");
-            inputs.forEach(el => {
-                if (el.tagName === "SELECT") el.selectedIndex = 0;
-                else el.value = "";
-                clearFieldError(el);
-            });
-        }
-
-        function update() {
-            const isElectric = (sel.value || "").toLowerCase() === "electric";
-
-            if (electricBlock) {
-                electricBlock.style.display = isElectric ? "block" : "none";
-                if (!isElectric) clearInputs(electricBlock);
-            }
-
-            if (lpGroup) {
-                lpGroup.style.display = isElectric ? "none" : "block";
-                if (isElectric) clearInputs(lpGroup);
-            }
-        }
-
-        update();
-        sel.addEventListener("change", update);
-    }
-
-    wirePowerTypeBehavior("demo_power_type", "demo_electric_block", "demo_need_lp_tank_group");
-    wirePowerTypeBehavior("rental_power_type", "rental_electric_block", "rental_need_lp_tank_group");
-
-    // -----------------------------
-    // 4) Used Equipment fuel behavior
-    // -----------------------------
-    (function wireUsedElectric() {
-        const sel = document.getElementById("used_fuel_type");
-        const gVolt = document.getElementById("used_voltage_group");
-        const gLine = document.getElementById("used_line_voltage_group");
-        const iVolt = document.getElementById("used_voltage");
-        const iLine = document.getElementById("used_line_voltage");
-
-        if (!sel) return;
-
-        function update() {
-            const isElectric = (sel.value || "").trim().toLowerCase() === "electric";
-            if (gVolt) gVolt.style.display = isElectric ? "block" : "none";
-            if (gLine) gLine.style.display = isElectric ? "block" : "none";
-
-            if (iVolt) {
-                if (isElectric) iVolt.setAttribute("required", "required");
-                else {
-                    iVolt.removeAttribute("required");
-                    iVolt.selectedIndex = 0;
-                    clearFieldError(iVolt);
-                }
-            }
-            if (iLine) {
-                if (isElectric) iLine.setAttribute("required", "required");
-                else {
-                    iLine.removeAttribute("required");
-                    iLine.value = "";
-                    clearFieldError(iLine);
-                }
-            }
-        }
-
-        update();
-        sel.addEventListener("change", update);
-    })();
-
-    // -----------------------------
-    // 4.5) Cash behavior (Quote form)
-    // -----------------------------
-    (function wireCash() {
-        const leaseType = document.getElementById("lease_type");
-        const leaseTerm = document.getElementById("lease_term");
-        const annualHours = document.getElementById("annual_hours");
-
-        if (!leaseType || !leaseTerm || !annualHours) return;
-
-        const leaseTermGroup = leaseTerm.closest(".qr-group");
-        const annualHoursGroup = annualHours.closest(".qr-group");
-
-        function update() {
-            const isCash = (leaseType.value || "").toLowerCase() === "cash";
-
-            if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
-            if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
-
-            if (isCash) {
-                leaseTerm.removeAttribute("required");
-                annualHours.removeAttribute("required");
-                leaseTerm.value = "";
-                annualHours.value = "";
-                clearFieldError(leaseTerm);
-                clearFieldError(annualHours);
-            } else {
-                leaseTerm.setAttribute("required", "required");
-                annualHours.setAttribute("required", "required");
-            }
-        }
-
-        update();
-        leaseType.addEventListener("change", update);
-    })();
-
-    // -----------------------------
-    // 4B) Used Equipment Cash behavior
-    // -----------------------------
-    (function wireUsedLeaseCash() {
-        const leaseType = document.getElementById("used_lease_type");
-        const leaseTerm = document.getElementById("used_lease_term");
-        const annualHours = document.getElementById("used_annual_hours");
-
-        if (!leaseType || !leaseTerm || !annualHours) return;
-
-        const leaseTermGroup = document.getElementById("used_lease_term_group") || leaseTerm.closest(".qr-group");
-        const annualHoursGroup = document.getElementById("used_annual_hours_group") || annualHours.closest(".qr-group");
-
-        function update() {
-            const isCash = (leaseType.value || "").trim().toLowerCase() === "cash";
-
-            if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
-            if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
-
-            if (isCash) {
-                leaseTerm.removeAttribute("required");
-                annualHours.removeAttribute("required");
-                leaseTerm.value = "";
-                annualHours.value = "";
-                clearFieldError(leaseTerm);
-                clearFieldError(annualHours);
-            } else {
-                leaseTerm.setAttribute("required", "required");
-                annualHours.setAttribute("required", "required");
-            }
-        }
-
-        update();
-        leaseType.addEventListener("change", update);
-    })();
-
-    // -----------------------------
-    // 5) Mobile Share/Save behavior (UPDATED)
-    //    - Validates first
-    //    - If server returns HTML, show a friendly message and render it
-    // -----------------------------
-    (function () {
-        const hint = document.getElementById("mobileSaveHint");
-        const ua = navigator.userAgent || "";
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(ua);
-
-        if (!isMobile) {
-            if (hint) hint.style.display = "none";
-            return;
-        }
-        if (hint) hint.style.display = "block";
-
-        const forms = document.querySelectorAll("form.quote-request-form");
-        forms.forEach((form) => {
-            form.addEventListener("submit", async (e) => {
-                // If invalid, block submit and keep data (no wipe)
-                if (!validateForm(form)) {
-                    e.preventDefault();
-                    return;
+            <script>
+                // ==========================================================
+                // A) Field highlighting + "don't wipe" behavior
+                // ==========================================================
+
+                function isVisible(el) {
+                    if (!el) return false;
+                    if (el.offsetParent === null) return false;
+                    if (el.type === "hidden" || el.disabled) return false;
+                    return true;
                 }
 
-                e.preventDefault();
-
-                const btn = form.querySelector("button[type='submit']");
-                const originalText = btn ? btn.textContent : "Generating PDF...";
-                if (btn) {
-                    btn.disabled = true;
-                    btn.textContent = "Generating PDF...";
+                function groupFor(el) {
+                    if (!el) return null;
+                    return el.closest(".qr-group") || null;
                 }
 
-                try {
-                    const formData = new FormData(form);
+                function clearFieldError(el) {
+                    if (!el) return;
+                    el.classList.remove("qr-invalid");
+                    el.removeAttribute("aria-invalid");
+                    const g = groupFor(el);
+                    if (!g) return;
+                    g.classList.remove("qr-group-invalid");
+                    const msg = g.querySelector(".qr-error-msg");
+                    if (msg) msg.remove();
+                }
 
-                    const res = await fetch(form.action, {
-                        method: "POST",
-                        body: formData,
-                        headers: {
-                            "X-Requested-With": "fetch",
-                            "Accept": "application/pdf"
+                function setFieldError(el, message) {
+                    if (!el) return;
+                    el.classList.add("qr-invalid");
+                    el.setAttribute("aria-invalid", "true");
+                    const g = groupFor(el);
+                    if (g) {
+                        g.classList.add("qr-group-invalid");
+                        if (!g.querySelector(".qr-error-msg")) {
+                            const div = document.createElement("div");
+                            div.className = "qr-error-msg";
+                            div.textContent = message || "This field is required.";
+                            g.appendChild(div);
+                        }
+                    }
+                }
+
+                function clearFormErrors(form) {
+                    if (!form) return;
+                    const fields = form.querySelectorAll("input, select, textarea");
+                    fields.forEach(clearFieldError);
+                }
+
+                function isEmptyValue(el) {
+                    if (!el) return true;
+                    if (el.tagName === "SELECT") {
+                        const v = (el.value || "").trim();
+                        return v === "";
+                    }
+                    return ((el.value || "").trim() === "");
+                }
+
+                function validateForm(form) {
+                    if (!form) return true;
+
+                    clearFormErrors(form);
+
+                    const requiredFields = Array.from(
+                        form.querySelectorAll("input[required], select[required], textarea[required]")
+                    ).filter(isVisible);
+
+                    const invalid = [];
+
+                    requiredFields.forEach(el => {
+                        if (isEmptyValue(el)) {
+                            invalid.push(el);
+                            setFieldError(el, "Required");
                         }
                     });
 
-                    const contentType = (res.headers.get("content-type") || "").toLowerCase();
-
-                    // If not PDF, it usually means validation error or redirect -> HTML
-                    if (!res.ok || !contentType.includes("application/pdf")) {
-                        const html = await res.text().catch(() => "");
-                        // Render returned HTML so user sees server-side errors (instead of raw HTML alert)
-                        document.open();
-                        document.write(html);
-                        document.close();
-                        return;
+                    if (invalid.length) {
+                        const first = invalid[0];
+                        try { first.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {}
+                        setTimeout(() => { try { first.focus({ preventScroll: true }); } catch (e) {} }, 250);
+                        return false;
                     }
 
-                    const blob = await res.blob();
+                    return true;
+                }
 
-                    const dispo = res.headers.get("content-disposition") || "";
-                    const match = dispo.match(/filename="(.+?)"/);
-                    const defaultName = (form.dataset.requestType || "request") + "_request.pdf";
-                    const filename = match ? match[1] : defaultName;
+                function storageKeyForForm(form) {
+                    const t = (form?.dataset?.requestType || "").trim() || "unknown";
+                    return `qr_draft_${t}`;
+                }
 
-                    const file = new File([blob], filename, { type: "application/pdf" });
-
-                    // Success: clear draft + reset form (optional)
-                    clearDraft(form);
-
-                    if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
-                        await navigator.share({
-                            title: form.dataset.pdfTitle || "HELI Request",
-                            text: "Request PDF",
-                            files: [file],
+                function saveDraft(form) {
+                    try {
+                        const key = storageKeyForForm(form);
+                        const data = {};
+                        const els = form.querySelectorAll("input, select, textarea");
+                        els.forEach(el => {
+                            if (!el.name) return;
+                            if (el.type === "password" || el.type === "file") return;
+                            if (el.type === "checkbox") data[el.name] = !!el.checked;
+                            else if (el.type === "radio") {
+                                if (el.checked) data[el.name] = el.value;
+                            } else {
+                                data[el.name] = el.value;
+                            }
                         });
-                        return;
-                    }
+                        sessionStorage.setItem(key, JSON.stringify(data));
+                    } catch (e) {}
+                }
 
-                    const url = URL.createObjectURL(blob);
-                    window.open(url, "_blank");
-                    setTimeout(() => URL.revokeObjectURL(url), 30000);
+                function restoreDraft(form) {
+                    try {
+                        const key = storageKeyForForm(form);
+                        const raw = sessionStorage.getItem(key);
+                        if (!raw) return;
+                        const data = JSON.parse(raw);
+                        const els = form.querySelectorAll("input, select, textarea");
+                        els.forEach(el => {
+                            if (!el.name) return;
+                            if (!(el.name in data)) return;
 
-                } catch (err) {
-                    alert("Failed to generate/share the PDF. Please check required fields or try again.");
-                } finally {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = originalText;
+                            if (el.type === "checkbox") {
+                                el.checked = !!data[el.name];
+                            } else if (el.type === "radio") {
+                                el.checked = (data[el.name] === el.value);
+                            } else {
+                                if ((el.value || "") === "") el.value = data[el.name];
+                            }
+                        });
+                    } catch (e) {}
+                }
+
+                function clearDraft(form) {
+                    try { sessionStorage.removeItem(storageKeyForForm(form)); } catch (e) {}
+                }
+
+                function wireAutosave(form) {
+                    if (!form) return;
+
+                    restoreDraft(form);
+
+                    const handler = () => saveDraft(form);
+                    form.addEventListener("input", handler);
+                    form.addEventListener("change", handler);
+
+                    form.addEventListener("input", (e) => { if (e.target) clearFieldError(e.target); });
+                    form.addEventListener("change", (e) => { if (e.target) clearFieldError(e.target); });
+                }
+
+                const allForms = document.querySelectorAll("form.quote-request-form");
+                allForms.forEach(wireAutosave);
+
+                allForms.forEach((form) => {
+                    form.addEventListener("submit", (e) => {
+                        if (!validateForm(form)) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return false;
+                        }
+                    }, true);
+                });
+
+                // -----------------------------
+                // 1) Switch between forms
+                // -----------------------------
+                const requestTypeSelect = document.getElementById("request_type_select");
+                const wrapQuote  = document.getElementById("form_wrap_quote");
+                const wrapDemo   = document.getElementById("form_wrap_demo");
+                const wrapRental = document.getElementById("form_wrap_rental");
+                const wrapUsed   = document.getElementById("form_wrap_used");
+
+                const pageTitle = document.getElementById("pageTitle");
+                const pageSubtitle = document.getElementById("pageSubtitle");
+
+                function setActiveForm(type) {
+                    wrapQuote.style.display  = "none";
+                    wrapDemo.style.display   = "none";
+                    wrapRental.style.display = "none";
+                    wrapUsed.style.display   = "none";
+
+                    if (type === "demo") {
+                        wrapDemo.style.display = "block";
+                        pageTitle.textContent = "HELI Demo Request";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        restoreDraft(document.getElementById("demoRequestForm"));
+                    } else if (type === "rental") {
+                        wrapRental.style.display = "block";
+                        pageTitle.textContent = "HELI Rental Request";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        restoreDraft(document.getElementById("rentalRequestForm"));
+                    } else if (type === "used") {
+                        wrapUsed.style.display = "block";
+                        pageTitle.textContent = "Used Equipment Request";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        restoreDraft(document.getElementById("usedRequestForm"));
+                    } else {
+                        wrapQuote.style.display = "block";
+                        pageTitle.textContent = "HELI Quote Request";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        restoreDraft(document.getElementById("quoteRequestForm"));
                     }
                 }
-            }, true);
-        });
-    })();
-</script>
 
+                if (requestTypeSelect) {
+                    requestTypeSelect.addEventListener("change", () => setActiveForm(requestTypeSelect.value));
+                    setActiveForm(requestTypeSelect.value);
+                }
+
+                // -----------------------------
+                // 2) Quote Fuel -> Battery Voltage requirement
+                // -----------------------------
+                const fuelSelect = document.getElementById('fuel_type');
+                const voltageGroup = document.getElementById('battery_voltage_group');
+                const voltageInput = document.getElementById('battery_voltage');
+
+                // #3 Battery + Charger hide/show based on fuel
+                const batteryEl = document.getElementById("battery");
+                const chargerEl = document.getElementById("charger");
+                const batteryGroup = document.getElementById("battery_group") || (batteryEl ? batteryEl.closest(".qr-group") : null);
+                const chargerGroup = document.getElementById("charger_group") || (chargerEl ? chargerEl.closest(".qr-group") : null);
+
+                function clearSelectToPlaceholder(sel) {
+                    if (!sel) return;
+                    try { sel.selectedIndex = 0; } catch (e) { sel.value = ""; }
+                    clearFieldError(sel);
+                }
+
+                function hideGroupAndClear(groupEl) {
+                    if (!groupEl) return;
+                    groupEl.style.display = "none";
+                    const fields = groupEl.querySelectorAll("input, select, textarea");
+                    fields.forEach(el => {
+                        el.removeAttribute("required");
+                        if (el.tagName === "SELECT") clearSelectToPlaceholder(el);
+                        else el.value = "";
+                        clearFieldError(el);
+                    });
+                }
+
+                function showGroup(groupEl, requiredEls=[]) {
+                    if (!groupEl) return;
+                    groupEl.style.display = "";
+                    requiredEls.forEach(el => {
+                        if (el) el.setAttribute("required", "required");
+                    });
+                }
+
+                function updateVoltageVisibility() {
+                    if (!fuelSelect || !voltageGroup || !voltageInput) return;
+                    const isElectric = (fuelSelect.value || "").trim().toLowerCase() === "electric";
+                    if (isElectric) {
+                        voltageGroup.style.display = 'block';
+                        voltageInput.setAttribute('required', 'required');
+                    } else {
+                        voltageGroup.style.display = 'none';
+                        voltageInput.removeAttribute('required');
+                        voltageInput.value = '';
+                        clearFieldError(voltageInput);
+                    }
+                }
+
+                function updateBatteryChargerVisibility() {
+                    if (!fuelSelect) return;
+
+                    const v = (fuelSelect.value || "").trim().toLowerCase();
+                    const isElectric = (v === "electric");
+
+                    if (isElectric) {
+                        showGroup(batteryGroup, [batteryEl]);
+                        showGroup(chargerGroup, [chargerEl]);
+                    } else {
+                        // Hide for LPG / Dual Fuel / Diesel (and any non-electric)
+                        hideGroupAndClear(batteryGroup);
+                        hideGroupAndClear(chargerGroup);
+                    }
+                }
+
+                function updateQuoteFuelDependencies() {
+                    updateVoltageVisibility();
+                    updateBatteryChargerVisibility();
+                }
+
+                if (fuelSelect) {
+                    updateQuoteFuelDependencies();
+                    fuelSelect.addEventListener('change', updateQuoteFuelDependencies);
+                }
+
+                // -----------------------------
+                // 5) Mast Type == N/A -> hide aux + mast ohl/mfh
+                // -----------------------------
+                const mastTypeEl = document.getElementById("mast_type");
+                const mastOhlEl = document.getElementById("mast_ohl_mfh");
+                const mastOhlGroup = document.getElementById("mast_ohl_mfh_group") || (mastOhlEl ? mastOhlEl.closest(".qr-group") : null);
+
+                const auxValveEl = document.getElementById("aux_valve");
+                const auxValveGroup = document.getElementById("aux_valve_group") || (auxValveEl ? auxValveEl.closest(".qr-group") : null);
+
+                const auxHoseEl = document.getElementById("aux_hose");
+                const auxHoseGroup = document.getElementById("aux_hose_group") || (auxHoseEl ? auxHoseEl.closest(".qr-group") : null);
+
+                function updateMastDependencies() {
+                    if (!mastTypeEl) return;
+
+                    const v = (mastTypeEl.value || "").trim().toLowerCase();
+                    const isNA = (v === "n/a" || v === "na");
+
+                    if (isNA) {
+                        hideGroupAndClear(mastOhlGroup);
+                        hideGroupAndClear(auxValveGroup);
+                        hideGroupAndClear(auxHoseGroup);
+                    } else {
+                        showGroup(mastOhlGroup, [mastOhlEl]);
+                        showGroup(auxValveGroup, [auxValveEl]);
+                        showGroup(auxHoseGroup, [auxHoseEl]);
+                    }
+                }
+
+                if (mastTypeEl) {
+                    updateMastDependencies();
+                    mastTypeEl.addEventListener("change", updateMastDependencies);
+                }
+
+                // -----------------------------
+                // 3) Demo/Rental power type behavior
+                // -----------------------------
+                function wirePowerTypeBehavior(selectId, electricBlockId, lpGroupId) {
+                    const sel = document.getElementById(selectId);
+                    const electricBlock = document.getElementById(electricBlockId);
+                    const lpGroup = document.getElementById(lpGroupId);
+
+                    if (!sel) return;
+
+                    function clearInputs(container) {
+                        if (!container) return;
+                        const inputs = container.querySelectorAll("input, select, textarea");
+                        inputs.forEach(el => {
+                            if (el.tagName === "SELECT") {
+                                el.selectedIndex = 0;
+                            } else {
+                                el.value = "";
+                            }
+                            clearFieldError(el);
+                        });
+                    }
+
+                    function update() {
+                        const isElectric = (sel.value || "").toLowerCase() === "electric";
+
+                        if (electricBlock) {
+                            electricBlock.style.display = isElectric ? "block" : "none";
+                            if (!isElectric) clearInputs(electricBlock);
+                        }
+
+                        if (lpGroup) {
+                            lpGroup.style.display = isElectric ? "none" : "block";
+                            if (isElectric) clearInputs(lpGroup);
+                        }
+                    }
+
+                    update();
+                    sel.addEventListener("change", update);
+                }
+
+                wirePowerTypeBehavior("demo_power_type", "demo_electric_block", "demo_need_lp_tank_group");
+                wirePowerTypeBehavior("rental_power_type", "rental_electric_block", "rental_need_lp_tank_group");
+
+                // -----------------------------
+                // 4) Used Equipment fuel behavior
+                // -----------------------------
+                (function wireUsedElectric() {
+                    const sel = document.getElementById("used_fuel_type");
+                    const gVolt = document.getElementById("used_voltage_group");
+                    const gLine = document.getElementById("used_line_voltage_group");
+                    const iVolt = document.getElementById("used_voltage");
+                    const iLine = document.getElementById("used_line_voltage");
+
+                    if (!sel) return;
+
+                    function update() {
+                        const isElectric = (sel.value || "").trim().toLowerCase() === "electric";
+                        if (gVolt) gVolt.style.display = isElectric ? "block" : "none";
+                        if (gLine) gLine.style.display = isElectric ? "block" : "none";
+
+                        if (iVolt) {
+                            if (isElectric) iVolt.setAttribute("required", "required");
+                            else {
+                                iVolt.removeAttribute("required");
+                                iVolt.selectedIndex = 0;
+                                clearFieldError(iVolt);
+                            }
+                        }
+                        if (iLine) {
+                            if (isElectric) iLine.setAttribute("required", "required");
+                            else {
+                                iLine.removeAttribute("required");
+                                iLine.value = "";
+                                clearFieldError(iLine);
+                            }
+                        }
+                    }
+
+                    update();
+                    sel.addEventListener("change", update);
+                })();
+
+                // -----------------------------
+                // 4.5) Cash behavior (Quote form)
+                // -----------------------------
+                (function wireCash() {
+                    const leaseType = document.getElementById("lease_type");
+                    const leaseTerm = document.getElementById("lease_term");
+                    const annualHours = document.getElementById("annual_hours");
+
+                    if (!leaseType || !leaseTerm || !annualHours) return;
+
+                    const leaseTermGroup = leaseTerm.closest(".qr-group");
+                    const annualHoursGroup = annualHours.closest(".qr-group");
+
+                    function update() {
+                        const isCash = (leaseType.value || "").toLowerCase() === "cash";
+
+                        if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+                        if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
+
+                        if (isCash) {
+                            leaseTerm.removeAttribute("required");
+                            annualHours.removeAttribute("required");
+                            leaseTerm.value = "";
+                            annualHours.value = "";
+                            clearFieldError(leaseTerm);
+                            clearFieldError(annualHours);
+                        } else {
+                            leaseTerm.setAttribute("required", "required");
+                            annualHours.setAttribute("required", "required");
+                        }
+                    }
+
+                    update();
+                    leaseType.addEventListener("change", update);
+                })();
+
+                // -----------------------------
+                // 4B) Used Equipment Cash behavior
+                // -----------------------------
+                (function wireUsedLeaseCash() {
+                    const leaseType = document.getElementById("used_lease_type");
+                    const leaseTerm = document.getElementById("used_lease_term");
+                    const annualHours = document.getElementById("used_annual_hours");
+
+                    if (!leaseType || !leaseTerm || !annualHours) return;
+
+                    const leaseTermGroup = document.getElementById("used_lease_term_group") || leaseTerm.closest(".qr-group");
+                    const annualHoursGroup = document.getElementById("used_annual_hours_group") || annualHours.closest(".qr-group");
+
+                    function update() {
+                        const isCash = (leaseType.value || "").trim().toLowerCase() === "cash";
+
+                        if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+                        if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
+
+                        if (isCash) {
+                            leaseTerm.removeAttribute("required");
+                            annualHours.removeAttribute("required");
+                            leaseTerm.value = "";
+                            annualHours.value = "";
+                            clearFieldError(leaseTerm);
+                            clearFieldError(annualHours);
+                        } else {
+                            leaseTerm.setAttribute("required", "required");
+                            annualHours.setAttribute("required", "required");
+                        }
+                    }
+
+                    update();
+                    leaseType.addEventListener("change", update);
+                })();
+
+                // -----------------------------
+                // 5) Mobile Share/Save behavior (unchanged)
+                // -----------------------------
+                (function () {
+                    const hint = document.getElementById("mobileSaveHint");
+                    const ua = navigator.userAgent || "";
+                    const isMobile = /iPhone|iPad|iPod|Android/i.test(ua);
+
+                    if (!isMobile) {
+                        if (hint) hint.style.display = "none";
+                        return;
+                    }
+                    if (hint) hint.style.display = "block";
+
+                    const forms = document.querySelectorAll("form.quote-request-form");
+                    forms.forEach((form) => {
+                        form.addEventListener("submit", async (e) => {
+                            if (!validateForm(form)) {
+                                e.preventDefault();
+                                return;
+                            }
+
+                            e.preventDefault();
+
+                            const btn = form.querySelector("button[type='submit']");
+                            const originalText = btn ? btn.textContent : "Generating PDF...";
+                            if (btn) {
+                                btn.disabled = true;
+                                btn.textContent = "Generating PDF...";
+                            }
+
+                            try {
+                                const formData = new FormData(form);
+
+                                const res = await fetch(form.action, {
+                                    method: "POST",
+                                    body: formData,
+                                    headers: {
+                                        "X-Requested-With": "fetch",
+                                        "Accept": "application/pdf"
+                                    }
+                                });
+
+                                const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+                                if (!res.ok || !contentType.includes("application/pdf")) {
+                                    const html = await res.text().catch(() => "");
+                                    document.open();
+                                    document.write(html);
+                                    document.close();
+                                    return;
+                                }
+
+                                const blob = await res.blob();
+
+                                const dispo = res.headers.get("content-disposition") || "";
+                                const match = dispo.match(/filename="(.+?)"/);
+                                const defaultName = (form.dataset.requestType || "request") + "_request.pdf";
+                                const filename = match ? match[1] : defaultName;
+
+                                const file = new File([blob], filename, { type: "application/pdf" });
+
+                                clearDraft(form);
+
+                                if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+                                    await navigator.share({
+                                        title: form.dataset.pdfTitle || "HELI Request",
+                                        text: "Request PDF",
+                                        files: [file],
+                                    });
+                                    return;
+                                }
+
+                                const url = URL.createObjectURL(blob);
+                                window.open(url, "_blank");
+                                setTimeout(() => URL.revokeObjectURL(url), 30000);
+
+                            } catch (err) {
+                                alert("Failed to generate/share the PDF. Please check required fields or try again.");
+                            } finally {
+                                if (btn) {
+                                    btn.disabled = false;
+                                    btn.textContent = originalText;
+                                }
+                            }
+                        }, true);
+                    });
+                })();
+            </script>
+
+        </section>
+    </div>
+</main>
+
+</div>
 </body>
 </html>
