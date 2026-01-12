@@ -110,7 +110,7 @@ RENTAL_FIELD_LABELS: List[Tuple[str, str]] = [
 USED_FIELD_LABELS: List[Tuple[str, str]] = [
     ("customer_name", "Customer"),
     ("address", "Address"),
-    ("city_zip_code", "City and Zip Code"),
+    ("city_state_zip", "City / State / Zip"),
     ("contact_name", "Contact Name"),
     ("budget_price", "Customer Budget"),
     ("model", "Model"),
