@@ -3,13 +3,17 @@ indiana_intel.py
 
 Indiana developments / lead finder for Tynan / Heli AI.
 
-This version is built to solve the "same results regardless of county/city" problem by:
-1) Stronger geo extraction (county/city detection is resilient to casing and phrasing)
-2) "Site discovery" for planning docs:
-   - First find the local municipal/agenda domains for the area
-   - Then search WITHIN those sites for industrial keywords
-3) Better junk filtering (job boards, licensing/forms pages, tourism, etc.)
-4) Optional post-filtering by recency when dates are detectable
+This version adds "richer notes" by enriching the top results:
+- fetches the page text for top N hits (small, controlled)
+- extracts: sqft, jobs, investment, dates, docket/case numbers
+- grabs 1–3 relevant sentences mentioning warehouse/logistics/manufacturing terms
+- injects that into output as Notes/Highlights
+
+Controls (env vars):
+- ENRICH_ENABLED=1|0
+- ENRICH_FETCH_TOP_N=4
+- ENRICH_TIMEOUT_SECONDS=8
+- ENRICH_MAX_CHARS=22000
 """
 
 from __future__ import annotations
@@ -47,15 +51,21 @@ CSE_BACKOFF_BASE_SECONDS = float(os.environ.get("CSE_BACKOFF_BASE_SECONDS", "1.2
 CSE_BACKOFF_MAX_SECONDS = float(os.environ.get("CSE_BACKOFF_MAX_SECONDS", "20"))
 CSE_MIN_INTERVAL_SECONDS = float(os.environ.get("CSE_MIN_INTERVAL_SECONDS", "0.5"))
 
-# Pagination controls: each page is 10 results
-CSE_MAX_PAGES = int(os.environ.get("CSE_MAX_PAGES", "1"))
+CSE_MAX_PAGES = int(os.environ.get("CSE_MAX_PAGES", "1"))  # each page = 10 results
 CSE_MAX_RESULTS_HARD_CAP = 50
 
-# Cache controls
 CACHE_TTL_SECONDS = int(os.environ.get("CSE_CACHE_TTL_SECONDS", "900"))  # 15 min
 
-# Enable discovery pass (highly recommended)
 ENABLE_SITE_DISCOVERY = os.environ.get("CSE_ENABLE_SITE_DISCOVERY", "1").strip() not in {"0", "false", "False"}
+
+# ---------------------------------------------------------------------------
+# Enrichment controls (richer notes)
+# ---------------------------------------------------------------------------
+
+ENRICH_ENABLED = os.environ.get("ENRICH_ENABLED", "1").strip() not in {"0", "false", "False"}
+ENRICH_FETCH_TOP_N = int(os.environ.get("ENRICH_FETCH_TOP_N", "4"))
+ENRICH_TIMEOUT_SECONDS = float(os.environ.get("ENRICH_TIMEOUT_SECONDS", "8"))
+ENRICH_MAX_CHARS = int(os.environ.get("ENRICH_MAX_CHARS", "22000"))
 
 # ---------------------------------------------------------------------------
 # Keywords
@@ -106,6 +116,13 @@ POSITIVE_FACILITY_TERMS = [
     "warehouse", "distribution center", "distribution facility", "fulfillment center",
     "logistics", "industrial park", "manufacturing", "plant", "factory", "cold storage",
     "spec building", "truck terminal", "data center", "3pl",
+]
+
+HIGHLIGHT_TERMS = [
+    "warehouse", "distribution", "logistics", "manufactur", "plant", "factory",
+    "cold storage", "spec building", "fulfillment", "data center", "industrial park",
+    "3pl", "groundbreaking", "ribbon cutting", "expansion", "now open",
+    "rezon", "site plan", "staff report", "petition", "variance", "docket",
 ]
 
 # ---------------------------------------------------------------------------
@@ -162,10 +179,6 @@ def _safe_http_error_log(resp: requests.Response, prefix: str) -> None:
 
 
 def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
-    """
-    CSE dateRestrict is rough (dN or mN). We still use it to bias recency,
-    but we also do our own post-filtering when we can detect dates.
-    """
     if not days or days <= 0:
         return None
     if days <= 31:
@@ -173,7 +186,7 @@ def _days_to_date_restrict(days: Optional[int]) -> Optional[str]:
     months = max(1, int(round(days / 30)))
     if months <= 24:
         return f"m{months}"
-    return "y2"  # best-effort fallback; some CSE configs ignore this
+    return "y2"
 
 
 def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
@@ -207,19 +220,16 @@ def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
 
 
 def _parse_date_from_snippet(snippet: str) -> Optional[datetime]:
-    """
-    Try to catch dates like 'Jan 5, 2026' or 'January 5, 2026' in snippets.
-    """
     s = snippet or ""
+    # Jan 5, 2026 / January 5, 2026
     m = re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+(20\d{2})\b", s, re.I)
     if m:
-        try:
-            return datetime.strptime(m.group(0), "%b %d, %Y")
-        except Exception:
+        raw = m.group(0)
+        for fmt in ("%b %d, %Y", "%B %d, %Y"):
             try:
-                return datetime.strptime(m.group(0), "%B %d, %Y")
+                return datetime.strptime(raw, fmt)
             except Exception:
-                return None
+                continue
     return None
 
 
@@ -247,14 +257,6 @@ def _looks_industrial(title: str, snippet: str) -> bool:
 
 
 def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Returns (city, county).
-    Handles:
-    - "Boone County" (any casing)
-    - "Whitestown, IN" / "Whitestown Indiana"
-    - "in Whitestown" / "near Whitestown"
-    - bare county token "Hendricks"
-    """
     if not q:
         return (None, None)
 
@@ -276,19 +278,16 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     city: Optional[str] = None
     county: Optional[str] = None
 
-    # explicit county phrase
     m = re.search(r"\b([a-z]+)\s+county\b", tl, flags=re.I)
     if m:
         c = m.group(1).strip().lower()
         if c in IN_COUNTIES:
             county = f"{c.title()} County"
 
-    # city, IN or city Indiana
     m = re.search(r"\b([A-Za-z][A-Za-z\s\.\-']{2,})\s*,?\s*(Indiana|IN)\b", text, flags=re.I)
     if m:
         city = m.group(1).strip()
 
-    # in/near/around City
     if not city:
         m = re.search(r"\b(?:in|near|around)\s+([A-Za-z][A-Za-z\s\.\-']+)", text, flags=re.I)
         if m:
@@ -298,7 +297,6 @@ def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
             if raw:
                 city = raw
 
-    # bare county token fallback
     if not county:
         tokens = re.findall(r"[A-Za-z]+", text)
         for tok in tokens:
@@ -426,14 +424,10 @@ def _dedupe_by_url(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Site discovery (the big upgrade)
+# Site discovery
 # ---------------------------------------------------------------------------
 
 def _discover_local_sites(city: Optional[str], county: Optional[str], days: int) -> List[str]:
-    """
-    Use CSE to discover relevant municipal/agenda domains for this area.
-    Returns list of domains (no site: prefix yet).
-    """
     if not ENABLE_SITE_DISCOVERY:
         return []
 
@@ -452,7 +446,6 @@ def _discover_local_sites(city: Optional[str], county: Optional[str], days: int)
             continue
         if any(bad in d for bad in BLOCK_DOMAINS):
             continue
-        # Bias toward government-ish domains
         if d.endswith(".gov") or d.endswith(".in.us") or ".in.gov" in d or "municode" in d or "granicus" in d:
             if d not in domains:
                 domains.append(d)
@@ -468,7 +461,235 @@ def _site_or_clause(domains: List[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Normalization / ranking
+# Enrichment (richer notes)
+# ---------------------------------------------------------------------------
+
+_ENRICH_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+def _enrich_cache_get(url: str) -> Optional[Dict[str, Any]]:
+    hit = _ENRICH_CACHE.get(url)
+    if not hit:
+        return None
+    ts, val = hit
+    if time.time() - ts > CACHE_TTL_SECONDS:
+        _ENRICH_CACHE.pop(url, None)
+        return None
+    return val
+
+
+def _enrich_cache_set(url: str, val: Dict[str, Any]) -> None:
+    _ENRICH_CACHE[url] = (time.time(), val)
+
+
+def _strip_html_to_text(html: str) -> str:
+    if not html:
+        return ""
+    # remove scripts/styles
+    html = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
+    html = re.sub(r"(?is)<style.*?>.*?</style>", " ", html)
+    # remove tags
+    text = re.sub(r"(?is)<[^>]+>", " ", html)
+    # decode basic entities
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&quot;", '"').replace("&#39;", "'")
+    # collapse whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _extract_numbers(text: str) -> Dict[str, Optional[str]]:
+    """
+    Pull common project signals from raw text.
+    Returns strings to keep it safe/simple for display.
+    """
+    t = text or ""
+
+    # sqft patterns: 1,200,000 square feet / 1.2 million sq ft / 500k sf
+    sqft = None
+    m = re.search(r"\b(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(million|m)?\s*(square feet|sq\.?\s*ft|sqft|sf)\b", t, re.I)
+    if m:
+        num = m.group(1)
+        mult = (m.group(2) or "").lower()
+        if mult in {"million", "m"}:
+            sqft = f"{num} million sq ft"
+        else:
+            sqft = f"{num} sq ft"
+
+    # jobs patterns: 250 jobs / 1,000 new jobs
+    jobs = None
+    m = re.search(r"\b(\d{2,5}(?:,\d{3})?)\s+(new\s+)?jobs\b", t, re.I)
+    if m:
+        jobs = f"{m.group(1)} jobs"
+
+    # investment: $120 million / $1.2B
+    investment = None
+    m = re.search(r"\$\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(billion|bn|b|million|m)?\b", t, re.I)
+    if m:
+        amt = m.group(1)
+        unit = (m.group(2) or "").lower()
+        if unit in {"billion", "bn", "b"}:
+            investment = f"${amt}B"
+        elif unit in {"million", "m"}:
+            investment = f"${amt}M"
+        else:
+            investment = f"${amt}"
+
+    return {"sqft": sqft, "jobs": jobs, "investment": investment}
+
+
+def _extract_case_numbers(text: str) -> List[str]:
+    """
+    Planning/permit style identifiers vary by city/county.
+    We just try to catch common patterns.
+    """
+    t = text or ""
+    pats = [
+        r"\b(?:DP|PZ|PC|BZA|ZA|Z|REZ|PUD|DEV|DEVPLAN)[-\s]?\d{1,5}(?:-\d{1,5})?\b",
+        r"\b\d{2}-\d{3,5}\b",
+        r"\b\d{4}-\d{3,6}\b",
+    ]
+    found: List[str] = []
+    for p in pats:
+        for m in re.findall(p, t, flags=re.I):
+            s = m.strip()
+            if s and s not in found:
+                found.append(s)
+    return found[:6]
+
+
+def _extract_dates(text: str) -> List[str]:
+    """
+    Extract a few readable dates from page text.
+    """
+    t = text or ""
+    dates: List[str] = []
+    # Month Day, Year
+    for m in re.findall(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+20\d{2}\b", t, flags=re.I):
+        # m is month name only due to group; re-find full match in a safer way:
+        pass
+
+    for m in re.finditer(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\b", t, flags=re.I):
+        s = m.group(0)
+        if s not in dates:
+            dates.append(s)
+
+    for m in re.finditer(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", t):
+        s = m.group(0)
+        if s not in dates:
+            dates.append(s)
+
+    return dates[:6]
+
+
+def _extract_highlight_sentences(text: str, max_sentences: int = 3) -> List[str]:
+    """
+    Pull up to N sentences that mention high-signal terms.
+    """
+    if not text:
+        return []
+    # crude sentence split
+    parts = re.split(r"(?<=[\.\!\?])\s+", text)
+    hits: List[str] = []
+    for s in parts:
+        sl = s.lower()
+        if any(term in sl for term in HIGHLIGHT_TERMS):
+            s2 = s.strip()
+            if len(s2) < 25:
+                continue
+            if s2 not in hits:
+                hits.append(s2)
+        if len(hits) >= max_sentences:
+            break
+    return hits
+
+
+def _fetch_url_text(url: str) -> str:
+    """
+    Lightweight fetch (HTML only). PDFs often return binary; we skip heavy PDF parsing here.
+    """
+    if not url:
+        return ""
+
+    cached = _enrich_cache_get(url)
+    if cached and "text" in cached:
+        return str(cached.get("text") or "")
+
+    dom = _domain(url)
+    if any(bad in dom for bad in BLOCK_DOMAINS):
+        return ""
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; IndianaIntelBot/1.0; +https://example.com)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=ENRICH_TIMEOUT_SECONDS)
+    except Exception as e:
+        log.info("Enrich fetch failed url=%s err=%s", url, e)
+        return ""
+
+    if resp.status_code != 200:
+        return ""
+
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    if "pdf" in ctype or url.lower().endswith(".pdf"):
+        # skip heavy PDF parsing (still can show case numbers from URL/snippet elsewhere)
+        return ""
+
+    html = resp.text or ""
+    text = _strip_html_to_text(html)
+    if len(text) > ENRICH_MAX_CHARS:
+        text = text[:ENRICH_MAX_CHARS]
+
+    _enrich_cache_set(url, {"text": text})
+    return text
+
+
+def _build_notes_from_enrichment(title: str, snippet: str, url: str, is_planning: bool) -> Dict[str, Any]:
+    """
+    Returns a dict with richer fields you can display as Notes.
+    """
+    base = {
+        "highlights": [],
+        "sqft": None,
+        "jobs": None,
+        "investment": None,
+        "dates": [],
+        "case_numbers": [],
+    }
+
+    if not ENRICH_ENABLED:
+        return base
+
+    text = _fetch_url_text(url)
+    if not text:
+        # still try to extract basics from snippet/title
+        nums = _extract_numbers(f"{title} {snippet}")
+        base.update(nums)
+        base["case_numbers"] = _extract_case_numbers(f"{title} {snippet} {url}") if is_planning else []
+        base["dates"] = _extract_dates(snippet)
+        base["highlights"] = _extract_highlight_sentences(f"{title}. {snippet}", max_sentences=2)
+        return base
+
+    nums = _extract_numbers(text)
+    base.update(nums)
+
+    if is_planning:
+        base["case_numbers"] = _extract_case_numbers(text) or _extract_case_numbers(f"{title} {snippet} {url}")
+
+    base["dates"] = _extract_dates(text) or _extract_dates(snippet)
+
+    # highlights: prefer page text; fallback to snippet
+    base["highlights"] = _extract_highlight_sentences(text, max_sentences=3)
+    if not base["highlights"]:
+        base["highlights"] = _extract_highlight_sentences(f"{title}. {snippet}", max_sentences=2)
+
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Ranking
 # ---------------------------------------------------------------------------
 
 def _geo_score(title: str, snippet: str, city: Optional[str], county: Optional[str]) -> int:
@@ -485,7 +706,7 @@ def _geo_score(title: str, snippet: str, city: Optional[str], county: Optional[s
 
 def _recency_ok(dt: Optional[datetime], days: int) -> bool:
     if not dt:
-        return True  # unknown date -> keep, but rank lower
+        return True
     cutoff = datetime.utcnow() - timedelta(days=days)
     return dt >= cutoff
 
@@ -516,8 +737,8 @@ def _compute_score(title: str, snippet: str, url: str, city: Optional[str], coun
 
 def _rank(items: List[Dict[str, Any]], city: Optional[str], county: Optional[str], is_planning: bool, days: int) -> List[Dict[str, Any]]:
     now = datetime.utcnow()
-
     scored: List[Dict[str, Any]] = []
+
     for it in items:
         title = it.get("title") or ""
         snippet = it.get("snippet") or ""
@@ -527,31 +748,20 @@ def _rank(items: List[Dict[str, Any]], city: Optional[str], county: Optional[str
         if _is_blocked(title, snippet, url):
             continue
 
-        # In facility mode, require at least some industrial term
         if not is_planning and not _looks_industrial(title, snippet):
             continue
 
-        # Post-filter recency when date is known
         if not _recency_ok(dt, days):
             continue
 
         score = _compute_score(title, snippet, url, city, county, is_planning)
 
         scored.append({
-            "project_name": title or "Untitled",
-            "company": None,
-            "project_type": "planning / zoning filing" if is_planning else "facility/news hit",
-            "location_label": county or city or "Indiana",
-            "geo_match_score": _geo_score(title, snippet, city, county),
-            "forklift_score": max(1, min(5, 1 + score // 4)),
-            "timeline_year": dt.year if isinstance(dt, datetime) else None,
-            "timeline_stage": "planning doc" if is_planning else "announcement/news",
-            "raw_date": dt,
+            "title": title,
+            "snippet": snippet,
             "url": url,
             "provider": it.get("provider") or _domain(url),
-            "snippet": snippet,
-            "source_tier": "local",
-            "result_mode": "planning" if is_planning else "facility",
+            "date": dt,
             "_score": score,
             "_age_days": (now - dt).days if isinstance(dt, datetime) else 9999,
         })
@@ -560,14 +770,83 @@ def _rank(items: List[Dict[str, Any]], city: Optional[str], county: Optional[str
     return scored
 
 
+def _enrich_top_results(ranked_raw: List[Dict[str, Any]], is_planning: bool) -> List[Dict[str, Any]]:
+    """
+    Enrich top N results for richer notes.
+    """
+    if not ranked_raw:
+        return ranked_raw
+    if not ENRICH_ENABLED or ENRICH_FETCH_TOP_N <= 0:
+        return ranked_raw
+
+    n = min(ENRICH_FETCH_TOP_N, len(ranked_raw))
+    for i in range(n):
+        r = ranked_raw[i]
+        try:
+            notes = _build_notes_from_enrichment(r.get("title", ""), r.get("snippet", ""), r.get("url", ""), is_planning=is_planning)
+        except Exception as e:
+            log.info("Enrichment failed url=%s err=%s", r.get("url"), e)
+            notes = {"highlights": [], "sqft": None, "jobs": None, "investment": None, "dates": [], "case_numbers": []}
+        r["notes"] = notes
+    return ranked_raw
+
+
+def _to_project_objects(ranked_raw: List[Dict[str, Any]], city: Optional[str], county: Optional[str], is_planning: bool) -> List[Dict[str, Any]]:
+    """
+    Convert ranked raw hits into your project dict format.
+    """
+    projects: List[Dict[str, Any]] = []
+    loc = county or city or "Indiana"
+
+    for r in ranked_raw:
+        title = r.get("title") or "Untitled"
+        snippet = r.get("snippet") or ""
+        url = r.get("url") or ""
+        provider = r.get("provider") or _domain(url)
+        dt = r.get("date")
+        notes = r.get("notes") or {}
+
+        # forklift score (1-5)
+        score = int(r.get("_score", 0))
+        forklift_score = max(1, min(5, 1 + score // 4))
+
+        # timeline
+        stage = "planning doc" if is_planning else "announcement/news"
+        year = dt.year if isinstance(dt, datetime) else None
+
+        projects.append({
+            "project_name": title,
+            "company": None,
+            "project_type": "planning / zoning filing" if is_planning else "warehouse / industrial facility",
+            "location_label": loc,
+            "geo_match_score": _geo_score(title, snippet, city, county),
+            "forklift_score": forklift_score,
+            "timeline_year": year,
+            "timeline_stage": stage,
+            "raw_date": dt,
+            "url": url,
+            "provider": provider,
+            "snippet": snippet,
+            "source_tier": "local",
+            "result_mode": "planning" if is_planning else "facility",
+
+            # richer note fields
+            "notes_highlights": notes.get("highlights") or [],
+            "notes_sqft": notes.get("sqft"),
+            "notes_jobs": notes.get("jobs"),
+            "notes_investment": notes.get("investment"),
+            "notes_dates": notes.get("dates") or [],
+            "notes_case_numbers": notes.get("case_numbers") or [],
+        })
+
+    return projects
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 25) -> List[Dict[str, Any]]:
-    """
-    Main entrypoint.
-    """
     city, county = _extract_geo_hint(user_q)
     is_planning = _is_planning_query(user_q)
 
@@ -575,7 +854,6 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 2
 
     max_items = max(1, min(int(max_items), CSE_MAX_RESULTS_HARD_CAP))
 
-    # 1) If planning-style question, do site discovery and search within those sites
     if is_planning:
         domains = _discover_local_sites(city, county, days=min(days, 730))
         site_clause = _site_or_clause(domains)
@@ -591,12 +869,17 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 2
 
         raw = _dedupe_by_url(raw)
         ranked = _rank(raw, city, county, is_planning=True, days=min(days, 730))
-        return ranked[:15]
+        ranked = _enrich_top_results(ranked, is_planning=True)
+        projects = _to_project_objects(ranked, city, county, is_planning=True)
+        return projects[:15]
 
-    # 2) Facility/news mode (announcements/expansions)
+    # facility/news mode
     area = city or county or "Indiana"
-    # Add “announce/expansion” bias, and exclude job listings
-    q = f'{area} Indiana {FACILITY_KEYWORDS} (announced OR expansion OR groundbreaking OR "now open" OR "ribbon cutting") -jobs -hiring -indeed -linkedin'
+    q = (
+        f'{area} Indiana {FACILITY_KEYWORDS} '
+        f'(announced OR expansion OR groundbreaking OR "now open" OR "ribbon cutting") '
+        f'-jobs -hiring -indeed -linkedin'
+    )
     log.info("Facility query: %s", q)
 
     try:
@@ -606,15 +889,16 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 2
 
     raw = _dedupe_by_url(raw)
     ranked = _rank(raw, city, county, is_planning=False, days=days)
-    return ranked[:15]
+    ranked = _enrich_top_results(ranked, is_planning=False)
+    projects = _to_project_objects(ranked, city, county, is_planning=False)
+    return projects[:15]
 
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     if not items:
         return (
             "No results returned for that specific area/time window.\n"
-            "If your logs show city=None/county=None, your query isn't being localized.\n"
-            "Try a planning-style question (agenda/packet) or increase days to 730."
+            "Tip: try a planning-style question (agenda/packet) or increase days to 730."
         )
 
     lines: List[str] = []
@@ -633,9 +917,20 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         geo_score = item.get("geo_match_score") or 0
         mode = item.get("result_mode") or "unknown"
 
-        stage_year = stage
-        if year:
-            stage_year = f"{stage} ({year})"
+        # richer notes
+        notes_bits: List[str] = []
+        if item.get("notes_sqft"):
+            notes_bits.append(f"Size: {item['notes_sqft']}")
+        if item.get("notes_jobs"):
+            notes_bits.append(f"Jobs: {item['notes_jobs']}")
+        if item.get("notes_investment"):
+            notes_bits.append(f"Investment: {item['notes_investment']}")
+        if item.get("notes_case_numbers"):
+            notes_bits.append(f"Case/Docket: {', '.join(item['notes_case_numbers'][:4])}")
+        if item.get("notes_dates"):
+            notes_bits.append(f"Dates seen: {', '.join(item['notes_dates'][:3])}")
+
+        highlights = item.get("notes_highlights") or []
 
         lines.append(f"{i}. {title} — {loc}")
         meta_bits = [ptype, f"Mode: {mode}"]
@@ -645,10 +940,22 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
             meta_bits.append(f"Relevance {score}/5")
         if geo_score:
             meta_bits.append(f"Geo match {geo_score}/3")
+
+        stage_year = stage
+        if year:
+            stage_year = f"{stage} ({year})"
         if stage_year:
             meta_bits.append(stage_year)
 
         lines.append("   " + " • ".join(meta_bits))
+
+        if notes_bits:
+            lines.append("   Notes: " + " • ".join(notes_bits))
+
+        if highlights:
+            for h in highlights[:3]:
+                lines.append(f"   Highlight: {h}")
+
         if snippet:
             lines.append(f"   Snippet: {snippet}")
         if url:
