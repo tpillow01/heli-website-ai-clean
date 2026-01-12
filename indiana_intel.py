@@ -171,39 +171,81 @@ def _slug(s: str) -> str:
 def _is_planning_query(q: str) -> bool:
     t = _lower(q)
     triggers = [
-        "plan commission", "area plan", "planning commission", "bza", "board of zoning",
-        "agenda", "minutes", "packet", "staff report", "rezoning", "rezone", "pud",
-        "petition", "site plan", "development plan", "ordinance", "variance",
-        "hearing examiner", "hearing officer", "metropolitan development commission", "mdc",
+        "plan commission", "area plan", "planning commission",
+        "bza", "board of zoning", "metropolitan development commission", "mdc",
+        "agenda", "minutes", "packet", "staff report",
+        "rezoning", "rezone", "pud", "petition", "variance", "special exception",
+        "site plan", "development plan", "primary plat", "secondary plat",
+        "permit", "building permit", "zoning", "zoning case",
+        # construction intent (you were missing these)
+        "being built", "under construction", "construction", "constructed", "breaking ground", "breaks ground",
     ]
     return any(w in t for w in triggers)
-
 
 def _extract_geo_hint(q: str) -> Tuple[Optional[str], Optional[str]]:
     if not q:
         return (None, None)
 
     text = q.strip()
+    tl = text.lower()
 
-    m_county = re.search(r"\b([A-Za-z]+)\s+County\b", text)
-    county = f"{m_county.group(1).strip()} County" if m_county else None
+    # Minimal Indiana county list (add/remove freely)
+    IN_COUNTIES = {
+        "adams","allen","bartholomew","benton","blackford","boone","brown","carroll","cass","clark","clay",
+        "clinton","crawford","daviess","dearborn","decatur","dekalb","delaware","duboise","elkhart","fayette",
+        "floyd","fountain","franklin","fulton","gibson","grant","greene","hamilton","hancock","harrison",
+        "hendricks","henry","howard","huntington","jackson","jasper","jay","jennings",
+        "johnson","knox","kosciusko","lagrange","lake","laporte","lawrence","madison","marion","marshall",
+        "martin","miami","monroe","montgomery","morgan","newton","noble","ohio","orange","owen","parke",
+        "perry","pike","porter","posey","pulaski","putnam","randolph","ripley","rush","scott","shelby",
+        "spencer","starke","steuben","sullivan","switzerland","tippecanoe","tipton","union","vanderburgh",
+        "vermillion","vigo","wabash","warren","warrick","washington","wayne","wells","white","whitley"
+    }
 
-    m_paren = re.search(r"\b([A-Za-z][A-Za-z\s]+?)\s*\(\s*([A-Za-z]+)\s+County\s*\)", text)
-    if m_paren:
-        city = m_paren.group(1).strip()
-        county = f"{m_paren.group(2).strip()} County"
+    city: Optional[str] = None
+    county: Optional[str] = None
+
+    # 1) Explicit "Boone County" (case-insensitive)
+    m = re.search(r"\b([a-z]+)\s+county\b", tl, flags=re.I)
+    if m:
+        c = m.group(1).strip().lower()
+        if c in IN_COUNTIES:
+            county = f"{c.title()} County"
+
+    # 2) Parenthetical city format: "Whitestown (Boone County)"
+    m = re.search(r"\b([A-Za-z][A-Za-z\s\.\-']+?)\s*\(\s*([A-Za-z]+)\s+County\s*\)", text, flags=re.I)
+    if m:
+        city = m.group(1).strip()
+        c = m.group(2).strip().lower()
+        if c in IN_COUNTIES:
+            county = f"{c.title()} County"
         return (city, county)
 
-    m_city = re.search(r"\b(?:in|around|near)\s+([A-Za-z\s]+?)(?:,|\?|\.|$)", text)
-    city = None
-    if m_city:
-        raw = m_city.group(1).strip()
-        raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
-        if raw:
-            city = raw
+    # 3) City + state: "Whitestown, IN" or "Whitestown Indiana"
+    m = re.search(r"\b([A-Za-z][A-Za-z\s\.\-']{2,})\s*,?\s*(Indiana|IN)\b", text, flags=re.I)
+    if m:
+        city = m.group(1).strip()
+    else:
+        # 4) "in/near/around Whitestown" (stop before year/time words)
+        m = re.search(r"\b(?:in|near|around)\s+([A-Za-z][A-Za-z\s\.\-']+)", text, flags=re.I)
+        if m:
+            raw = m.group(1).strip()
+            # cut off common tails
+            raw = re.split(r"\b(20\d{2}|this year|next year|last year|today|now|last|past|recent)\b", raw, flags=re.I)[0].strip()
+            raw = re.sub(r"\b(Indiana|IN)\b\.?", "", raw, flags=re.I).strip()
+            if raw:
+                city = raw
+
+    # 5) Bare county name ("Hendricks 2026", "Boone developments")
+    if county is None:
+        tokens = re.findall(r"[A-Za-z]+", text)
+        for tok in tokens:
+            t = tok.lower()
+            if t in IN_COUNTIES:
+                county = f"{t.title()} County"
+                break
 
     return (city, county)
-
 
 def _parse_date_from_pagemap(it: Dict[str, Any]) -> Optional[datetime]:
     pagemap = it.get("pagemap") or {}
@@ -555,14 +597,14 @@ def _build_planning_site_bias(county: Optional[str]) -> str:
         "site:indy.gov", "site:indianapolis.granicus.com",
     ]
     if county:
-        cslug = _slug(county.replace(" county", ""))
+        base = (county.split()[0] if county.split() else county).strip().lower()
+        cslug = _slug(base)
         sites.extend([
             f"site:co.{cslug}.in.us",
             f"site:{cslug}county.in.gov",
             f"site:{cslug}county.in.us",
         ])
     return "(" + " OR ".join(sites) + ")"
-
 
 def _normalize(
     raw_items: List[Dict[str, Any]],
