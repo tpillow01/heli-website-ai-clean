@@ -3440,8 +3440,6 @@ def quote_request():
                 errors.append("Battery type is required for Electric trucks.")
             charger = "Standard"
         else:
-            # Requirement: if LPG / Dual Fuel / Diesel selected -> Battery + Charger ignored
-            # (Also covers any non-electric fuel safely)
             battery_voltage = "N/A"
             battery = "None"
             charger = "None"
@@ -3624,14 +3622,25 @@ def quote_request():
         )
 
     # -----------------------------
-    # USED EQUIPMENT
+    # USED EQUIPMENT  (FIX: build city/state/zip + add alias keys)
     # -----------------------------
     if request_type == "used_equipment":
         customer_name = _s(form.get("customer_name"))
         address = _s(form.get("address"))
-        city_state_zip = _s(form.get("city_state_zip"))
-        contact_name = _s(form.get("contact_name"))
 
+        # Primary combined field
+        city_state_zip = _s(form.get("city_state_zip"))
+
+        # Optional separate fields (if your HTML uses them now or later)
+        city = _s(form.get("city"))
+        state = _s(form.get("state"))
+        zip_code = _s(form.get("zip")) or _s(form.get("zip_code"))
+
+        # If combined field is blank but separate fields exist, build it
+        if not city_state_zip and (city or state or zip_code):
+            city_state_zip = " ".join([p for p in [city, state, zip_code] if p]).strip()
+
+        contact_name = _s(form.get("contact_name"))
         model = _s(form.get("model"))
 
         fuel_type = _s(form.get("fuel_type"))  # STRICT dropdown
@@ -3704,7 +3713,17 @@ def quote_request():
         form_data = {
             "customer_name": customer_name,
             "address": address,
+
+            # Canonical key
             "city_state_zip": city_state_zip,
+
+            # Aliases so the PDF builder can’t miss it (common variations)
+            "city_zip": city_state_zip,
+            "city": city,
+            "state": state,
+            "zip": zip_code,
+            "zip_code": zip_code,
+
             "contact_name": contact_name,
             "model": model,
             "fuel_type": fuel_type,
