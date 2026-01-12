@@ -893,6 +893,64 @@ def search_indiana_developments(user_q: str, days: int = 365, max_items: int = 2
     projects = _to_project_objects(ranked, city, county, is_planning=False)
     return projects[:15]
 
+def _make_notes_line(item: Dict[str, Any]) -> str:
+    """
+    Produce a single, rich 'Notes:' line like:
+    'Jul 25, 2024 ... US Cold Storage to expand Lebanon warehouse; welcomes Gorton's processing ... Size: 120,000 sq ft • Jobs: 80'
+    """
+    # Pick best "source sentence"
+    highlights = item.get("notes_highlights") or []
+    snippet = (item.get("snippet") or "").strip()
+
+    base_text = ""
+    if highlights:
+        base_text = highlights[0].strip()
+    elif snippet:
+        base_text = snippet
+
+    # Ensure it starts with a date-ish prefix if we have it
+    dt = item.get("raw_date")
+    date_prefix = ""
+    if isinstance(dt, datetime):
+        date_prefix = dt.strftime("%b %d, %Y")
+
+    # Avoid duplicating date if snippet already begins with it
+    if date_prefix and base_text and date_prefix.lower() not in base_text[:40].lower():
+        base_text = f"{date_prefix} ... {base_text}"
+    elif base_text and not base_text.startswith(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) and date_prefix:
+        base_text = f"{date_prefix} ... {base_text}"
+
+    # Append concise hard facts
+    extras = []
+    if item.get("notes_sqft"):
+        extras.append(f"Size: {item['notes_sqft']}")
+    if item.get("notes_jobs"):
+        extras.append(f"Jobs: {item['notes_jobs']}")
+    if item.get("notes_investment"):
+        extras.append(f"Investment: {item['notes_investment']}")
+    if item.get("notes_case_numbers"):
+        extras.append(f"Case/Docket: {', '.join(item['notes_case_numbers'][:3])}")
+
+    # Optional: if we extracted dates from page text, include the most relevant one
+    # (only if we don't already have raw_date)
+    if not isinstance(dt, datetime):
+        dates_seen = item.get("notes_dates") or []
+        if dates_seen:
+            extras.append(f"Date: {dates_seen[0]}")
+
+    notes = base_text.strip()
+
+    # Clean up overly long notes
+    notes = re.sub(r"\s+", " ", notes)
+    if len(notes) > 240:
+        notes = notes[:237].rstrip() + "..."
+
+    if extras:
+        notes = f"{notes} • " + " • ".join(extras)
+
+    # If nothing at all, return a fallback
+    return notes if notes else "No additional notes available from snippet/page text."
+
 
 def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
     if not items:
@@ -902,66 +960,37 @@ def render_developments_markdown(items: List[Dict[str, Any]]) -> str:
         )
 
     lines: List[str] = []
-    lines.append("Industrial / logistics results (web search hits):")
 
     for i, item in enumerate(items[:15], start=1):
         title = item.get("project_name") or "Untitled"
-        snippet = (item.get("snippet") or "").strip()
         url = item.get("url") or ""
         provider = item.get("provider") or ""
         year = item.get("timeline_year")
         stage = item.get("timeline_stage") or ""
         loc = item.get("location_label") or "Indiana"
         ptype = item.get("project_type") or "Industrial / commercial project"
-        score = item.get("forklift_score") or ""
-        geo_score = item.get("geo_match_score") or 0
-        mode = item.get("result_mode") or "unknown"
 
-        # richer notes
-        notes_bits: List[str] = []
-        if item.get("notes_sqft"):
-            notes_bits.append(f"Size: {item['notes_sqft']}")
-        if item.get("notes_jobs"):
-            notes_bits.append(f"Jobs: {item['notes_jobs']}")
-        if item.get("notes_investment"):
-            notes_bits.append(f"Investment: {item['notes_investment']}")
-        if item.get("notes_case_numbers"):
-            notes_bits.append(f"Case/Docket: {', '.join(item['notes_case_numbers'][:4])}")
-        if item.get("notes_dates"):
-            notes_bits.append(f"Dates seen: {', '.join(item['notes_dates'][:3])}")
+        # --- Format header like your example ---
+        lines.append(f"{title} – {loc}")
+        lines.append(f"Type: {ptype}")
+        lines.append("Company / Developer: not specified in snippet")
+        lines.append("Scope: not specified in snippet")
 
-        highlights = item.get("notes_highlights") or []
-
-        lines.append(f"{i}. {title} — {loc}")
-        meta_bits = [ptype, f"Mode: {mode}"]
-        if provider:
-            meta_bits.append(provider)
-        if score:
-            meta_bits.append(f"Relevance {score}/5")
-        if geo_score:
-            meta_bits.append(f"Geo match {geo_score}/3")
-
-        stage_year = stage
+        timeline = stage
         if year:
-            stage_year = f"{stage} ({year})"
-        if stage_year:
-            meta_bits.append(stage_year)
+            timeline = f"{stage} ({year})"
+        lines.append(f"Timeline: {timeline}")
 
-        lines.append("   " + " • ".join(meta_bits))
-
-        if notes_bits:
-            lines.append("   Notes: " + " • ".join(notes_bits))
-
-        if highlights:
-            for h in highlights[:3]:
-                lines.append(f"   Highlight: {h}")
-
-        if snippet:
-            lines.append(f"   Snippet: {snippet}")
         if url:
-            lines.append(f"   URL: {url}")
+            lines.append(f"Source: {url}")
+        else:
+            lines.append("Source: not specified in snippet")
 
-    return "\n".join(lines)
+        # --- The exact thing you want improved ---
+        notes_line = _make_notes_line(item)
+        lines.append(f"Notes: {notes_line}")
 
+        # Blank line between results
+        lines.append("")
 
-__all__ = ["search_indiana_developments", "render_developments_markdown"]
+    return "\n".join(lines).strip()
