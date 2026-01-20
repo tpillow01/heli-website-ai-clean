@@ -1414,24 +1414,35 @@
                     const leaseTermGroup = leaseTerm.closest(".qr-group");
                     const annualHoursGroup = annualHours.closest(".qr-group");
 
-                    function update() {
-                        const isCash = (leaseType.value || "").toLowerCase() === "cash";
+                function update() {
+                    const lt = (leaseType.value || "").trim().toLowerCase();
+                    const isCash = (lt === "cash");
+                    const isFPO  = (lt === "fpo");
 
-                        if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
-                        if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
+                    // Cash = hide both
+                    if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
 
-                        if (isCash) {
-                            leaseTerm.removeAttribute("required");
-                            annualHours.removeAttribute("required");
-                            leaseTerm.value = "";
-                            annualHours.value = "";
-                            clearFieldError(leaseTerm);
-                            clearFieldError(annualHours);
-                        } else {
-                            leaseTerm.setAttribute("required", "required");
-                            annualHours.setAttribute("required", "required");
-                        }
+                    // Cash OR FPO = hide annual hours
+                    if (annualHoursGroup) annualHoursGroup.style.display = (isCash || isFPO) ? "none" : "";
+
+                    // Annual hours: remove required + clear for Cash or FPO
+                    if (isCash || isFPO) {
+                        annualHours.removeAttribute("required");
+                        annualHours.value = "";
+                        clearFieldError(annualHours);
+                    } else {
+                        annualHours.setAttribute("required", "required");
                     }
+
+                    // Lease term: Cash only behavior (unchanged)
+                    if (isCash) {
+                        leaseTerm.removeAttribute("required");
+                        leaseTerm.value = "";
+                        clearFieldError(leaseTerm);
+                    } else {
+                        leaseTerm.setAttribute("required", "required");
+                    }
+                }
 
                     update();
                     leaseType.addEventListener("change", update);
@@ -1450,24 +1461,34 @@
                     const leaseTermGroup = document.getElementById("used_lease_term_group") || leaseTerm.closest(".qr-group");
                     const annualHoursGroup = document.getElementById("used_annual_hours_group") || annualHours.closest(".qr-group");
 
-                    function update() {
-                        const isCash = (leaseType.value || "").trim().toLowerCase() === "cash";
+                function update() {
+                    const lt = (leaseType.value || "").trim().toLowerCase();
+                    const isCash = lt === "cash";
+                    const isFPO  = lt === "fpo";
 
-                        if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
-                        if (annualHoursGroup) annualHoursGroup.style.display = isCash ? "none" : "";
+                    // ✅ Annual Hours hides for BOTH Cash and FPO
+                    if (annualHoursGroup) annualHoursGroup.style.display = (isCash || isFPO) ? "none" : "";
 
-                        if (isCash) {
-                            leaseTerm.removeAttribute("required");
-                            annualHours.removeAttribute("required");
-                            leaseTerm.value = "";
-                            annualHours.value = "";
-                            clearFieldError(leaseTerm);
-                            clearFieldError(annualHours);
-                        } else {
-                            leaseTerm.setAttribute("required", "required");
-                            annualHours.setAttribute("required", "required");
-                        }
+                    // ✅ Lease Term hides ONLY for Cash
+                    if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+
+                    if (isCash || isFPO) {
+                        annualHours.removeAttribute("required");
+                        annualHours.value = "";
+                        clearFieldError(annualHours);
+                    } else {
+                        annualHours.setAttribute("required", "required");
                     }
+
+                    // Cash-only behavior (unchanged)
+                    if (isCash) {
+                        leaseTerm.removeAttribute("required");
+                        leaseTerm.value = "";
+                        clearFieldError(leaseTerm);
+                    } else {
+                        leaseTerm.setAttribute("required", "required");
+                    }
+                }
 
                     update();
                     leaseType.addEventListener("change", update);

@@ -3686,14 +3686,21 @@ def quote_request():
         elif lease_type not in allowed_used_lease_types:
             errors.append("Lease Type must be FPO or Cash.")
 
-        if (lease_type or "").lower() == "cash":
+        lt = (lease_type or "").strip().lower()
+
+        if lt in {"cash", "fpo"}:
             annual_hours = ""
+
+        if lt == "cash":
             lease_term = ""
-        else:
-            if not annual_hours:
-                errors.append("Annual Hours is required unless Lease Type is Cash.")
-            if not lease_term:
-                errors.append("Lease Term is required unless Lease Type is Cash.")
+
+        # Only require annual_hours when NOT cash or fpo
+        if lt not in {"cash", "fpo"} and not annual_hours:
+            errors.append("Annual Hours is required unless Lease Type is Cash or FPO.")
+
+        # Only require lease_term when cash is NOT selected
+        if lt != "cash" and not lease_term:
+            errors.append("Lease Term is required unless Lease Type is Cash.")
 
         is_electric = (fuel_type or "").lower() == "electric"
         if is_electric:
