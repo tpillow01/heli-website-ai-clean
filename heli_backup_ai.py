@@ -9,7 +9,7 @@ import difflib
 from datetime import timedelta, datetime  # ⬅️ added datetime
 from functools import wraps, lru_cache  # ⬅️ add lru_cache here
 import logging
-import io  # ⬅️ for in-memory PDF bytes
+import io  # ⬅️ for in-memory DOCX bytes
 
 import pandas as pd  # ⬅️ NEW: for customer_report.csv handling
 
@@ -22,12 +22,17 @@ from flask import (
     url_for,
     session,
     Response,
-    send_file,  # needed for PDF download
+    send_file,  # needed for DOCX download
     flash,      # for error messages
 )
 
 from werkzeug.security import generate_password_hash, check_password_hash
-from quote_request_pdf import build_request_pdf
+
+# DOCX generation (Word) — replaces PDF builder import
+from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
 from indiana_intel import search_indiana_developments, _extract_geo_hint
 
 # (Optional) OpenAI client — leave imported but do not instantiate here
@@ -3261,6 +3266,19 @@ def find_brand_coverage_peers(heli_model: dict, max_rows: int = 10, per_brand: i
     peers = list(best_by_brand.values())[:max_rows]
     return peers
 
+from datetime import datetime
+import io
+import re
+
+from flask import request, render_template, send_file, flash
+from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
 @app.route("/quote-request", methods=["GET", "POST"])
 def quote_request():
     # -----------------------------
@@ -3272,7 +3290,7 @@ def quote_request():
     def _choice(val, default="N/A") -> str:
         """
         For dropdowns where you want an explicit N/A option.
-        Treat empty/placeholder as N/A so PDFs stay clean.
+        Treat empty/placeholder as N/A so docs stay clean.
         """
         v = _s(val)
         if v in {"", "—", "-"}:
@@ -3283,6 +3301,183 @@ def quote_request():
         """For fields that MUST be a real value (not blank, not N/A)."""
         v = _s(val)
         return v == "" or v.lower() in {"n/a", "na"}
+
+    def _sanitize_filename_part(value: str, fallback: str) -> str:
+        """
+        Safe filename for Windows/macOS.
+        Keeps letters/numbers/_/./- and collapses whitespace.
+        """
+        v = (value or "").strip()
+        v = re.sub(r"[^\w\s\-.]", "", v)
+        v = re.sub(r"\s+", " ", v).strip()
+        v = v.replace(" ", "_")
+        return (v or fallback)[:120]
+
+    def build_request_docx(form_data: dict, req_type: str) -> bytes:
+        """
+        Builds a DOCX from the keys your route already produces.
+        Returns raw bytes.
+        """
+        rt = _s(req_type).lower().replace(" ", "_")
+        doc = Document()
+
+        title_map = {
+            "quote": "HELI Quote Request",
+            "demo": "HELI Demo Request",
+            "rental": "HELI Rental Request",
+            "used": "Used Equipment Request",
+            "used_equipment": "Used Equipment Request",
+        }
+
+        def add_title(text: str):
+            p = doc.add_paragraph()
+            run = p.add_run(text)
+            run.bold = True
+            run.font.size = Pt(16)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        def add_sub(text: str):
+            p = doc.add_paragraph()
+            run = p.add_run(text)
+            run.bold = True
+            run.font.size = Pt(12)
+
+        def add_kv(label: str, value):
+            p = doc.add_paragraph()
+            r1 = p.add_run(f"{label}: ")
+            r1.bold = True
+            p.add_run(_s(str(value)) if value is not None else "")
+
+        add_title(title_map.get(rt, "HELI Request"))
+        doc.add_paragraph(f"Generated: {datetime.now().strftime('%m/%d/%Y %I:%M %p')}")
+        doc.add_paragraph("")
+
+        # -----------------------------
+        # QUOTE
+        # -----------------------------
+        if rt == "quote":
+            add_sub("Customer Information")
+            add_kv("Customer Name", form_data.get("customer_name", ""))
+            add_kv("Address", form_data.get("address", ""))
+            add_kv("City / State / Zip", form_data.get("city_state_zip", ""))
+            add_kv("Contact Name", form_data.get("contact_name", ""))
+
+            doc.add_paragraph("")
+            add_sub("Truck Details")
+            add_kv("Model", form_data.get("model", ""))
+            add_kv("Fuel / Voltage", form_data.get("fuel_voltage", ""))
+            add_kv("Mast OHL / MFH", form_data.get("mast_ohl_mfh", ""))
+            add_kv("Mast Type", form_data.get("mast_type", ""))
+            add_kv("Attachment", form_data.get("attachment", ""))
+            add_kv("Aux Control Valve", form_data.get("aux_valve", ""))
+            add_kv("Aux Hose Take Up", form_data.get("aux_hose", ""))
+            add_kv("Fork Type", form_data.get("fork_type", ""))
+            add_kv("Fork Length", form_data.get("fork_length", ""))
+            add_kv("Tires", form_data.get("tires", ""))
+
+            doc.add_paragraph("")
+            add_sub("Options")
+            add_kv("Seat Suspension", form_data.get("seat_suspension", ""))
+            add_kv("Front Work Lights", form_data.get("headlights", ""))
+            add_kv("Backup Alarm", form_data.get("back_up_alarm", ""))
+            add_kv("Strobe", form_data.get("strobe", ""))
+            add_kv("Rear Work Light", form_data.get("rear_work_light", ""))
+            add_kv("Blue Light Front", form_data.get("blue_light_front", ""))
+            add_kv("Blue Light Rear", form_data.get("blue_light_rear", ""))
+            add_kv("Red Curtain Lights", form_data.get("red_curtain_lights", ""))
+            add_kv("Battery", form_data.get("battery", ""))
+            add_kv("Charger", form_data.get("charger", ""))
+            add_kv("Local Options", form_data.get("local_options", ""))
+
+            doc.add_paragraph("")
+            add_sub("Delivery / Finance")
+            add_kv("Requested Delivery", form_data.get("expected_delivery", ""))
+            add_kv("Lease Type", form_data.get("lease_type", ""))
+            add_kv("Annual Hours", form_data.get("annual_hours", ""))
+            add_kv("Lease Term (Months)", form_data.get("lease_term", ""))
+
+            doc.add_paragraph("")
+            add_sub("Notes")
+            doc.add_paragraph(form_data.get("notes", "") or "")
+
+            doc.add_paragraph("")
+            add_kv("Salesperson", form_data.get("salesperson_name", ""))
+
+        # -----------------------------
+        # DEMO / RENTAL
+        # -----------------------------
+        elif rt in {"demo", "rental"}:
+            add_sub("Order Info")
+            add_kv("Ordered By", form_data.get("ordered_by", ""))
+            add_kv("Company Name", form_data.get("company_name", ""))
+            add_kv("Ship To Address", form_data.get("ship_to_address", ""))
+            add_kv("Contact Name", form_data.get("contact_name", ""))
+            add_kv("Phone", form_data.get("phone", ""))
+            add_kv("Bill To Address", form_data.get("bill_to_address", ""))
+            add_kv("Cartage", form_data.get("cartage", ""))
+            add_kv("Company Phone/Fax", form_data.get("company_phone_fax", ""))
+            add_kv("PO #", form_data.get("po_number", ""))
+            add_kv("Quantity", form_data.get("quantity", ""))
+            add_kv("Description / Model", form_data.get("description_model", ""))
+            add_kv("Rate", form_data.get("rate", ""))
+            add_kv("Freight Charges", form_data.get("freight_charges", ""))
+            add_kv("Fork Length", form_data.get("fork_length", ""))
+            add_kv("LBR", form_data.get("lbr", ""))
+            add_kv("Side Shifter", form_data.get("side_shifter", ""))
+            add_kv("Back-up Alarm", form_data.get("backup_alarm", ""))
+            add_kv("Work Lights", form_data.get("headlights", ""))
+            add_kv("Tires", form_data.get("tires", ""))
+            add_kv("LP or Gas / Electric", form_data.get("power_type", ""))
+            add_kv("Need LP Tank", form_data.get("need_lp_tank", ""))
+            add_kv("Mast Height", form_data.get("mast_height", ""))
+            add_kv("Mast Type", form_data.get("mast_type", ""))
+
+            doc.add_paragraph("")
+            add_sub("Electric Details (if applicable)")
+            add_kv("Connector", form_data.get("connector", ""))
+            add_kv("Need Charger", form_data.get("need_charger", ""))
+            add_kv("Input Volts", form_data.get("input_volts", ""))
+            add_kv("Phase", form_data.get("phase", ""))
+
+            doc.add_paragraph("")
+            add_sub("Special Instructions")
+            doc.add_paragraph(form_data.get("special_instructions", "") or "")
+
+        # -----------------------------
+        # USED EQUIPMENT
+        # -----------------------------
+        else:
+            add_sub("Customer Information")
+            add_kv("Customer Name", form_data.get("customer_name", ""))
+            add_kv("Address", form_data.get("address", ""))
+            add_kv("City / State / Zip", form_data.get("city_state_zip", ""))
+            add_kv("Contact Name", form_data.get("contact_name", ""))
+
+            doc.add_paragraph("")
+            add_sub("Truck Details")
+            add_kv("Model", form_data.get("model", ""))
+            add_kv("Fuel Type", form_data.get("fuel_type", ""))
+            add_kv("Battery Voltage", form_data.get("battery_voltage", ""))
+            add_kv("Line Voltage", form_data.get("line_voltage", ""))
+            add_kv("Mast Height", form_data.get("mast_height", ""))
+            add_kv("Mast Type", form_data.get("mast_type", ""))
+            add_kv("Fork Size", form_data.get("fork_size", ""))
+
+            doc.add_paragraph("")
+            add_sub("Budget / Options")
+            add_kv("Customer Budget", form_data.get("budget_price", ""))
+            add_kv("Options Need", form_data.get("options_need", ""))
+            add_kv("Additional Notes", form_data.get("additional_notes", ""))
+
+            doc.add_paragraph("")
+            add_sub("Lease")
+            add_kv("Lease Type", form_data.get("lease_type", ""))
+            add_kv("Annual Hours", form_data.get("annual_hours", ""))
+            add_kv("Lease Term (Months)", form_data.get("lease_term", ""))
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
 
     def _render_with_lists():
         # Ensure Mast Type list includes N/A (for the Quote Request mast type dropdown)
@@ -3491,17 +3686,18 @@ def quote_request():
             "salesperson_name": salesperson_name,
         }
 
-        pdf_bytes = build_request_pdf(form_data, "quote")
-        if not pdf_bytes:
-            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+        docx_bytes = build_request_docx(form_data, "quote")
+        if not docx_bytes:
+            flash("Document generation failed (empty doc). Check server logs.", "error")
             return _render_with_lists()
 
-        safe_customer = (customer_name or "customer").replace(" ", "_")
-        filename = f"heli_quote_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        safe_customer = _sanitize_filename_part(customer_name, "customer")
+        safe_model = _sanitize_filename_part(model, "model")
+        filename = f"{safe_customer}_{safe_model}.docx"
 
         return send_file(
-            io.BytesIO(pdf_bytes),
-            mimetype="application/pdf",
+            io.BytesIO(docx_bytes),
+            mimetype=DOCX_MIME,
             as_attachment=True,
             download_name=filename,
         )
@@ -3606,17 +3802,18 @@ def quote_request():
             "special_instructions": special_instructions,
         }
 
-        pdf_bytes = build_request_pdf(form_data, request_type)
-        if not pdf_bytes:
-            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+        docx_bytes = build_request_docx(form_data, request_type)
+        if not docx_bytes:
+            flash("Document generation failed (empty doc). Check server logs.", "error")
             return _render_with_lists()
 
-        safe_company = (company_name or "company").replace(" ", "_")
-        filename = f"heli_{request_type}_request_{safe_company}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        safe_company = _sanitize_filename_part(company_name, "company")
+        safe_desc = _sanitize_filename_part(description_model, "model")
+        filename = f"{safe_company}_{safe_desc}.docx"
 
         return send_file(
-            io.BytesIO(pdf_bytes),
-            mimetype="application/pdf",
+            io.BytesIO(docx_bytes),
+            mimetype=DOCX_MIME,
             as_attachment=True,
             download_name=filename,
         )
@@ -3720,17 +3917,12 @@ def quote_request():
         form_data = {
             "customer_name": customer_name,
             "address": address,
-
-            # Canonical key
             "city_state_zip": city_state_zip,
-
-            # Aliases so the PDF builder can’t miss it (common variations)
             "city_zip": city_state_zip,
             "city": city,
             "state": state,
             "zip": zip_code,
             "zip_code": zip_code,
-
             "contact_name": contact_name,
             "model": model,
             "fuel_type": fuel_type,
@@ -3750,17 +3942,18 @@ def quote_request():
             "serial_number": "",
         }
 
-        pdf_bytes = build_request_pdf(form_data, "used")
-        if not pdf_bytes:
-            flash("PDF generation failed (empty PDF). Check server logs.", "error")
+        docx_bytes = build_request_docx(form_data, "used")
+        if not docx_bytes:
+            flash("Document generation failed (empty doc). Check server logs.", "error")
             return _render_with_lists()
 
-        safe_customer = (customer_name or "customer").replace(" ", "_")
-        filename = f"used_equipment_request_{safe_customer}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        safe_customer = _sanitize_filename_part(customer_name, "customer")
+        safe_model = _sanitize_filename_part(model, "model")
+        filename = f"{safe_customer}_{safe_model}.docx"
 
         return send_file(
-            io.BytesIO(pdf_bytes),
-            mimetype="application/pdf",
+            io.BytesIO(docx_bytes),
+            mimetype=DOCX_MIME,
             as_attachment=True,
             download_name=filename,
         )

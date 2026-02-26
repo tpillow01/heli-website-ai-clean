@@ -67,7 +67,7 @@
         <section class="quote-request-card">
             <h1 id="pageTitle" class="quote-request-title">HELI Quote Request</h1>
             <p id="pageSubtitle" class="quote-request-subtitle">
-                Fill out every field below to generate a clean PDF for Lisa.
+                Fill out every field below to generate a clean Word document for Lisa.
             </p>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -82,7 +82,7 @@
 
             <div id="mobileSaveHint" style="display:none; margin-top:12px;">
                 <div class="qr-hint">
-                    Mobile tip: after the PDF opens, tap <strong>Share</strong> → <strong>Save to Files</strong> (iPhone)
+                    Mobile tip: after the Word document opens/downloads, tap <strong>Share</strong> → <strong>Save to Files</strong> (iPhone)
                     or <strong>Download</strong>/<strong>Save to Drive</strong> (Android).
                 </div>
             </div>
@@ -109,7 +109,7 @@
                       class="quote-request-form"
                       novalidate
                       data-request-type="quote"
-                      data-pdf-title="HELI Quote Request">
+                      data-doc-title="HELI Quote Request">
 
                     <input type="hidden" name="request_type" value="quote" />
 
@@ -173,7 +173,6 @@
                             <div class="qr-hint">Simplex, Duplex, Triplex, or Quad</div>
                             <select id="mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <!-- #2 Add N/A -->
                                 <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     {% set opt = option|string %}
@@ -326,7 +325,6 @@
                                 <option value="" disabled selected>Select battery</option>
                                 {% for option in battery_options %}
                                     {% set opt = option|string %}
-                                    <!-- #4 Remove N/A and dash-like options -->
                                     {% if opt|trim|lower not in ['n/a', 'na', '-', '—'] %}
                                         <option value="{{ opt }}">{{ opt }}</option>
                                     {% endif %}
@@ -390,7 +388,7 @@
 
                     <div class="qr-actions">
                         <button type="submit" class="primary-button">
-                            Generate Quote Request PDF
+                            Generate Quote Request Word Doc
                         </button>
                     </div>
                 </form>
@@ -406,7 +404,7 @@
                       class="quote-request-form"
                       novalidate
                       data-request-type="demo"
-                      data-pdf-title="HELI Demo Request">
+                      data-doc-title="HELI Demo Request">
 
                     <input type="hidden" name="request_type" value="demo" />
 
@@ -454,7 +452,6 @@
                         <div class="qr-group">
                             <label for="demo_cartage">Cartage</label>
                             <select id="demo_cartage" name="cartage" class="qr-select">
-                                <!-- #6 remove dash; use N/A -->
                                 <option value="N/A" selected>N/A</option>
                                 <option value="Dock">Dock</option>
                                 <option value="Ground">Ground</option>
@@ -474,7 +471,6 @@
                         <div class="qr-group">
                             <label for="demo_rate">Rate</label>
                             <select id="demo_rate" name="rate" class="qr-select">
-                                <!-- #6 remove dash; use N/A -->
                                 <option value="N/A" selected>N/A</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
@@ -571,7 +567,6 @@
                             <label for="demo_mast_type">Mast Type</label>
                             <select id="demo_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <!-- #2 Add N/A -->
                                 <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     {% set opt = option|string %}
@@ -619,7 +614,7 @@
 
                     <div class="qr-actions">
                         <button type="submit" class="primary-button">
-                            Generate Demo Request PDF
+                            Generate Demo Request Word Doc
                         </button>
                     </div>
                 </form>
@@ -635,7 +630,7 @@
                       class="quote-request-form"
                       novalidate
                       data-request-type="rental"
-                      data-pdf-title="HELI Rental Request">
+                      data-doc-title="HELI Rental Request">
 
                     <input type="hidden" name="request_type" value="rental" />
 
@@ -798,7 +793,6 @@
                             <label for="rental_mast_type">Mast Type</label>
                             <select id="rental_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <!-- #2 Add N/A -->
                                 <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     {% set opt = option|string %}
@@ -846,7 +840,7 @@
 
                     <div class="qr-actions">
                         <button type="submit" class="primary-button">
-                            Generate Rental Request PDF
+                            Generate Rental Request Word Doc
                         </button>
                     </div>
                 </form>
@@ -862,7 +856,7 @@
                       class="quote-request-form"
                       novalidate
                       data-request-type="used_equipment"
-                      data-pdf-title="Used Equipment Request">
+                      data-doc-title="Used Equipment Request">
 
                     <input type="hidden" name="request_type" value="used_equipment" />
 
@@ -908,7 +902,6 @@
                         <div class="qr-group" id="used_voltage_group" style="display:none;">
                             <label for="used_voltage">Electric Voltage</label>
                             <select id="used_voltage" name="battery_voltage" class="qr-select">
-                                <!-- #6 remove dash; use N/A -->
                                 <option value="N/A" selected>N/A</option>
                                 <option value="12V">12V</option>
                                 <option value="24V">24V</option>
@@ -932,7 +925,6 @@
                             <label for="used_mast_type">Mast Type</label>
                             <select id="used_mast_type" name="mast_type" class="qr-select" required>
                                 <option value="" disabled selected>Select mast type</option>
-                                <!-- #2 Add N/A -->
                                 <option value="N/A">N/A</option>
                                 {% for option in mast_type_options %}
                                     {% set opt = option|string %}
@@ -989,7 +981,7 @@
 
                     <div class="qr-actions">
                         <button type="submit" class="primary-button">
-                            Generate Used Equipment Request PDF
+                            Generate Used Equipment Request Word Doc
                         </button>
                     </div>
                 </form>
@@ -1179,22 +1171,22 @@
                     if (type === "demo") {
                         wrapDemo.style.display = "block";
                         pageTitle.textContent = "HELI Demo Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
                         restoreDraft(document.getElementById("demoRequestForm"));
                     } else if (type === "rental") {
                         wrapRental.style.display = "block";
                         pageTitle.textContent = "HELI Rental Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
                         restoreDraft(document.getElementById("rentalRequestForm"));
                     } else if (type === "used") {
                         wrapUsed.style.display = "block";
                         pageTitle.textContent = "Used Equipment Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
                         restoreDraft(document.getElementById("usedRequestForm"));
                     } else {
                         wrapQuote.style.display = "block";
                         pageTitle.textContent = "HELI Quote Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean PDF for Lisa.";
+                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
                         restoreDraft(document.getElementById("quoteRequestForm"));
                     }
                 }
@@ -1211,7 +1203,6 @@
                 const voltageGroup = document.getElementById('battery_voltage_group');
                 const voltageInput = document.getElementById('battery_voltage');
 
-                // #3 Battery + Charger hide/show based on fuel
                 const batteryEl = document.getElementById("battery");
                 const chargerEl = document.getElementById("charger");
                 const batteryGroup = document.getElementById("battery_group") || (batteryEl ? batteryEl.closest(".qr-group") : null);
@@ -1267,7 +1258,6 @@
                         showGroup(batteryGroup, [batteryEl]);
                         showGroup(chargerGroup, [chargerEl]);
                     } else {
-                        // Hide for LPG / Dual Fuel / Diesel (and any non-electric)
                         hideGroupAndClear(batteryGroup);
                         hideGroupAndClear(chargerGroup);
                     }
@@ -1414,35 +1404,30 @@
                     const leaseTermGroup = leaseTerm.closest(".qr-group");
                     const annualHoursGroup = annualHours.closest(".qr-group");
 
-                function update() {
-                    const lt = (leaseType.value || "").trim().toLowerCase();
-                    const isCash = (lt === "cash");
-                    const isFPO  = (lt === "fpo");
+                    function update() {
+                        const lt = (leaseType.value || "").trim().toLowerCase();
+                        const isCash = (lt === "cash");
+                        const isFPO  = (lt === "fpo");
 
-                    // Cash = hide both
-                    if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+                        if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+                        if (annualHoursGroup) annualHoursGroup.style.display = (isCash || isFPO) ? "none" : "";
 
-                    // Cash OR FPO = hide annual hours
-                    if (annualHoursGroup) annualHoursGroup.style.display = (isCash || isFPO) ? "none" : "";
+                        if (isCash || isFPO) {
+                            annualHours.removeAttribute("required");
+                            annualHours.value = "";
+                            clearFieldError(annualHours);
+                        } else {
+                            annualHours.setAttribute("required", "required");
+                        }
 
-                    // Annual hours: remove required + clear for Cash or FPO
-                    if (isCash || isFPO) {
-                        annualHours.removeAttribute("required");
-                        annualHours.value = "";
-                        clearFieldError(annualHours);
-                    } else {
-                        annualHours.setAttribute("required", "required");
+                        if (isCash) {
+                            leaseTerm.removeAttribute("required");
+                            leaseTerm.value = "";
+                            clearFieldError(leaseTerm);
+                        } else {
+                            leaseTerm.setAttribute("required", "required");
+                        }
                     }
-
-                    // Lease term: Cash only behavior (unchanged)
-                    if (isCash) {
-                        leaseTerm.removeAttribute("required");
-                        leaseTerm.value = "";
-                        clearFieldError(leaseTerm);
-                    } else {
-                        leaseTerm.setAttribute("required", "required");
-                    }
-                }
 
                     update();
                     leaseType.addEventListener("change", update);
@@ -1461,41 +1446,37 @@
                     const leaseTermGroup = document.getElementById("used_lease_term_group") || leaseTerm.closest(".qr-group");
                     const annualHoursGroup = document.getElementById("used_annual_hours_group") || annualHours.closest(".qr-group");
 
-                function update() {
-                    const lt = (leaseType.value || "").trim().toLowerCase();
-                    const isCash = lt === "cash";
-                    const isFPO  = lt === "fpo";
+                    function update() {
+                        const lt = (leaseType.value || "").trim().toLowerCase();
+                        const isCash = lt === "cash";
+                        const isFPO  = lt === "fpo";
 
-                    // ✅ Annual Hours hides for BOTH Cash and FPO
-                    if (annualHoursGroup) annualHoursGroup.style.display = (isCash || isFPO) ? "none" : "";
+                        if (annualHoursGroup) annualHoursGroup.style.display = (isCash || isFPO) ? "none" : "";
+                        if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
 
-                    // ✅ Lease Term hides ONLY for Cash
-                    if (leaseTermGroup) leaseTermGroup.style.display = isCash ? "none" : "";
+                        if (isCash || isFPO) {
+                            annualHours.removeAttribute("required");
+                            annualHours.value = "";
+                            clearFieldError(annualHours);
+                        } else {
+                            annualHours.setAttribute("required", "required");
+                        }
 
-                    if (isCash || isFPO) {
-                        annualHours.removeAttribute("required");
-                        annualHours.value = "";
-                        clearFieldError(annualHours);
-                    } else {
-                        annualHours.setAttribute("required", "required");
+                        if (isCash) {
+                            leaseTerm.removeAttribute("required");
+                            leaseTerm.value = "";
+                            clearFieldError(leaseTerm);
+                        } else {
+                            leaseTerm.setAttribute("required", "required");
+                        }
                     }
-
-                    // Cash-only behavior (unchanged)
-                    if (isCash) {
-                        leaseTerm.removeAttribute("required");
-                        leaseTerm.value = "";
-                        clearFieldError(leaseTerm);
-                    } else {
-                        leaseTerm.setAttribute("required", "required");
-                    }
-                }
 
                     update();
                     leaseType.addEventListener("change", update);
                 })();
 
                 // -----------------------------
-                // 5) Mobile Share/Save behavior (unchanged)
+                // 5) Mobile Share/Save behavior (DOCX)
                 // -----------------------------
                 (function () {
                     const hint = document.getElementById("mobileSaveHint");
@@ -1509,6 +1490,8 @@
                     if (hint) hint.style.display = "block";
 
                     const forms = document.querySelectorAll("form.quote-request-form");
+                    const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
                     forms.forEach((form) => {
                         form.addEventListener("submit", async (e) => {
                             if (!validateForm(form)) {
@@ -1519,10 +1502,10 @@
                             e.preventDefault();
 
                             const btn = form.querySelector("button[type='submit']");
-                            const originalText = btn ? btn.textContent : "Generating PDF...";
+                            const originalText = btn ? btn.textContent : "Generating document...";
                             if (btn) {
                                 btn.disabled = true;
-                                btn.textContent = "Generating PDF...";
+                                btn.textContent = "Generating document...";
                             }
 
                             try {
@@ -1533,13 +1516,13 @@
                                     body: formData,
                                     headers: {
                                         "X-Requested-With": "fetch",
-                                        "Accept": "application/pdf"
+                                        "Accept": DOCX_MIME
                                     }
                                 });
 
                                 const contentType = (res.headers.get("content-type") || "").toLowerCase();
 
-                                if (!res.ok || !contentType.includes("application/pdf")) {
+                                if (!res.ok || !contentType.includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
                                     const html = await res.text().catch(() => "");
                                     document.open();
                                     document.write(html);
@@ -1551,17 +1534,17 @@
 
                                 const dispo = res.headers.get("content-disposition") || "";
                                 const match = dispo.match(/filename="(.+?)"/);
-                                const defaultName = (form.dataset.requestType || "request") + "_request.pdf";
+                                const defaultName = (form.dataset.requestType || "request") + "_request.docx";
                                 const filename = match ? match[1] : defaultName;
 
-                                const file = new File([blob], filename, { type: "application/pdf" });
+                                const file = new File([blob], filename, { type: DOCX_MIME });
 
                                 clearDraft(form);
 
                                 if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
                                     await navigator.share({
-                                        title: form.dataset.pdfTitle || "HELI Request",
-                                        text: "Request PDF",
+                                        title: form.dataset.docTitle || "HELI Request",
+                                        text: "Request Document",
                                         files: [file],
                                     });
                                     return;
@@ -1572,7 +1555,7 @@
                                 setTimeout(() => URL.revokeObjectURL(url), 30000);
 
                             } catch (err) {
-                                alert("Failed to generate/share the PDF. Please check required fields or try again.");
+                                alert("Failed to generate/share the document. Please check required fields or try again.");
                             } finally {
                                 if (btn) {
                                     btn.disabled = false;
