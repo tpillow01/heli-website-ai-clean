@@ -3292,237 +3292,147 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
     now = datetime.now()
 
     # -----------------------------
-    # QUOTE (HARD ONE-PAGE VERSION)
-    # -----------------------------
-    if rt == "quote":
-        doc = Document()
-
-        # Tighter margins (big win for one page)
-        section = doc.sections[0]
-        section.top_margin = Inches(0.4)
-        section.bottom_margin = Inches(0.4)
-        section.left_margin = Inches(0.45)
-        section.right_margin = Inches(0.45)
-
-        # Smaller default font (still readable)
-        normal = doc.styles["Normal"]
-        normal.font.name = "Calibri"
-        normal.font.size = Pt(9.5)
-
-        def clamp_text(text: str, max_chars: int) -> str:
-            text = s(text)
-            return text if len(text) <= max_chars else (text[:max_chars].rstrip() + "…")
-
-        def set_cell_shading(cell, fill_hex="EDEDED"):
-            tcPr = cell._tc.get_or_add_tcPr()
-            shd = OxmlElement("w:shd")
-            shd.set(qn("w:val"), "clear")
-            shd.set(qn("w:color"), "auto")
-            shd.set(qn("w:fill"), fill_hex)
-            tcPr.append(shd)
-
-        # Tighter cell padding
-        def set_cell_margins(cell, top=40, start=90, bottom=40, end=90):
-            tcPr = cell._tc.get_or_add_tcPr()
-            tcMar = OxmlElement("w:tcMar")
-            for tag, val in (("w:top", top), ("w:start", start), ("w:bottom", bottom), ("w:end", end)):
-                node = OxmlElement(tag)
-                node.set(qn("w:w"), str(val))
-                node.set(qn("w:type"), "dxa")
-                tcMar.append(node)
-            tcPr.append(tcMar)
-
-        # Smaller row height
-        def set_row_height(row, height_twips, exact=False):
-            trPr = row._tr.get_or_add_trPr()
-            trHeight = OxmlElement("w:trHeight")
-            trHeight.set(qn("w:val"), str(height_twips))
-            trHeight.set(qn("w:hRule"), "exact" if exact else "atLeast")
-            trPr.append(trHeight)
-
-        def set_table_no_borders(tbl):
-            tblPr = tbl._tbl.tblPr
-            borders = OxmlElement("w:tblBorders")
-            for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-                element = OxmlElement(f"w:{edge}")
-                element.set(qn("w:val"), "nil")
-                borders.append(element)
-            tblPr.append(borders)
-
-        def set_table_light_grid(tbl):
-            tblPr = tbl._tbl.tblPr
-            borders = OxmlElement("w:tblBorders")
-            for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-                element = OxmlElement(f"w:{edge}")
-                element.set(qn("w:val"), "single")
-                element.set(qn("w:sz"), "6")
-                element.set(qn("w:space"), "0")
-                element.set(qn("w:color"), "BFBFBF")
-                borders.append(element)
-            tblPr.append(borders)
-
-        def add_title(title_text: str):
-            p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(1)
-            r = p.add_run(title_text)
-            r.bold = True
-            r.font.size = Pt(14)  # smaller than before
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            p2 = doc.add_paragraph()
-            p2.paragraph_format.space_before = Pt(0)
-            p2.paragraph_format.space_after = Pt(4)
-            r2 = p2.add_run(f"Generated: {now.strftime('%m/%d/%Y %I:%M %p')}")
-            r2.font.size = Pt(8.5)
-            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        def add_section_header(container_cell, text: str):
-            tbl = container_cell.add_table(rows=1, cols=1)
-            tbl.autofit = True
-            set_table_light_grid(tbl)
-            c = tbl.cell(0, 0)
-            set_cell_shading(c, "EDEDED")
-            set_cell_margins(c, top=30, bottom=30, start=110, end=110)
-
-            p = c.paragraphs[0]
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(1)
-
-            rr = p.add_run(text.upper())
-            rr.bold = True
-            rr.font.size = Pt(9.5)
-
-        def add_kv_rows(container_cell, items):
-            tbl = container_cell.add_table(rows=len(items), cols=2)
-            tbl.autofit = True
-            set_table_light_grid(tbl)
-
-            for i, (label, value) in enumerate(items):
-                set_row_height(tbl.rows[i], 240, exact=False)  # tighter than 320
-
-                c1 = tbl.cell(i, 0)
-                c2 = tbl.cell(i, 1)
-                set_cell_margins(c1)
-                set_cell_margins(c2)
-
-                # label
-                p1 = c1.paragraphs[0]
-                p1.paragraph_format.space_before = Pt(0)
-                p1.paragraph_format.space_after = Pt(0)
-                r1 = p1.add_run(str(label))
-                r1.bold = True
-                r1.font.size = Pt(8.8)
-
-                # value
-                p2 = c2.paragraphs[0]
-                p2.paragraph_format.space_before = Pt(0)
-                p2.paragraph_format.space_after = Pt(0)
-                p2.add_run(s(value)).font.size = Pt(9.5)
-
-        def add_notes_box(container_cell, text: str, height_twips=520):
-            tbl = container_cell.add_table(rows=1, cols=1)
-            tbl.autofit = True
-            set_table_light_grid(tbl)
-            c = tbl.cell(0, 0)
-            set_cell_margins(c, top=80, bottom=80, start=120, end=120)
-            set_row_height(tbl.rows[0], height_twips, exact=False)
-
-            p = c.paragraphs[0]
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(0)
-            p.add_run(s(text)).font.size = Pt(9.5)
-
-        # Clamp more aggressively (this is what truly guarantees one page)
-        safe_address = clamp_text(form_data.get("address", ""), 55)
-        safe_local = clamp_text(form_data.get("local_options", ""), 65)
-        safe_notes = clamp_text(form_data.get("notes", ""), 160)
-
-        add_title("HELI Quote Request")
-
-        # Two columns
-        outer = doc.add_table(rows=1, cols=2)
-        outer.autofit = False
-        set_table_no_borders(outer)
-
-        left = outer.cell(0, 0)
-        right = outer.cell(0, 1)
-
-        # smaller gutter
-        set_cell_margins(left, top=0, bottom=0, start=0, end=120)
-        set_cell_margins(right, top=0, bottom=0, start=120, end=0)
-
-        # LEFT = Customer + Options
-        add_section_header(left, "Customer Information")
-        add_kv_rows(left, [
-            ("Customer", form_data.get("customer_name", "")),
-            ("Contact", form_data.get("contact_name", "")),
-            ("Address", safe_address),
-            ("City/State/Zip", form_data.get("city_state_zip", "")),
-        ])
-
-        add_section_header(left, "Options")
-        add_kv_rows(left, [
-            ("Seat Suspension", form_data.get("seat_suspension", "")),
-            ("Front Work Lights", form_data.get("headlights", "")),
-            ("Backup Alarm", form_data.get("back_up_alarm", "")),
-            ("Strobe", form_data.get("strobe", "")),
-            ("Rear Work Light", form_data.get("rear_work_light", "")),
-            ("Blue Light Front", form_data.get("blue_light_front", "")),
-            ("Blue Light Rear", form_data.get("blue_light_rear", "")),
-            ("Red Curtain Lights", form_data.get("red_curtain_lights", "")),
-            ("Battery", form_data.get("battery", "")),
-            ("Charger", form_data.get("charger", "")),
-            ("Local Options", safe_local),
-        ])
-
-        # RIGHT = Equipment + Delivery/Finance
-        add_section_header(right, "Equipment Requirements")
-        add_kv_rows(right, [
-            ("Model", form_data.get("model", "")),
-            ("Fuel / Voltage", form_data.get("fuel_voltage", "")),
-            ("Mast Type", form_data.get("mast_type", "")),
-            ("Mast OHL / MFH", form_data.get("mast_ohl_mfh", "")),
-            ("Attachment", form_data.get("attachment", "")),
-            ("Aux Valve", form_data.get("aux_valve", "")),
-            ("Aux Hose", form_data.get("aux_hose", "")),
-            ("Fork Type", form_data.get("fork_type", "")),
-            ("Fork Length", form_data.get("fork_length", "")),
-            ("Tires", form_data.get("tires", "")),
-        ])
-
-        add_section_header(right, "Delivery / Finance")
-        add_kv_rows(right, [
-            ("Requested Delivery", form_data.get("expected_delivery", "")),
-            ("Lease Type", form_data.get("lease_type", "")),
-            ("Annual Hours", form_data.get("annual_hours", "")),
-            ("Lease Term (Months)", form_data.get("lease_term", "")),
-        ])
-
-        # Full-width Notes + Sales (NO extra blank paragraph)
-        full = doc.add_table(rows=1, cols=1)
-        full.autofit = True
-        set_table_no_borders(full)
-        full_cell = full.cell(0, 0)
-        set_cell_margins(full_cell, top=0, bottom=0, start=0, end=0)
-
-        add_section_header(full_cell, "Notes")
-        add_notes_box(full_cell, safe_notes, height_twips=520)
-
-        add_section_header(full_cell, "Sales")
-        add_kv_rows(full_cell, [
-            ("Salesperson", form_data.get("salesperson_name", "")),
-        ])
-
-        buf = io.BytesIO()
-        doc.save(buf)
-        return buf.getvalue()
-    
-    # -----------------------------
-    # NON-QUOTE (simple output)
+    # Shared one-page styling helpers
     # -----------------------------
     doc = Document()
 
+    # Tight margins for 1-page behavior
+    section = doc.sections[0]
+    section.top_margin = Inches(0.4)
+    section.bottom_margin = Inches(0.4)
+    section.left_margin = Inches(0.45)
+    section.right_margin = Inches(0.45)
+
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(9.5)
+
+    def clamp_text(text: str, max_chars: int) -> str:
+        text = s(text)
+        return text if len(text) <= max_chars else (text[:max_chars].rstrip() + "…")
+
+    def set_cell_shading(cell, fill_hex="EDEDED"):
+        tcPr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), fill_hex)
+        tcPr.append(shd)
+
+    # Tight cell padding
+    def set_cell_margins(cell, top=35, start=85, bottom=35, end=85):
+        tcPr = cell._tc.get_or_add_tcPr()
+        tcMar = OxmlElement("w:tcMar")
+        for tag, val in (("w:top", top), ("w:start", start), ("w:bottom", bottom), ("w:end", end)):
+            node = OxmlElement(tag)
+            node.set(qn("w:w"), str(val))
+            node.set(qn("w:type"), "dxa")
+            tcMar.append(node)
+        tcPr.append(tcMar)
+
+    # Tight row height
+    def set_row_height(row, height_twips=220, exact=False):
+        trPr = row._tr.get_or_add_trPr()
+        trHeight = OxmlElement("w:trHeight")
+        trHeight.set(qn("w:val"), str(height_twips))
+        trHeight.set(qn("w:hRule"), "exact" if exact else "atLeast")
+        trPr.append(trHeight)
+
+    def set_table_no_borders(tbl):
+        tblPr = tbl._tbl.tblPr
+        borders = OxmlElement("w:tblBorders")
+        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            element = OxmlElement(f"w:{edge}")
+            element.set(qn("w:val"), "nil")
+            borders.append(element)
+        tblPr.append(borders)
+
+    def set_table_light_grid(tbl):
+        tblPr = tbl._tbl.tblPr
+        borders = OxmlElement("w:tblBorders")
+        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            element = OxmlElement(f"w:{edge}")
+            element.set(qn("w:val"), "single")
+            element.set(qn("w:sz"), "6")
+            element.set(qn("w:space"), "0")
+            element.set(qn("w:color"), "BFBFBF")
+            borders.append(element)
+        tblPr.append(borders)
+
+    def add_title(title_text: str):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(1)
+        r = p.add_run(title_text)
+        r.bold = True
+        r.font.size = Pt(14)
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        p2 = doc.add_paragraph()
+        p2.paragraph_format.space_before = Pt(0)
+        p2.paragraph_format.space_after = Pt(4)
+        r2 = p2.add_run(f"Generated: {now.strftime('%m/%d/%Y %I:%M %p')}")
+        r2.font.size = Pt(8.5)
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    def add_section_header(container_cell, text: str):
+        tbl = container_cell.add_table(rows=1, cols=1)
+        tbl.autofit = True
+        set_table_light_grid(tbl)
+        c = tbl.cell(0, 0)
+        set_cell_shading(c, "EDEDED")
+        set_cell_margins(c, top=25, bottom=25, start=110, end=110)
+
+        p = c.paragraphs[0]
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(1)
+
+        rr = p.add_run(text.upper())
+        rr.bold = True
+        rr.font.size = Pt(9.5)
+
+    def add_kv_rows(container_cell, items):
+        # items: list of (label, value). Empty values are allowed (keeps layout consistent)
+        tbl = container_cell.add_table(rows=len(items), cols=2)
+        tbl.autofit = True
+        set_table_light_grid(tbl)
+
+        for i, (label, value) in enumerate(items):
+            set_row_height(tbl.rows[i], 220, exact=False)
+
+            c1 = tbl.cell(i, 0)
+            c2 = tbl.cell(i, 1)
+            set_cell_margins(c1)
+            set_cell_margins(c2)
+
+            p1 = c1.paragraphs[0]
+            p1.paragraph_format.space_before = Pt(0)
+            p1.paragraph_format.space_after = Pt(0)
+            r1 = p1.add_run(str(label))
+            r1.bold = True
+            r1.font.size = Pt(8.8)
+
+            p2 = c2.paragraphs[0]
+            p2.paragraph_format.space_before = Pt(0)
+            p2.paragraph_format.space_after = Pt(0)
+            p2.add_run(s(value)).font.size = Pt(9.5)
+
+    def add_notes_box(container_cell, text: str, height_twips=520):
+        tbl = container_cell.add_table(rows=1, cols=1)
+        tbl.autofit = True
+        set_table_light_grid(tbl)
+        c = tbl.cell(0, 0)
+        set_cell_margins(c, top=70, bottom=70, start=120, end=120)
+        set_row_height(tbl.rows[0], height_twips, exact=False)
+
+        p = c.paragraphs[0]
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.add_run(s(text)).font.size = Pt(9.5)
+
+    # -----------------------------
+    # Decide title + sections per request type
+    # -----------------------------
     title_map = {
         "quote": "HELI Quote Request",
         "demo": "HELI Demo Request",
@@ -3531,102 +3441,212 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
         "used_equipment": "Used Equipment Request",
     }
 
-    def add_title_simple(text: str):
-        p = doc.add_paragraph()
-        run = p.add_run(text)
-        run.bold = True
-        run.font.size = Pt(16)
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Default notes + salesperson (if present)
+    notes_text = ""
+    salesperson = s(form_data.get("salesperson_name"))
 
-    def add_sub(text: str):
-        p = doc.add_paragraph()
-        run = p.add_run(text)
-        run.bold = True
-        run.font.size = Pt(12)
+    # Clamp common long fields
+    safe_address = clamp_text(form_data.get("address", ""), 55)
+    safe_ship_to = clamp_text(form_data.get("ship_to_address", ""), 65)
+    safe_bill_to = clamp_text(form_data.get("bill_to_address", ""), 65)
+    safe_local = clamp_text(form_data.get("local_options", ""), 65)
 
-    def add_kv(label: str, value):
-        p = doc.add_paragraph()
-        r1 = p.add_run(f"{label}: ")
-        r1.bold = True
-        p.add_run(s(value))
+    # Build section definitions:
+    # Each section is: ("Section Title", [(label, value), ...])
+    left_sections = []
+    right_sections = []
 
-    add_title_simple(title_map.get(rt, "HELI Request"))
-    doc.add_paragraph(f"Generated: {now.strftime('%m/%d/%Y %I:%M %p')}")
-    doc.add_paragraph("")
+    if rt == "quote":
+        # Notes + salesperson exist
+        notes_text = clamp_text(form_data.get("notes", ""), 160)
 
-    if rt in {"demo", "rental"}:
-        add_sub("Order Info")
-        for k, lbl in [
-            ("ordered_by", "Ordered By"),
-            ("company_name", "Company Name"),
-            ("ship_to_address", "Ship To Address"),
-            ("contact_name", "Contact Name"),
-            ("phone", "Phone"),
-            ("bill_to_address", "Bill To Address"),
-            ("cartage", "Cartage"),
-            ("company_phone_fax", "Company Phone/Fax"),
-            ("po_number", "PO #"),
-            ("quantity", "Quantity"),
-            ("description_model", "Description / Model"),
-            ("rate", "Rate"),
-            ("freight_charges", "Freight Charges"),
-            ("fork_length", "Fork Length"),
-            ("lbr", "LBR"),
-            ("side_shifter", "Side Shifter"),
-            ("backup_alarm", "Back-up Alarm"),
-            ("headlights", "Work Lights"),
-            ("tires", "Tires"),
-            ("power_type", "LP or Gas / Electric"),
-            ("need_lp_tank", "Need LP Tank"),
-            ("mast_height", "Mast Height"),
-            ("mast_type", "Mast Type"),
-        ]:
-            add_kv(lbl, form_data.get(k, ""))
+        # LEFT: Customer + Options
+        left_sections = [
+            ("Customer Information", [
+                ("Customer", form_data.get("customer_name", "")),
+                ("Contact", form_data.get("contact_name", "")),
+                ("Address", safe_address),
+                ("City/State/Zip", form_data.get("city_state_zip", "")),
+            ]),
+            ("Options", [
+                ("Seat Suspension", form_data.get("seat_suspension", "")),
+                ("Front Work Lights", form_data.get("headlights", "")),
+                ("Backup Alarm", form_data.get("back_up_alarm", "")),
+                ("Strobe", form_data.get("strobe", "")),
+                ("Rear Work Light", form_data.get("rear_work_light", "")),
+                ("Blue Light Front", form_data.get("blue_light_front", "")),
+                ("Blue Light Rear", form_data.get("blue_light_rear", "")),
+                ("Red Curtain Lights", form_data.get("red_curtain_lights", "")),
+                ("Battery", form_data.get("battery", "")),
+                ("Charger", form_data.get("charger", "")),
+                ("Local Options", safe_local),
+            ]),
+        ]
 
-        doc.add_paragraph("")
-        add_sub("Electric Details (if applicable)")
-        add_kv("Connector", form_data.get("connector", ""))
-        add_kv("Need Charger", form_data.get("need_charger", ""))
-        add_kv("Input Volts", form_data.get("input_volts", ""))
-        add_kv("Phase", form_data.get("phase", ""))
+        # RIGHT: Equipment + Delivery/Finance
+        right_sections = [
+            ("Equipment Requirements", [
+                ("Model", form_data.get("model", "")),
+                ("Fuel / Voltage", form_data.get("fuel_voltage", "")),
+                ("Mast Type", form_data.get("mast_type", "")),
+                ("Mast OHL / MFH", form_data.get("mast_ohl_mfh", "")),
+                ("Attachment", form_data.get("attachment", "")),
+                ("Aux Valve", form_data.get("aux_valve", "")),
+                ("Aux Hose", form_data.get("aux_hose", "")),
+                ("Fork Type", form_data.get("fork_type", "")),
+                ("Fork Length", form_data.get("fork_length", "")),
+                ("Tires", form_data.get("tires", "")),
+            ]),
+            ("Delivery / Finance", [
+                ("Requested Delivery", form_data.get("expected_delivery", "")),
+                ("Lease Type", form_data.get("lease_type", "")),
+                ("Annual Hours", form_data.get("annual_hours", "")),
+                ("Lease Term (Months)", form_data.get("lease_term", "")),
+            ]),
+        ]
 
-        doc.add_paragraph("")
-        add_sub("Special Instructions")
-        doc.add_paragraph(form_data.get("special_instructions", "") or "")
+    elif rt in {"demo", "rental"}:
+        # Use special instructions as notes (clamped)
+        notes_text = clamp_text(form_data.get("special_instructions", ""), 160)
+
+        # LEFT: "Customer/Order" + "Options" (still quote-style)
+        left_sections = [
+            ("Order Information", [
+                ("Ordered By", form_data.get("ordered_by", "")),
+                ("Company", form_data.get("company_name", "")),
+                ("Contact", form_data.get("contact_name", "")),
+                ("Phone", form_data.get("phone", "")),
+                ("PO #", form_data.get("po_number", "")),
+                ("Quantity", form_data.get("quantity", "")),
+                ("Rate", form_data.get("rate", "")),
+            ]),
+            ("Shipping / Billing", [
+                ("Ship To", safe_ship_to),
+                ("Bill To", safe_bill_to),
+                ("Cartage", form_data.get("cartage", "")),
+                ("Freight Charges", form_data.get("freight_charges", "")),
+                ("Company Phone/Fax", form_data.get("company_phone_fax", "")),
+            ]),
+        ]
+
+        # RIGHT: Equipment + Power + Electric Details
+        right_sections = [
+            ("Equipment Requirements", [
+                ("Description / Model", form_data.get("description_model", "")),
+                ("Mast Height", form_data.get("mast_height", "")),
+                ("Mast Type", form_data.get("mast_type", "")),
+                ("Fork Length", form_data.get("fork_length", "")),
+                ("Tires", form_data.get("tires", "")),
+                ("Power Type", form_data.get("power_type", "")),
+                ("Need LP Tank", form_data.get("need_lp_tank", "")),
+            ]),
+            ("Options", [
+                ("LBR", form_data.get("lbr", "")),
+                ("Side Shifter", form_data.get("side_shifter", "")),
+                ("Back-up Alarm", form_data.get("backup_alarm", "")),
+                ("Work Lights", form_data.get("headlights", "")),
+            ]),
+            ("Electric Details (if applicable)", [
+                ("Connector", form_data.get("connector", "")),
+                ("Need Charger", form_data.get("need_charger", "")),
+                ("Input Volts", form_data.get("input_volts", "")),
+                ("Phase", form_data.get("phase", "")),
+            ]),
+        ]
 
     else:
-        add_sub("Customer Information")
-        add_kv("Customer Name", form_data.get("customer_name", ""))
-        add_kv("Address", form_data.get("address", ""))
-        add_kv("City / State / Zip", form_data.get("city_state_zip", ""))
-        add_kv("Contact Name", form_data.get("contact_name", ""))
+        # USED EQUIPMENT
+        notes_text = clamp_text(form_data.get("additional_notes", ""), 160)
 
-        doc.add_paragraph("")
-        add_sub("Truck Details")
-        add_kv("Model", form_data.get("model", ""))
-        add_kv("Fuel Type", form_data.get("fuel_type", ""))
-        add_kv("Battery Voltage", form_data.get("battery_voltage", ""))
-        add_kv("Line Voltage", form_data.get("line_voltage", ""))
-        add_kv("Mast Height", form_data.get("mast_height", ""))
-        add_kv("Mast Type", form_data.get("mast_type", ""))
-        add_kv("Fork Size", form_data.get("fork_size", ""))
+        left_sections = [
+            ("Customer Information", [
+                ("Customer", form_data.get("customer_name", "")),
+                ("Contact", form_data.get("contact_name", "")),
+                ("Address", safe_address),
+                ("City/State/Zip", form_data.get("city_state_zip", "")),
+            ]),
+            ("Lease", [
+                ("Lease Type", form_data.get("lease_type", "")),
+                ("Annual Hours", form_data.get("annual_hours", "")),
+                ("Lease Term (Months)", form_data.get("lease_term", "")),
+            ]),
+        ]
 
-        doc.add_paragraph("")
-        add_sub("Budget / Options")
-        add_kv("Customer Budget", form_data.get("budget_price", ""))
-        add_kv("Options Need", form_data.get("options_need", ""))
-        add_kv("Additional Notes", form_data.get("additional_notes", ""))
+        # Combine voltages for cleaner scan
+        fuel = s(form_data.get("fuel_type"))
+        bv = s(form_data.get("battery_voltage"))
+        lv = s(form_data.get("line_voltage"))
+        voltage_combo = ""
+        if fuel.lower() == "electric":
+            parts = []
+            if bv:
+                parts.append(f"Battery: {bv}")
+            if lv:
+                parts.append(f"Line: {lv}")
+            voltage_combo = " | ".join(parts)
 
-        doc.add_paragraph("")
-        add_sub("Lease")
-        add_kv("Lease Type", form_data.get("lease_type", ""))
-        add_kv("Annual Hours", form_data.get("annual_hours", ""))
-        add_kv("Lease Term (Months)", form_data.get("lease_term", ""))
+        right_sections = [
+            ("Equipment Requirements", [
+                ("Model", form_data.get("model", "")),
+                ("Fuel Type", form_data.get("fuel_type", "")),
+                ("Voltage", voltage_combo),
+                ("Mast Height", form_data.get("mast_height", "")),
+                ("Mast Type", form_data.get("mast_type", "")),
+                ("Fork Size", form_data.get("fork_size", "")),
+            ]),
+            ("Budget / Needs", [
+                ("Customer Budget", form_data.get("budget_price", "")),
+                ("Options Need", form_data.get("options_need", "")),
+            ]),
+        ]
+
+    # -----------------------------
+    # Render document
+    # -----------------------------
+    add_title(title_map.get(rt, "HELI Request"))
+
+    # Two columns main area
+    outer = doc.add_table(rows=1, cols=2)
+    outer.autofit = False
+    set_table_no_borders(outer)
+
+    left_cell = outer.cell(0, 0)
+    right_cell = outer.cell(0, 1)
+
+    # gutter between columns
+    set_cell_margins(left_cell, top=0, bottom=0, start=0, end=120)
+    set_cell_margins(right_cell, top=0, bottom=0, start=120, end=0)
+
+    # Left column sections
+    for sec_title, sec_items in left_sections:
+        add_section_header(left_cell, sec_title)
+        add_kv_rows(left_cell, sec_items)
+
+    # Right column sections
+    for sec_title, sec_items in right_sections:
+        add_section_header(right_cell, sec_title)
+        add_kv_rows(right_cell, sec_items)
+
+    # Full width Notes + Sales (quote-style across all)
+    full = doc.add_table(rows=1, cols=1)
+    full.autofit = True
+    set_table_no_borders(full)
+    full_cell = full.cell(0, 0)
+    set_cell_margins(full_cell, top=0, bottom=0, start=0, end=0)
+
+    add_section_header(full_cell, "Notes")
+    add_notes_box(full_cell, notes_text, height_twips=520)
+
+    # Sales section (only if salesperson_name exists)
+    if salesperson:
+        add_section_header(full_cell, "Sales")
+        add_kv_rows(full_cell, [
+            ("Salesperson", salesperson),
+        ])
 
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
-
 
 # ============================================================
 # /quote-request ROUTE (FULL REPLACEMENT)
