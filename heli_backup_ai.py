@@ -3292,22 +3292,22 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
     now = datetime.now()
 
     # -----------------------------
-    # QUOTE (GUARANTEED ONE PAGE)
+    # QUOTE (HARD ONE-PAGE VERSION)
     # -----------------------------
     if rt == "quote":
         doc = Document()
 
-        # Page setup for one page
+        # Tighter margins (big win for one page)
         section = doc.sections[0]
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
+        section.top_margin = Inches(0.4)
+        section.bottom_margin = Inches(0.4)
+        section.left_margin = Inches(0.45)
+        section.right_margin = Inches(0.45)
 
-        # Default font
+        # Smaller default font (still readable)
         normal = doc.styles["Normal"]
         normal.font.name = "Calibri"
-        normal.font.size = Pt(10.5)
+        normal.font.size = Pt(9.5)
 
         def clamp_text(text: str, max_chars: int) -> str:
             text = s(text)
@@ -3321,7 +3321,8 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             shd.set(qn("w:fill"), fill_hex)
             tcPr.append(shd)
 
-        def set_cell_margins(cell, top=60, start=120, bottom=60, end=120):
+        # Tighter cell padding
+        def set_cell_margins(cell, top=40, start=90, bottom=40, end=90):
             tcPr = cell._tc.get_or_add_tcPr()
             tcMar = OxmlElement("w:tcMar")
             for tag, val in (("w:top", top), ("w:start", start), ("w:bottom", bottom), ("w:end", end)):
@@ -3331,6 +3332,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
                 tcMar.append(node)
             tcPr.append(tcMar)
 
+        # Smaller row height
         def set_row_height(row, height_twips, exact=False):
             trPr = row._tr.get_or_add_trPr()
             trHeight = OxmlElement("w:trHeight")
@@ -3361,17 +3363,19 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
 
         def add_title(title_text: str):
             p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(1)
             r = p.add_run(title_text)
             r.bold = True
-            r.font.size = Pt(16)
+            r.font.size = Pt(14)  # smaller than before
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
             p2 = doc.add_paragraph()
+            p2.paragraph_format.space_before = Pt(0)
+            p2.paragraph_format.space_after = Pt(4)
             r2 = p2.add_run(f"Generated: {now.strftime('%m/%d/%Y %I:%M %p')}")
-            r2.font.size = Pt(9.5)
+            r2.font.size = Pt(8.5)
             p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            doc.add_paragraph("")
 
         def add_section_header(container_cell, text: str):
             tbl = container_cell.add_table(rows=1, cols=1)
@@ -3379,15 +3383,15 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             set_table_light_grid(tbl)
             c = tbl.cell(0, 0)
             set_cell_shading(c, "EDEDED")
-            set_cell_margins(c, top=40, bottom=40, start=140, end=140)
+            set_cell_margins(c, top=30, bottom=30, start=110, end=110)
 
             p = c.paragraphs[0]
             p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(2)
+            p.paragraph_format.space_after = Pt(1)
 
             rr = p.add_run(text.upper())
             rr.bold = True
-            rr.font.size = Pt(11)
+            rr.font.size = Pt(9.5)
 
         def add_kv_rows(container_cell, items):
             tbl = container_cell.add_table(rows=len(items), cols=2)
@@ -3395,49 +3399,48 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             set_table_light_grid(tbl)
 
             for i, (label, value) in enumerate(items):
-                set_row_height(tbl.rows[i], 320, exact=False)
+                set_row_height(tbl.rows[i], 240, exact=False)  # tighter than 320
 
                 c1 = tbl.cell(i, 0)
                 c2 = tbl.cell(i, 1)
-                set_cell_margins(c1, top=40, bottom=40, start=90, end=90)
-                set_cell_margins(c2, top=40, bottom=40, start=90, end=90)
+                set_cell_margins(c1)
+                set_cell_margins(c2)
 
+                # label
                 p1 = c1.paragraphs[0]
                 p1.paragraph_format.space_before = Pt(0)
                 p1.paragraph_format.space_after = Pt(0)
                 r1 = p1.add_run(str(label))
                 r1.bold = True
-                r1.font.size = Pt(9.5)
+                r1.font.size = Pt(8.8)
 
+                # value
                 p2 = c2.paragraphs[0]
                 p2.paragraph_format.space_before = Pt(0)
                 p2.paragraph_format.space_after = Pt(0)
-                p2.add_run(s(value)).font.size = Pt(10.5)
+                p2.add_run(s(value)).font.size = Pt(9.5)
 
-            container_cell.add_paragraph("")
-
-        def add_notes_box(container_cell, text: str, height_twips=720):
+        def add_notes_box(container_cell, text: str, height_twips=520):
             tbl = container_cell.add_table(rows=1, cols=1)
             tbl.autofit = True
             set_table_light_grid(tbl)
             c = tbl.cell(0, 0)
-            set_cell_margins(c, top=120, bottom=120, start=140, end=140)
+            set_cell_margins(c, top=80, bottom=80, start=120, end=120)
             set_row_height(tbl.rows[0], height_twips, exact=False)
 
             p = c.paragraphs[0]
             p.paragraph_format.space_before = Pt(0)
             p.paragraph_format.space_after = Pt(0)
-            p.add_run(s(text)).font.size = Pt(10.5)
+            p.add_run(s(text)).font.size = Pt(9.5)
 
-            container_cell.add_paragraph("")
-
-        # Clamp long fields so it never becomes 2 pages
-        safe_address = clamp_text(form_data.get("address", ""), 70)
-        safe_local = clamp_text(form_data.get("local_options", ""), 90)
-        safe_notes = clamp_text(form_data.get("notes", ""), 240)
+        # Clamp more aggressively (this is what truly guarantees one page)
+        safe_address = clamp_text(form_data.get("address", ""), 55)
+        safe_local = clamp_text(form_data.get("local_options", ""), 65)
+        safe_notes = clamp_text(form_data.get("notes", ""), 160)
 
         add_title("HELI Quote Request")
 
+        # Two columns
         outer = doc.add_table(rows=1, cols=2)
         outer.autofit = False
         set_table_no_borders(outer)
@@ -3445,16 +3448,11 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
         left = outer.cell(0, 0)
         right = outer.cell(0, 1)
 
-        set_cell_margins(left, top=0, bottom=0, start=0, end=160)
-        set_cell_margins(right, top=0, bottom=0, start=160, end=0)
+        # smaller gutter
+        set_cell_margins(left, top=0, bottom=0, start=0, end=120)
+        set_cell_margins(right, top=0, bottom=0, start=120, end=0)
 
-        # =========================================================
-        # UPDATED LAYOUT PER YOUR REQUEST:
-        # LEFT  = Customer Information + Options
-        # RIGHT = Equipment Requirements + Delivery / Finance
-        # =========================================================
-
-        # LEFT COLUMN
+        # LEFT = Customer + Options
         add_section_header(left, "Customer Information")
         add_kv_rows(left, [
             ("Customer", form_data.get("customer_name", "")),
@@ -3478,7 +3476,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             ("Local Options", safe_local),
         ])
 
-        # RIGHT COLUMN
+        # RIGHT = Equipment + Delivery/Finance
         add_section_header(right, "Equipment Requirements")
         add_kv_rows(right, [
             ("Model", form_data.get("model", "")),
@@ -3501,8 +3499,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             ("Lease Term (Months)", form_data.get("lease_term", "")),
         ])
 
-        # Full-width Notes + Salesperson
-        doc.add_paragraph("")
+        # Full-width Notes + Sales (NO extra blank paragraph)
         full = doc.add_table(rows=1, cols=1)
         full.autofit = True
         set_table_no_borders(full)
@@ -3510,7 +3507,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
         set_cell_margins(full_cell, top=0, bottom=0, start=0, end=0)
 
         add_section_header(full_cell, "Notes")
-        add_notes_box(full_cell, safe_notes, height_twips=720)
+        add_notes_box(full_cell, safe_notes, height_twips=520)
 
         add_section_header(full_cell, "Sales")
         add_kv_rows(full_cell, [
@@ -3520,7 +3517,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
         buf = io.BytesIO()
         doc.save(buf)
         return buf.getvalue()
-
+    
     # -----------------------------
     # NON-QUOTE (simple output)
     # -----------------------------
