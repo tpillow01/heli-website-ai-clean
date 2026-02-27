@@ -3448,6 +3448,13 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
         set_cell_margins(left, top=0, bottom=0, start=0, end=160)
         set_cell_margins(right, top=0, bottom=0, start=160, end=0)
 
+        # =========================================================
+        # UPDATED LAYOUT PER YOUR REQUEST:
+        # LEFT  = Customer Information + Options
+        # RIGHT = Equipment Requirements + Delivery / Finance
+        # =========================================================
+
+        # LEFT COLUMN
         add_section_header(left, "Customer Information")
         add_kv_rows(left, [
             ("Customer", form_data.get("customer_name", "")),
@@ -3456,14 +3463,22 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             ("City/State/Zip", form_data.get("city_state_zip", "")),
         ])
 
-        add_section_header(left, "Delivery / Finance")
+        add_section_header(left, "Options")
         add_kv_rows(left, [
-            ("Requested Delivery", form_data.get("expected_delivery", "")),
-            ("Lease Type", form_data.get("lease_type", "")),
-            ("Annual Hours", form_data.get("annual_hours", "")),
-            ("Lease Term (Months)", form_data.get("lease_term", "")),
+            ("Seat Suspension", form_data.get("seat_suspension", "")),
+            ("Front Work Lights", form_data.get("headlights", "")),
+            ("Backup Alarm", form_data.get("back_up_alarm", "")),
+            ("Strobe", form_data.get("strobe", "")),
+            ("Rear Work Light", form_data.get("rear_work_light", "")),
+            ("Blue Light Front", form_data.get("blue_light_front", "")),
+            ("Blue Light Rear", form_data.get("blue_light_rear", "")),
+            ("Red Curtain Lights", form_data.get("red_curtain_lights", "")),
+            ("Battery", form_data.get("battery", "")),
+            ("Charger", form_data.get("charger", "")),
+            ("Local Options", safe_local),
         ])
 
+        # RIGHT COLUMN
         add_section_header(right, "Equipment Requirements")
         add_kv_rows(right, [
             ("Model", form_data.get("model", "")),
@@ -3478,21 +3493,15 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             ("Tires", form_data.get("tires", "")),
         ])
 
-        add_section_header(right, "Options")
+        add_section_header(right, "Delivery / Finance")
         add_kv_rows(right, [
-            ("Seat Suspension", form_data.get("seat_suspension", "")),
-            ("Front Work Lights", form_data.get("headlights", "")),
-            ("Backup Alarm", form_data.get("back_up_alarm", "")),
-            ("Strobe", form_data.get("strobe", "")),
-            ("Rear Work Light", form_data.get("rear_work_light", "")),
-            ("Blue Light Front", form_data.get("blue_light_front", "")),
-            ("Blue Light Rear", form_data.get("blue_light_rear", "")),
-            ("Red Curtain Lights", form_data.get("red_curtain_lights", "")),
-            ("Battery", form_data.get("battery", "")),
-            ("Charger", form_data.get("charger", "")),
-            ("Local Options", safe_local),
+            ("Requested Delivery", form_data.get("expected_delivery", "")),
+            ("Lease Type", form_data.get("lease_type", "")),
+            ("Annual Hours", form_data.get("annual_hours", "")),
+            ("Lease Term (Months)", form_data.get("lease_term", "")),
         ])
 
+        # Full-width Notes + Salesperson
         doc.add_paragraph("")
         full = doc.add_table(rows=1, cols=1)
         full.autofit = True
