@@ -3915,6 +3915,7 @@ def quote_request():
         input_volts = _s(form.get("input_volts"))
         phase = _s(form.get("phase"))
         special_instructions = _s(form.get("special_instructions"))
+        certificate_of_insurance = "Yes" if form.get("certificate_of_insurance") == "Yes" else "No"
 
         errors = []
         if not ordered_by:
@@ -3946,35 +3947,36 @@ def quote_request():
             return _render_with_lists()
 
         form_data = {
-            "ordered_by": ordered_by,
-            "company_name": company_name,
-            "ship_to_address": ship_to_address,
-            "contact_name": contact_name,
-            "phone": phone,
-            "bill_to_address": bill_to_address,
-            "cartage": cartage,
-            "company_phone_fax": company_phone_fax,
-            "po_number": po_number,
-            "quantity": quantity,
-            "description_model": description_model,
-            "rate": rate,
-            "freight_charges": freight_charges,
-            "fork_length": fork_length,
-            "lbr": lbr,
-            "side_shifter": side_shifter,
-            "backup_alarm": backup_alarm,
-            "headlights": headlights,
-            "tires": tires,
-            "power_type": power_type,
-            "need_lp_tank": need_lp_tank,
-            "mast_height": mast_height,
-            "mast_type": mast_type,
-            "connector": connector,
-            "need_charger": need_charger,
-            "input_volts": input_volts,
-            "phase": phase,
-            "special_instructions": special_instructions,
-        }
+        "ordered_by": ordered_by,
+        "company_name": company_name,
+        "ship_to_address": ship_to_address,
+        "contact_name": contact_name,
+        "phone": phone,
+        "bill_to_address": bill_to_address,
+        "cartage": cartage,
+        "company_phone_fax": company_phone_fax,
+        "po_number": po_number,
+        "quantity": quantity,
+        "description_model": description_model,
+        "rate": rate,
+        "freight_charges": freight_charges,
+        "fork_length": fork_length,
+        "lbr": lbr,
+        "side_shifter": side_shifter,
+        "backup_alarm": backup_alarm,
+        "headlights": headlights,
+        "tires": tires,
+        "power_type": power_type,
+        "need_lp_tank": need_lp_tank,
+        "mast_height": mast_height,
+        "mast_type": mast_type,
+        "connector": connector,
+        "need_charger": need_charger,
+        "input_volts": input_volts,
+        "phase": phase,
+        "special_instructions": special_instructions,
+        "certificate_of_insurance": certificate_of_insurance,
+    }
 
         docx_bytes = build_request_docx(form_data, request_type)
         if not docx_bytes:
