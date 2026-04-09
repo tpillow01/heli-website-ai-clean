@@ -1,0 +1,4 @@
+Flask
+Flask-sqlalchemy
+python-dotenv
+geopy

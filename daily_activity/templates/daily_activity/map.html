@@ -1,0 +1,934 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Map | Daily Activity App{% endblock %}
+{% block page_title %}Customer Map{% endblock %}
+{% block page_subtitle %}View accounts geographically, spot competitor-held customers, and build a smarter daily route{% endblock %}
+
+{% block content %}
+<link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+
+<style>
+    .map-page-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+    }
+
+    .map-top-panel {
+        background: linear-gradient(180deg, #0b0b0b 0%, #141414 100%);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: 24px;
+    }
+
+    .map-top-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+
+    .map-top-panel-header h3 {
+        margin: 0;
+        color: #ffffff;
+        font-size: 26px;
+        font-weight: 800;
+    }
+
+    .map-top-panel-header p {
+        margin: 8px 0 0;
+        color: rgba(255,255,255,0.76);
+        font-size: 14px;
+        line-height: 1.6;
+        max-width: 820px;
+    }
+
+    .map-control-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    .map-filter-group {
+        min-width: 0;
+    }
+
+    .map-filter-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 13px;
+        font-weight: 800;
+        color: #ffffff;
+    }
+
+    .map-filter-group input,
+    .map-filter-group select {
+        width: 100%;
+        min-height: 46px;
+    }
+
+    .map-main-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.6fr) 370px;
+        gap: 22px;
+        align-items: start;
+    }
+
+    .map-panel,
+    .map-side-card {
+        background: linear-gradient(180deg, #0b0b0b 0%, #141414 100%);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
+    }
+
+    .map-panel {
+        padding: 18px;
+    }
+
+    .map-panel-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+    }
+
+    .map-panel-top h3 {
+        margin: 0;
+        color: #ffffff;
+        font-size: 22px;
+        font-weight: 800;
+    }
+
+    .map-panel-top p {
+        margin: 6px 0 0;
+        color: rgba(255,255,255,0.76);
+        font-size: 14px;
+    }
+
+    .map-panel-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .map-stat-chip {
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        color: #111111;
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 800;
+        box-shadow: 0 8px 18px rgba(0,0,0,0.10);
+        text-align: center;
+    }
+
+    #customer-map {
+        width: 100%;
+        height: 720px;
+        min-height: 720px;
+        border-radius: 18px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: #f3f4f6;
+        position: relative;
+    }
+
+    .leaflet-container {
+        width: 100%;
+        height: 100%;
+        background: #f3f4f6 !important;
+        border-radius: 18px;
+        font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    .leaflet-tile {
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+        background: #ffffff;
+        color: #111111;
+    }
+
+    .map-sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        min-width: 0;
+    }
+
+    .map-side-card {
+        padding: 20px;
+    }
+
+    .map-side-card h3 {
+        margin: 0 0 8px;
+        color: #ffffff;
+        font-size: 20px;
+        font-weight: 800;
+    }
+
+    .map-side-card p {
+        margin: 0 0 14px;
+        color: rgba(255,255,255,0.76);
+        font-size: 14px;
+        line-height: 1.6;
+    }
+
+    .map-legend-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 12px;
+    }
+
+    .legend-pill {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        color: #ffffff;
+        font-weight: 700;
+    }
+
+    .legend-color-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        flex-shrink: 0;
+        border: 2px solid rgba(0,0,0,0.08);
+    }
+
+    .legend-red { background: #d81f2a; }
+    .legend-blue { background: #2563eb; }
+    .legend-green { background: #16a34a; }
+    .legend-orange { background: #f59e0b; }
+
+    .stop-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .stop-card {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 12px;
+        align-items: start;
+        padding: 14px;
+        border-radius: 16px;
+        border: 1px solid #dddddd;
+        background: #ffffff;
+        cursor: pointer;
+        transition: 0.16s ease;
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.08);
+    }
+
+    .stop-card:hover {
+        transform: translateY(-1px);
+        border-color: #cfcfcf;
+        background: #f8f8f8;
+    }
+
+    .stop-rank {
+        width: 42px;
+        height: 42px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, var(--red), var(--red-dark));
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 15px;
+        box-shadow: 0 8px 18px rgba(197, 23, 33, 0.18);
+    }
+
+    .stop-content {
+        min-width: 0;
+    }
+
+    .stop-content strong {
+        display: block;
+        color: #111111;
+        font-size: 16px;
+        margin-bottom: 5px;
+        word-break: break-word;
+    }
+
+    .stop-meta {
+        color: #4b5563;
+        font-size: 13px;
+        line-height: 1.55;
+        word-break: break-word;
+    }
+
+    .stop-badge {
+        display: inline-flex;
+        align-items: center;
+        margin-top: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .stop-badge.competitor {
+        background: #ffe5e8;
+        color: #b91c1c;
+    }
+
+    .stop-badge.quoted {
+        background: #fff3db;
+        color: #a16207;
+    }
+
+    .stop-badge.current {
+        background: #e8f7ee;
+        color: #166534;
+    }
+
+    .stop-badge.no-relationship {
+        background: #e8f0ff;
+        color: #1d4ed8;
+    }
+
+    .missing-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .missing-list li {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .missing-list li:last-child {
+        border-bottom: none;
+    }
+
+    .missing-list a {
+        color: var(--red);
+        font-weight: 800;
+    }
+
+    .pushpin-icon {
+        background: transparent !important;
+        border: none !important;
+    }
+
+    .pushpin {
+        position: relative;
+        width: 24px;
+        height: 42px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        filter: drop-shadow(0 3px 5px rgba(0,0,0,0.22));
+    }
+
+    .pushpin-head {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        background:
+            radial-gradient(circle at 35% 28%, rgba(255,255,255,0.92), rgba(255,255,255,0.28) 34%, transparent 36%),
+            linear-gradient(180deg, var(--pin-highlight, #ff9aa1) 0%, var(--pin-color, #d81f2a) 56%, var(--pin-dark, #a8141c) 100%);
+        border: 1px solid rgba(120, 0, 0, 0.18);
+    }
+
+    .pushpin-stem {
+        width: 5px;
+        height: 14px;
+        margin-top: -1px;
+        border-radius: 0 0 8px 8px;
+        background: linear-gradient(180deg, #9b9b9b 0%, #e7e7e7 52%, #8d8d8d 100%);
+        border-left: 1px solid rgba(255,255,255,0.35);
+        border-right: 1px solid rgba(0,0,0,0.10);
+    }
+
+    .pushpin-shadow {
+        width: 14px;
+        height: 5px;
+        border-radius: 999px;
+        background: rgba(0,0,0,0.16);
+        margin-top: -2px;
+        filter: blur(1px);
+    }
+
+    @media (max-width: 1180px) {
+        .map-main-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .map-control-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 780px) {
+        .map-top-panel,
+        .map-panel,
+        .map-side-card {
+            padding: 16px;
+        }
+
+        .map-control-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .map-panel-top,
+        .map-top-panel-header {
+            gap: 12px;
+        }
+
+        .map-panel-stats {
+            width: 100%;
+        }
+
+        .map-stat-chip {
+            flex: 1 1 100%;
+        }
+
+        .hero-actions {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        #customer-map {
+            height: 520px;
+            min-height: 520px;
+        }
+
+        .map-legend-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 560px) {
+        .map-top-panel-header h3,
+        .map-panel-top h3 {
+            font-size: 22px;
+        }
+
+        #customer-map {
+            height: 420px;
+            min-height: 420px;
+        }
+
+        .stop-card {
+            grid-template-columns: 1fr;
+        }
+
+        .stop-rank {
+            width: 38px;
+            height: 38px;
+            font-size: 14px;
+        }
+
+        .leaflet-control-container .leaflet-top,
+        .leaflet-control-container .leaflet-bottom {
+            transform: scale(0.95);
+            transform-origin: top left;
+        }
+    }
+</style>
+
+<div class="map-page-wrap">
+    <div class="map-top-panel">
+        <div class="map-top-panel-header">
+            <div>
+                <h3>Territory View</h3>
+                <p>
+                    Filter customer accounts, search by rep or county, and visually identify current customers,
+                    quoted accounts, no-relationship prospects, and competitor-held customers.
+                </p>
+            </div>
+        </div>
+
+        <div class="map-control-grid">
+            <div class="map-filter-group">
+                <label for="searchInput">Search</label>
+                <input type="text" id="searchInput" placeholder="Company, city, county, rep">
+            </div>
+
+            <div class="map-filter-group">
+                <label for="repFilter">Rep</label>
+                <select id="repFilter">
+                    <option value="">All Reps</option>
+                </select>
+            </div>
+
+            <div class="map-filter-group">
+                <label for="countyFilter">County</label>
+                <select id="countyFilter">
+                    <option value="">All Counties</option>
+                </select>
+            </div>
+
+            <div class="map-filter-group">
+                <label for="relationshipFilter">Relationship</label>
+                <select id="relationshipFilter">
+                    <option value="">All Relationships</option>
+                    <option value="competitor_owned">Competitor-Owned</option>
+                    <option value="current_customer">Current Customer</option>
+                    <option value="quoted">Quoted</option>
+                    <option value="no_relationship">No Relationship</option>
+                </select>
+            </div>
+
+            <div class="map-filter-group">
+                <label for="opposingCompanyFilter">Opposing Company</label>
+                <select id="opposingCompanyFilter">
+                    <option value="">All Opposing Companies</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="hero-actions" style="margin-top: 16px;">
+            <button type="button" id="buildDayBtn" class="btn btn-primary">Build My Day</button>
+            <button type="button" id="resetFiltersBtn" class="btn btn-secondary">Reset Filters</button>
+            <a href="{{ url_for('planner') }}" class="btn btn-secondary">Open Planner</a>
+        </div>
+    </div>
+
+    <div class="map-main-grid">
+        <div class="map-panel">
+            <div class="map-panel-top">
+                <div>
+                    <h3>Customer Map</h3>
+                    <p>Click a pin to view the account summary and jump into the customer record.</p>
+                </div>
+
+                <div class="map-panel-stats">
+                    <div class="map-stat-chip" id="visibleCountChip">0 Visible Accounts</div>
+                    <div class="map-stat-chip" id="competitorCountChip">0 Competitor Accounts</div>
+                </div>
+            </div>
+
+            <div id="customer-map"></div>
+        </div>
+
+        <div class="map-sidebar">
+            <div class="map-side-card">
+                <h3>Pin Legend</h3>
+                <p>The map always uses the same relationship colors so reps know exactly what they are seeing.</p>
+
+                <div class="map-legend-grid">
+                    <div class="legend-pill"><span class="legend-color-dot legend-red"></span> Competitor-Owned</div>
+                    <div class="legend-pill"><span class="legend-color-dot legend-green"></span> Current Customer</div>
+                    <div class="legend-pill"><span class="legend-color-dot legend-orange"></span> Quoted</div>
+                    <div class="legend-pill"><span class="legend-color-dot legend-blue"></span> No Relationship</div>
+                </div>
+            </div>
+
+            <div class="map-side-card">
+                <h3>Suggested Stops</h3>
+                <p>Filtered to help reps attack competitor accounts, follow up quotes, and stay on top of due accounts.</p>
+                <div id="suggestedStops" class="stop-list"></div>
+            </div>
+
+            <div class="map-side-card">
+                <h3>Accounts Missing Coordinates</h3>
+
+                {% set missing = customers | selectattr('latitude', 'equalto', none) | list %}
+                {% if missing %}
+                    <ul class="missing-list">
+                        {% for customer in missing %}
+                            <li>
+                                <a href="{{ url_for('edit_customer', customer_id=customer.id) }}">{{ customer.company_name }}</a>
+                                <div class="muted">Update the address if this account should appear on the map.</div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="muted">All customers currently have coordinates.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="map-customers-data" type="application/json">
+{{ map_customers | tojson }}
+</script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+window.addEventListener("load", function () {
+    const rawCustomerData = document.getElementById("map-customers-data").textContent;
+    const customers = JSON.parse(rawCustomerData);
+
+    const mapElement = document.getElementById("customer-map");
+    const suggestedStopsElement = document.getElementById("suggestedStops");
+    const visibleCountChip = document.getElementById("visibleCountChip");
+    const competitorCountChip = document.getElementById("competitorCountChip");
+
+    const searchInput = document.getElementById("searchInput");
+    const repFilter = document.getElementById("repFilter");
+    const countyFilter = document.getElementById("countyFilter");
+    const relationshipFilter = document.getElementById("relationshipFilter");
+    const opposingCompanyFilter = document.getElementById("opposingCompanyFilter");
+    const buildDayBtn = document.getElementById("buildDayBtn");
+    const resetFiltersBtn = document.getElementById("resetFiltersBtn");
+
+    if (!mapElement) return;
+
+    if (typeof L === "undefined") {
+        mapElement.innerHTML = "<p style='padding:20px;color:#111;'>Leaflet failed to load.</p>";
+        return;
+    }
+
+    const map = L.map("customer-map", {
+        preferCanvas: false
+    }).setView([39.7684, -86.1581], window.innerWidth <= 560 ? 7 : 8);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    const markerLayer = L.layerGroup().addTo(map);
+    const markerLookup = {};
+
+    function normalize(value) {
+        return (value || "").toString().trim().toLowerCase();
+    }
+
+    function populateFilters() {
+        const reps = [...new Set(customers.map(c => c.assigned_rep).filter(Boolean))].sort();
+        const counties = [...new Set(customers.map(c => c.county).filter(Boolean))].sort();
+        const opposingCompanies = [...new Set(customers.map(c => c.opposing_company).filter(Boolean))].sort();
+
+        reps.forEach(rep => {
+            const option = document.createElement("option");
+            option.value = rep;
+            option.textContent = rep;
+            repFilter.appendChild(option);
+        });
+
+        counties.forEach(county => {
+            const option = document.createElement("option");
+            option.value = county;
+            option.textContent = county;
+            countyFilter.appendChild(option);
+        });
+
+        opposingCompanies.forEach(company => {
+            const option = document.createElement("option");
+            option.value = company;
+            option.textContent = company;
+            opposingCompanyFilter.appendChild(option);
+        });
+    }
+
+    function relationshipColor(relationship) {
+        const r = normalize(relationship);
+        if (r === "competitor_owned") return "#d81f2a";
+        if (r === "current_customer") return "#16a34a";
+        if (r === "quoted") return "#f59e0b";
+        return "#2563eb";
+    }
+
+    function darkerShade(hex) {
+        const clean = hex.replace("#", "");
+        const bigint = parseInt(clean, 16);
+        let r = (bigint >> 16) & 255;
+        let g = (bigint >> 8) & 255;
+        let b = bigint & 255;
+
+        r = Math.max(0, Math.floor(r * 0.72));
+        g = Math.max(0, Math.floor(g * 0.72));
+        b = Math.max(0, Math.floor(b * 0.72));
+
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function lighterShade(hex) {
+        const clean = hex.replace("#", "");
+        const bigint = parseInt(clean, 16);
+        let r = (bigint >> 16) & 255;
+        let g = (bigint >> 8) & 255;
+        let b = bigint & 255;
+
+        r = Math.min(255, Math.floor(r + (255 - r) * 0.45));
+        g = Math.min(255, Math.floor(g + (255 - g) * 0.45));
+        b = Math.min(255, Math.floor(b + (255 - b) * 0.45));
+
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function createPin(customer) {
+        const color = relationshipColor(customer.relationship_type);
+        const dark = darkerShade(color);
+        const light = lighterShade(color);
+
+        return L.divIcon({
+            className: "pushpin-icon",
+            html: `
+                <div class="pushpin" style="--pin-color:${color}; --pin-dark:${dark}; --pin-highlight:${light};">
+                    <div class="pushpin-head"></div>
+                    <div class="pushpin-stem"></div>
+                    <div class="pushpin-shadow"></div>
+                </div>
+            `,
+            iconSize: [24, 42],
+            iconAnchor: [12, 37],
+            popupAnchor: [0, -28]
+        });
+    }
+
+    function matchesFilters(customer) {
+        const searchValue = normalize(searchInput.value);
+        const repValue = repFilter.value;
+        const countyValue = countyFilter.value;
+        const relationshipValue = relationshipFilter.value;
+        const opposingCompanyValue = opposingCompanyFilter.value;
+
+        const searchableText = [
+            customer.company_name,
+            customer.city,
+            customer.state,
+            customer.county,
+            customer.assigned_rep,
+            customer.relationship_label,
+            customer.opposing_company
+        ].join(" ").toLowerCase();
+
+        if (searchValue && !searchableText.includes(searchValue)) return false;
+        if (repValue && customer.assigned_rep !== repValue) return false;
+        if (countyValue && customer.county !== countyValue) return false;
+        if (relationshipValue && customer.relationship_type !== relationshipValue) return false;
+        if (opposingCompanyValue && customer.opposing_company !== opposingCompanyValue) return false;
+
+        return true;
+    }
+
+    function parseDate(dateString) {
+        if (!dateString) return null;
+        const parsed = new Date(dateString + "T00:00:00");
+        return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function daysUntil(dateString) {
+        const target = parseDate(dateString);
+        if (!target) return null;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const diffMs = target.getTime() - today.getTime();
+        return Math.round(diffMs / (1000 * 60 * 60 * 24));
+    }
+
+    function daysSince(dateString) {
+        const target = parseDate(dateString);
+        if (!target) return null;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const diffMs = today.getTime() - target.getTime();
+        return Math.round(diffMs / (1000 * 60 * 60 * 24));
+    }
+
+    function stopPriority(customer) {
+        const relationship = normalize(customer.relationship_type);
+        const followUpDays = daysUntil(customer.follow_up_date);
+        const lastTouchDays = daysSince(customer.last_touch_date);
+
+        let rank = 0;
+
+        if (relationship === "competitor_owned") rank += 40;
+        if (relationship === "quoted") rank += 30;
+        if (relationship === "current_customer") rank += 20;
+        if (relationship === "no_relationship") rank += 10;
+
+        if (followUpDays !== null) {
+            if (followUpDays < 0) rank += 30;
+            else if (followUpDays === 0) rank += 24;
+            else if (followUpDays <= 3) rank += 16;
+            else if (followUpDays <= 7) rank += 10;
+        }
+
+        if (lastTouchDays !== null && lastTouchDays >= 30) {
+            rank += 8;
+        }
+
+        return rank;
+    }
+
+    function popupHtml(customer) {
+        return `
+            <div style="color:#111; line-height:1.55; min-width:230px;">
+                <strong style="font-size:16px;">${customer.company_name}</strong><br>
+                ${customer.address ? customer.address + "<br>" : ""}
+                ${(customer.city || "")}${customer.state ? ", " + customer.state : ""}<br>
+                ${customer.county ? "County: " + customer.county + "<br>" : ""}
+                ${customer.assigned_rep ? "Rep: " + customer.assigned_rep + "<br>" : ""}
+                ${customer.relationship_label ? "Relationship: " + customer.relationship_label + "<br>" : ""}
+                ${customer.opposing_company ? "Opposing Company: " + customer.opposing_company + "<br>" : ""}
+                ${customer.follow_up_date ? "Follow-Up: " + customer.follow_up_date + "<br>" : ""}
+                ${customer.last_touch_date ? "Last Touch: " + customer.last_touch_date + "<br>" : ""}
+                <a href="/customer/${customer.id}" style="color:#c51721;font-weight:800;">Open Customer</a>
+            </div>
+        `;
+    }
+
+    function renderMarkers(filteredCustomers) {
+        markerLayer.clearLayers();
+
+        Object.keys(markerLookup).forEach(key => delete markerLookup[key]);
+
+        const bounds = [];
+
+        filteredCustomers.forEach(customer => {
+            if (customer.latitude == null || customer.longitude == null) return;
+
+            const marker = L.marker(
+                [customer.latitude, customer.longitude],
+                { icon: createPin(customer) }
+            ).addTo(markerLayer);
+
+            marker.bindPopup(popupHtml(customer));
+            markerLookup[customer.id] = marker;
+            bounds.push([customer.latitude, customer.longitude]);
+        });
+
+        visibleCountChip.textContent = `${bounds.length} Visible Account${bounds.length === 1 ? "" : "s"}`;
+
+        const competitorCount = filteredCustomers.filter(c => normalize(c.relationship_type) === "competitor_owned").length;
+        competitorCountChip.textContent = `${competitorCount} Competitor Account${competitorCount === 1 ? "" : "s"}`;
+
+        if (bounds.length === 1) {
+            map.setView(bounds[0], 11);
+        } else if (bounds.length > 1) {
+            map.fitBounds(bounds, { padding: [30, 30] });
+        }
+    }
+
+    function relationshipBadge(customer) {
+        const relationship = normalize(customer.relationship_type);
+
+        if (relationship === "competitor_owned") {
+            return "<div class='stop-badge competitor'>Competitor-Owned</div>";
+        }
+
+        if (relationship === "quoted") {
+            return "<div class='stop-badge quoted'>Quoted</div>";
+        }
+
+        if (relationship === "current_customer") {
+            return "<div class='stop-badge current'>Current Customer</div>";
+        }
+
+        return "<div class='stop-badge no-relationship'>No Relationship</div>";
+    }
+
+    function renderSuggestedStops(filteredCustomers) {
+        if (!filteredCustomers.length) {
+            suggestedStopsElement.innerHTML = "<div class='empty-state'>No customers match the current filters.</div>";
+            return;
+        }
+
+        const ranked = [...filteredCustomers]
+            .sort((a, b) => stopPriority(b) - stopPriority(a))
+            .slice(0, 10);
+
+        let html = "";
+
+        ranked.forEach((customer, index) => {
+            const lastTouchDays = daysSince(customer.last_touch_date);
+
+            html += `
+                <div class="stop-card" data-customer-id="${customer.id}">
+                    <div class="stop-rank">${index + 1}</div>
+                    <div class="stop-content">
+                        <strong>${customer.company_name}</strong>
+                        <div class="stop-meta">
+                            ${customer.city || ""}${customer.city && customer.county ? " • " : ""}${customer.county || ""}
+                        </div>
+                        <div class="stop-meta">
+                            ${customer.assigned_rep || "No Rep"}${customer.opposing_company ? " • " + customer.opposing_company : ""}
+                        </div>
+                        <div class="stop-meta">
+                            ${customer.follow_up_date ? "Follow-Up: " + customer.follow_up_date : "No Follow-Up"}${lastTouchDays !== null ? " • Last Touch: " + lastTouchDays + "d ago" : ""}
+                        </div>
+                        ${relationshipBadge(customer)}
+                    </div>
+                </div>
+            `;
+        });
+
+        suggestedStopsElement.innerHTML = html;
+
+        document.querySelectorAll(".stop-card").forEach(card => {
+            card.addEventListener("click", function () {
+                const customerId = this.getAttribute("data-customer-id");
+                const selectedCustomer = filteredCustomers.find(c => String(c.id) === String(customerId));
+                const marker = markerLookup[customerId];
+
+                if (selectedCustomer && marker) {
+                    map.setView([selectedCustomer.latitude, selectedCustomer.longitude], 12);
+                    marker.openPopup();
+                    document.getElementById("customer-map").scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+            });
+        });
+    }
+
+    function applyFilters() {
+        const filteredCustomers = customers.filter(matchesFilters);
+        renderMarkers(filteredCustomers);
+        renderSuggestedStops(filteredCustomers);
+    }
+
+    populateFilters();
+    applyFilters();
+
+    [searchInput, repFilter, countyFilter, relationshipFilter, opposingCompanyFilter].forEach(element => {
+        element.addEventListener("input", applyFilters);
+        element.addEventListener("change", applyFilters);
+    });
+
+    buildDayBtn.addEventListener("click", function () {
+        applyFilters();
+        suggestedStopsElement.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    resetFiltersBtn.addEventListener("click", function () {
+        searchInput.value = "";
+        repFilter.value = "";
+        countyFilter.value = "";
+        relationshipFilter.value = "";
+        opposingCompanyFilter.value = "";
+        applyFilters();
+    });
+
+    setTimeout(function () {
+        map.invalidateSize(true);
+    }, 300);
+
+    setTimeout(function () {
+        map.invalidateSize(true);
+    }, 900);
+
+    window.addEventListener("resize", function () {
+        map.invalidateSize(true);
+    });
+});
+</script>
+{% endblock %}

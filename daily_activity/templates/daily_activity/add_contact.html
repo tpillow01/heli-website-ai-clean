@@ -1,0 +1,82 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Add Contact | Daily Activity App{% endblock %}
+{% block page_title %}Add Contact{% endblock %}
+{% block page_subtitle %}Add a customer contact so reps have the right person, title, phone, and email on hand{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Customer Contact</div>
+        <h3>Add a contact for {{ customer.company_name }}</h3>
+        <p>
+            Save the main person connected to this account so reps can quickly reach the right
+            decision maker, operator, office contact, or service contact.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Back to Customer</a>
+            <a href="{{ url_for('customers') }}" class="btn btn-secondary">Back to Customers</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Account</span>
+            <strong>{{ customer.company_name }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Contact Type</span>
+            <strong>Primary</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Used For</span>
+            <strong>Follow-Up</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Used For</span>
+            <strong>Planning</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card form-shell">
+    <div class="panel-top">
+        <div>
+            <h3>Contact Information</h3>
+            <p>Enter the basic contact details for this customer.</p>
+        </div>
+    </div>
+
+    <form method="POST" class="main-form" autocomplete="on">
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" required autocomplete="name" autofocus>
+            </div>
+
+            <div class="form-row">
+                <label for="title">Title</label>
+                <input type="text" id="title" name="title" autocomplete="organization-title">
+            </div>
+
+            <div class="form-row">
+                <label for="phone">Phone</label>
+                <input type="tel" id="phone" name="phone" inputmode="tel" autocomplete="tel">
+            </div>
+
+            <div class="form-row">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" autocomplete="email">
+            </div>
+        </div>
+
+        <div class="hero-actions" style="margin-top: 8px;">
+            <button type="submit" class="btn btn-primary">Save Contact</button>
+            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

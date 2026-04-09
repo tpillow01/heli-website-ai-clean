@@ -59,6 +59,14 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
+DAILY_ACTIVITY_DB_PATH = os.getenv(
+    "DAILY_ACTIVITY_DB_PATH",
+    os.path.join(BASE_DIR, "daily_activity", "instance", "daily_activity.db"),
+)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DAILY_ACTIVITY_DB_PATH}"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
 # Detailed billing / revenue data (Inquiry + AI map analysis)
 CUSTOMER_REPORT_PATH = os.path.join(DATA_DIR, "customer_report.csv")
 
@@ -208,6 +216,8 @@ except Exception as e:
 
     def debug_parse_and_rank(*args, **kwargs):
         return {"parsed": {}, "top": []}
+
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # OPTIONS / ATTACHMENTS CHAT (non-auth) — robust, always returns a string
@@ -375,6 +385,24 @@ except Exception as e:
 # Options & Attachments API (focused chat endpoints)
 
 # Contact Finder (new) — registers /api/contacts/search and /api/chat_contact_finder
+
+try:
+    from daily_activity import daily_activity_bp
+    from daily_activity.models import db as daily_activity_db
+
+    daily_activity_db.init_app(app)
+
+    with app.app_context():
+        daily_activity_db.create_all()
+
+    if daily_activity_bp.name not in app.blueprints:
+        app.register_blueprint(daily_activity_bp)
+        logging.info("✅ daily_activity blueprint registered")
+    else:
+        logging.info("ℹ️ daily_activity blueprint already registered")
+except Exception as e:
+    logging.warning("daily_activity blueprint not available or failed to register (%s)", e)
+
 try:
     from contact_finder import contact_finder_bp  # contact_finder.py must NOT import 'app'
     app.register_blueprint(contact_finder_bp)
@@ -565,6 +593,13 @@ def login_required(f):
             return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return wrapper
+
+
+@app.before_request
+def protect_daily_activity_routes():
+    if request.path.startswith("/daily-activity"):
+        if not session.get("user_id"):
+            return redirect(url_for("login", next=request.path))
 
 # ─────────────────────────────────────────────────────────────────────────
 # Data (JSON) load once

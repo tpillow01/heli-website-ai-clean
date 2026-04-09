@@ -1,0 +1,118 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Add Activity | Daily Activity App{% endblock %}
+{% block page_title %}Add Activity{% endblock %}
+{% block page_subtitle %}Log rep activity, update customer history, and keep follow-up reminders accurate{% endblock %}
+
+{% set selected_id = selected_customer_id|default(None) %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Activity Logging</div>
+        <h3>Record what happened and what should happen next</h3>
+        <p>
+            Use this form to log calls, visits, emails, and follow-up work. Activity entries update
+            customer history and help keep the planner and reminder system accurate.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('activity') }}" class="btn btn-secondary">Back to Activity</a>
+            <a href="{{ url_for('planner') }}" class="btn btn-secondary">Open Planner</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Purpose</span>
+            <strong>Track</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Updates</span>
+            <strong>Touch</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Updates</span>
+            <strong>Contact</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Updates</span>
+            <strong>Reminders</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card form-shell">
+    <div class="panel-top">
+        <div>
+            <h3>Activity Details</h3>
+            <p>Capture the interaction, the outcome, and the next follow-up date if one is needed.</p>
+        </div>
+    </div>
+
+    <form method="POST" class="main-form" autocomplete="on">
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="customer_id">Customer</label>
+                <select id="customer_id" name="customer_id" {% if selected_id %}disabled{% else %}required{% endif %}>
+                    <option value="">Select Customer</option>
+                    {% for customer in customers %}
+                        <option value="{{ customer.id }}" {% if selected_id == customer.id %}selected{% endif %}>
+                            {{ customer.company_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+
+                {% if selected_id %}
+                    <input type="hidden" name="customer_id" value="{{ selected_id }}">
+                {% endif %}
+            </div>
+
+            <div class="form-row">
+                <label for="activity_type">Activity Type</label>
+                <select id="activity_type" name="activity_type" required>
+                    <option value="">Select Type</option>
+                    <option value="Call">Call</option>
+                    <option value="Email">Email</option>
+                    <option value="Site Visit">Site Visit</option>
+                    <option value="Quote Follow-Up">Quote Follow-Up</option>
+                    <option value="Service Discussion">Service Discussion</option>
+                    <option value="Rental Discussion">Rental Discussion</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label for="rep_name">Rep Name</label>
+                <input type="text" id="rep_name" name="rep_name" autocomplete="name">
+            </div>
+
+            <div class="form-row">
+                <label for="activity_date">Activity Date</label>
+                <input type="date" id="activity_date" name="activity_date">
+            </div>
+
+            <div class="form-row">
+                <label for="follow_up_date">Next Follow-Up Date</label>
+                <input type="date" id="follow_up_date" name="follow_up_date">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="summary">Summary</label>
+            <textarea id="summary" name="summary" rows="5" required placeholder="Enter what happened during the call, visit, discussion, or follow-up..."></textarea>
+        </div>
+
+        <div class="form-row">
+            <label for="next_step">Next Step</label>
+            <input type="text" id="next_step" name="next_step" placeholder="Example: Send quote, call next Tuesday, schedule site visit">
+        </div>
+
+        <div class="hero-actions" style="margin-top: 8px;">
+            <button type="submit" class="btn btn-primary">Save Activity</button>
+            <a href="{{ url_for('activity') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Activity | Daily Activity App{% endblock %}
+{% block page_title %}Activity{% endblock %}
+{% block page_subtitle %}Track rep movement, customer touchpoints, and follow-up actions in one organized log{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Rep Activity</div>
+        <h3>Review recent customer touchpoints and next actions</h3>
+        <p>
+            Use the activity log to keep a running record of calls, visits, follow-ups, and customer
+            interactions. This page gives you a clean view of what has happened and what needs to happen next.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('add_activity') }}" class="btn btn-primary">Add Activity</a>
+            <a href="{{ url_for('customers') }}" class="btn btn-secondary">View Customers</a>
+            <a href="{{ url_for('planner') }}" class="btn btn-secondary">Open Planner</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Total Logs</span>
+            <strong>{{ logs|length }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Use Case</span>
+            <strong>Calls</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Use Case</span>
+            <strong>Visits</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Use Case</span>
+            <strong>Follow-Up</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Activity Log</h3>
+            <p>Review customer interactions, summaries, and next-step planning in one table.</p>
+        </div>
+
+        <a href="{{ url_for('add_activity') }}" class="btn btn-small btn-primary">+ Add Activity</a>
+    </div>
+
+    {% if logs %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rep</th>
+                        <th>Customer</th>
+                        <th>Type</th>
+                        <th>Summary</th>
+                        <th>Next Step</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                        <tr>
+                            <td>{{ log.rep_name or "—" }}</td>
+                            <td>
+                                {% if log.customer %}
+                                    {{ log.customer.company_name }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>{{ log.activity_type or "—" }}</td>
+                            <td>{{ log.summary or "—" }}</td>
+                            <td>{{ log.next_step or "—" }}</td>
+                            <td>{{ log.activity_date or "—" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">No activity found yet. Add your first activity entry to begin tracking rep movement and customer touchpoints.</div>
+    {% endif %}
+</div>
+
+{% endblock %}

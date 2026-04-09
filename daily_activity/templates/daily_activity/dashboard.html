@@ -1,0 +1,401 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Dashboard | Daily Activity App{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Your starting point for customer management, follow-ups, competitor accounts, and daily planning{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Daily Focus</div>
+        <h3>Run your sales day from one clear workspace</h3>
+        <p>
+            Use the dashboard to quickly see who needs attention today, which accounts are being quoted,
+            which customers are tied to competitors, and what follow-ups are coming in the next few days.
+            The goal is to make it easy for reps to know what to do next.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('add_customer') }}" class="btn btn-primary">Add Customer</a>
+            <a href="{{ url_for('add_activity') }}" class="btn btn-secondary">Log Activity</a>
+            <a href="{{ url_for('calendar_page') }}" class="btn btn-secondary">Open Calendar</a>
+            <a href="{{ url_for('planner') }}" class="btn btn-secondary">Open Planner</a>
+            <a href="{{ url_for('map_page') }}" class="btn btn-secondary">Open Map</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Total Customers</span>
+            <strong>{{ customer_count }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Total Contacts</span>
+            <strong>{{ contact_count }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Activity Logs</span>
+            <strong>{{ activity_count }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Fleet Records</span>
+            <strong>{{ fleet_count }}</strong>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Follow-Ups Due Today</h3>
+                <p>Accounts that should be worked today.</p>
+            </div>
+            <a href="{{ url_for('calendar_page') }}" class="btn btn-small btn-secondary">Open Calendar</a>
+        </div>
+
+        {% if dashboard_reminders.due_today %}
+            <div class="item-list">
+                {% for item in dashboard_reminders.due_today %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                Follow-Up Due: {{ item.customer.follow_up_date or "Today" }}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.relationship_label }}
+                                {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No follow-ups due today.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Overdue Follow-Ups</h3>
+                <p>Accounts whose follow-up date has already passed.</p>
+            </div>
+            <a href="{{ url_for('planner') }}" class="btn btn-small btn-secondary">Open Planner</a>
+        </div>
+
+        {% if dashboard_reminders.overdue_followups %}
+            <div class="item-list">
+                {% for item in dashboard_reminders.overdue_followups %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                Follow-Up: {{ item.customer.follow_up_date or "No Date" }}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.relationship_label }}
+                                {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No overdue follow-ups right now.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Upcoming Follow-Ups</h3>
+                <p>Accounts coming due in the next 7 days.</p>
+            </div>
+            <a href="{{ url_for('calendar_page') }}" class="btn btn-small btn-secondary">View Next 3 Weeks</a>
+        </div>
+
+        {% if dashboard_reminders.due_this_week %}
+            <div class="item-list">
+                {% for item in dashboard_reminders.due_this_week %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                Follow-Up: {{ item.customer.follow_up_date or "No Date" }}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.relationship_label }}
+                                {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No follow-ups due in the next 7 days.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Customers Needing a Touch</h3>
+                <p>Accounts that have not been touched recently.</p>
+            </div>
+            <a href="{{ url_for('planner') }}" class="btn btn-small btn-secondary">Build Day</a>
+        </div>
+
+        {% if dashboard_reminders.stale_accounts %}
+            <div class="item-list">
+                {% for item in dashboard_reminders.stale_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                {% if item.days_since_last_touch is not none %}
+                                    Last Touch: {{ item.days_since_last_touch }} days ago
+                                {% else %}
+                                    No touch date recorded
+                                {% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.relationship_label }}
+                                {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                                {% if item.customer.county %} • {{ item.customer.county }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No stale accounts detected right now.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Competitor-Owned Accounts</h3>
+                <p>Accounts currently tied to an opposing company.</p>
+            </div>
+            <a href="{{ url_for('planner') }}" class="btn btn-small btn-secondary">Attack Competitor Accounts</a>
+        </div>
+
+        {% if dashboard_reminders.competitor_accounts %}
+            <div class="item-list">
+                {% for item in dashboard_reminders.competitor_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                {% if item.opposing_company %}
+                                    Opposing Company: {{ item.opposing_company }}
+                                {% else %}
+                                    Competitor-owned account
+                                {% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.customer.county or "No County" }}
+                                {% if item.customer.city %} • {{ item.customer.city }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No competitor-owned accounts are marked right now.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Accounts Being Quoted</h3>
+                <p>Customers currently in the quoting stage.</p>
+            </div>
+            <a href="{{ url_for('planner') }}" class="btn btn-small btn-secondary">Follow Up Quotes</a>
+        </div>
+
+        {% if dashboard_reminders.quoted_accounts %}
+            <div class="item-list">
+                {% for item in dashboard_reminders.quoted_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                {% if item.customer.follow_up_date %}
+                                    Quote Follow-Up: {{ item.customer.follow_up_date }}
+                                {% else %}
+                                    No follow-up date set yet
+                                {% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.customer.county or "No County" }}
+                                {% if item.customer.city %} • {{ item.customer.city }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No quoted accounts are marked right now.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Recent Activity</h3>
+                <p>Latest field updates and logged touchpoints.</p>
+            </div>
+            <a href="{{ url_for('activity') }}" class="btn btn-small btn-secondary">View All</a>
+        </div>
+
+        {% if recent_activity %}
+            <div class="item-list">
+                {% for log in recent_activity %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ log.activity_type }}</div>
+                            <div class="list-text">{{ log.summary }}</div>
+                            <div class="list-meta">
+                                {{ log.rep_name or "No Rep" }}
+                                {% if log.activity_date %} • {{ log.activity_date }}{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No activity logged yet.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Recent Customers</h3>
+                <p>Newest or most recently added accounts.</p>
+            </div>
+            <a href="{{ url_for('customers') }}" class="btn btn-small btn-secondary">View All</a>
+        </div>
+
+        {% if recent_customers %}
+            <div class="item-list">
+                {% for customer in recent_customers %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ customer.company_name }}</div>
+                            <div class="list-text">
+                                {{ customer.city or "No City" }}{% if customer.state %}, {{ customer.state }}{% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {% if customer.relationship_type %}
+                                    {{ customer.relationship_type.replace('_', ' ').title() }}
+                                {% else %}
+                                    No Relationship Set
+                                {% endif %}
+                                {% if customer.opposing_company %}
+                                    • {{ customer.opposing_company }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="list-item-action">
+                            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-small btn-primary">
+                                Open
+                            </a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No customers yet.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-grid dashboard-grid-bottom">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Quick Actions</h3>
+                <p>Most common tasks for the day.</p>
+            </div>
+        </div>
+
+        <div class="action-grid">
+            <a href="{{ url_for('add_customer') }}" class="action-tile">
+                <span class="action-tile-title">Create Account</span>
+                <span class="action-tile-text">Add a new customer and assign a relationship type right away.</span>
+            </a>
+
+            <a href="{{ url_for('add_activity') }}" class="action-tile">
+                <span class="action-tile-title">Record Activity</span>
+                <span class="action-tile-text">Log calls, visits, and follow-up details for the rep team.</span>
+            </a>
+
+            <a href="{{ url_for('calendar_page') }}" class="action-tile">
+                <span class="action-tile-title">View Calendar</span>
+                <span class="action-tile-text">Look ahead at upcoming follow-ups over the next few weeks.</span>
+            </a>
+
+            <a href="{{ url_for('planner') }}" class="action-tile">
+                <span class="action-tile-title">Plan Day</span>
+                <span class="action-tile-text">Build a rep day around follow-ups, quoted accounts, or competitor accounts.</span>
+            </a>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

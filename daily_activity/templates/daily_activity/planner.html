@@ -1,0 +1,457 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Planner | Daily Activity App{% endblock %}
+{% block page_title %}Planner{% endblock %}
+{% block page_subtitle %}Build a rep day around follow-ups, competitor-held accounts, quoted customers, and area-based planning{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Planning Assistant</div>
+        <h3>Build a realistic day for each rep</h3>
+        <p>
+            Use this planner to organize a rep day around the accounts that matter most right now.
+            Narrow the route by rep, county, or opposing company and build a focused workload of up to 25 visits.
+        </p>
+
+        <form method="GET" action="{{ url_for('planner') }}" class="hero-actions planner-filter-form">
+            <div class="planner-filter-item">
+                <label for="rep">Filter by Rep</label>
+                <select id="rep" name="rep">
+                    <option value="">All Reps</option>
+                    {% for rep in reps %}
+                        <option value="{{ rep }}" {% if selected_rep == rep %}selected{% endif %}>{{ rep }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="planner-filter-item">
+                <label for="county">Area / County</label>
+                <select id="county" name="county">
+                    <option value="">All Counties</option>
+                    {% for county in counties %}
+                        <option value="{{ county }}" {% if selected_county == county %}selected{% endif %}>{{ county }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="planner-filter-item">
+                <label for="opposing_company">Opposing Company</label>
+                <select id="opposing_company" name="opposing_company">
+                    <option value="">All Opposing Companies</option>
+                    {% for company in opposing_companies %}
+                        <option value="{{ company }}" {% if selected_opposing_company == company %}selected{% endif %}>{{ company }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="planner-filter-item">
+                <label for="max_stops">Workload Size</label>
+                <select id="max_stops" name="max_stops">
+                    <option value="5" {% if selected_max_stops == 5 %}selected{% endif %}>5 Visits</option>
+                    <option value="8" {% if selected_max_stops == 8 %}selected{% endif %}>8 Visits</option>
+                    <option value="10" {% if selected_max_stops == 10 %}selected{% endif %}>10 Visits</option>
+                    <option value="12" {% if selected_max_stops == 12 %}selected{% endif %}>12 Visits</option>
+                    <option value="15" {% if selected_max_stops == 15 %}selected{% endif %}>15 Visits</option>
+                    <option value="20" {% if selected_max_stops == 20 %}selected{% endif %}>20 Visits</option>
+                    <option value="25" {% if selected_max_stops == 25 %}selected{% endif %}>25 Visits</option>
+                </select>
+            </div>
+
+            <div class="planner-filter-actions">
+                <button type="submit" class="btn btn-primary">Build My Day</button>
+                <a href="{{ url_for('planner') }}" class="btn btn-secondary">Clear Filter</a>
+                <a href="{{ url_for('map_page') }}" class="btn btn-secondary">Open Map</a>
+                <a href="{{ url_for('calendar_page') }}" class="btn btn-secondary">Open Calendar</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Planned Stops</span>
+            <strong>{{ day_plan.stops|length }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Competitor Accounts</span>
+            <strong>{{ planner_data.competitor_accounts|length }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Quoted Accounts</span>
+            <strong>{{ planner_data.quoted_accounts|length }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Overdue</span>
+            <strong>{{ planner_data.overdue_accounts|length }}</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>{{ planner_summary.headline }}</h3>
+            <p>Summary of the current route focus and account mix.</p>
+        </div>
+    </div>
+
+    <div class="item-list">
+        {% for line in planner_summary.summary_lines %}
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-text">{{ line }}</div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Recommended Day Plan</h3>
+            <p>{{ day_plan_summary }}</p>
+        </div>
+    </div>
+
+    {% if day_plan.stops %}
+        <div class="item-list">
+            {% for item in day_plan.stops %}
+                <div class="list-item">
+                    <div class="list-item-main">
+                        <div class="list-title">
+                            {{ loop.index }}. {{ item.customer.company_name }}
+                        </div>
+
+                        <div class="list-text">
+                            {{ item.customer.county or "No County" }}
+                            {% if item.customer.city %} • {{ item.customer.city }}{% endif %}
+                            {% if item.customer.state %}, {{ item.customer.state }}{% endif %}
+                        </div>
+
+                        <div class="list-meta">
+                            {{ item.relationship_label }}
+                            {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                            {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                        </div>
+
+                        {% if item.reasons %}
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Why Selected: {{ item.reasons | join(" • ") }}
+                            </div>
+                        {% endif %}
+
+                        <div class="list-meta" style="margin-top: 6px;">
+                            Suggested Action: {{ item.suggested_action }}
+                        </div>
+
+                        <div class="row-actions" style="margin-top: 12px;">
+                            <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                            <a href="{{ url_for('add_activity_for_customer', customer_id=item.customer.id) }}" class="btn btn-small btn-secondary">Log Activity</a>
+
+                            <form method="POST" action="{{ url_for('complete_followup', customer_id=item.customer.id) }}">
+                                <button type="submit" class="btn btn-small btn-secondary">Complete</button>
+                            </form>
+
+                            <form method="POST" action="{{ url_for('snooze_followup', customer_id=item.customer.id) }}">
+                                <input type="hidden" name="days" value="3">
+                                <button type="submit" class="btn btn-small btn-secondary">Snooze 3 Days</button>
+                            </form>
+                        </div>
+
+                        <form method="POST" action="{{ url_for('reschedule_followup', customer_id=item.customer.id) }}" style="margin-top: 12px;">
+                            <div class="row-actions">
+                                <input type="date" name="follow_up_date" class="planner-inline-date">
+                                <button type="submit" class="btn btn-small btn-secondary">Reschedule</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">No day plan available for the selected criteria.</div>
+    {% endif %}
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Competitor-Owned Accounts</h3>
+                <p>Use this list to attack accounts tied to opposing companies.</p>
+            </div>
+        </div>
+
+        {% if planner_data.competitor_accounts %}
+            <div class="item-list">
+                {% for item in planner_data.competitor_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                {% if item.opposing_company %}
+                                    Opposing Company: {{ item.opposing_company }}
+                                {% else %}
+                                    Competitor-owned account
+                                {% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.customer.county or "No County" }}
+                                {% if item.customer.city %} • {{ item.customer.city }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+
+                            <div class="row-actions" style="margin-top: 12px;">
+                                <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                                <a href="{{ url_for('add_activity_for_customer', customer_id=item.customer.id) }}" class="btn btn-small btn-secondary">Log Activity</a>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No competitor-owned accounts match the current filters.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Quoted Accounts</h3>
+                <p>Customers that should be followed up on quote activity.</p>
+            </div>
+        </div>
+
+        {% if planner_data.quoted_accounts %}
+            <div class="item-list">
+                {% for item in planner_data.quoted_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                {% if item.customer.follow_up_date %}
+                                    Follow-Up: {{ item.customer.follow_up_date }}
+                                {% else %}
+                                    No follow-up date set
+                                {% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.customer.county or "No County" }}
+                                {% if item.customer.city %} • {{ item.customer.city }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+
+                            <div class="row-actions" style="margin-top: 12px;">
+                                <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                                <a href="{{ url_for('add_activity_for_customer', customer_id=item.customer.id) }}" class="btn btn-small btn-secondary">Log Activity</a>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No quoted accounts match the current filters.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Overdue Follow-Ups</h3>
+                <p>Accounts that should already have been worked.</p>
+            </div>
+        </div>
+
+        {% if planner_data.overdue_accounts %}
+            <div class="item-list">
+                {% for item in planner_data.overdue_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                Follow-Up: {{ item.customer.follow_up_date or "No Date" }}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.relationship_label }}
+                                {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+
+                            <div class="row-actions" style="margin-top: 12px;">
+                                <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                                <a href="{{ url_for('add_activity_for_customer', customer_id=item.customer.id) }}" class="btn btn-small btn-secondary">Log Activity</a>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No overdue follow-ups match the current filters.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Stale Accounts</h3>
+                <p>Accounts that have not been touched recently.</p>
+            </div>
+        </div>
+
+        {% if planner_data.stale_accounts %}
+            <div class="item-list">
+                {% for item in planner_data.stale_accounts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ item.customer.company_name }}</div>
+                            <div class="list-text">
+                                {% if item.days_since_last_touch is not none %}
+                                    Last Touch: {{ item.days_since_last_touch }} days ago
+                                {% else %}
+                                    No touch date recorded
+                                {% endif %}
+                            </div>
+                            <div class="list-meta">
+                                {{ item.relationship_label }}
+                                {% if item.opposing_company %} • {{ item.opposing_company }}{% endif %}
+                                {% if item.customer.county %} • {{ item.customer.county }}{% endif %}
+                                {% if item.customer.assigned_rep %} • {{ item.customer.assigned_rep }}{% endif %}
+                            </div>
+                            <div class="list-meta" style="margin-top: 6px;">
+                                Suggested Action: {{ item.suggested_action }}
+                            </div>
+
+                            <div class="row-actions" style="margin-top: 12px;">
+                                <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                                <a href="{{ url_for('add_activity_for_customer', customer_id=item.customer.id) }}" class="btn btn-small btn-secondary">Log Activity</a>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No stale accounts match the current filters.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>County Focus</h3>
+            <p>Use this to identify the strongest county clusters for the day.</p>
+        </div>
+    </div>
+
+    {% if planner_data.county_summary %}
+        <div class="item-list">
+            {% for county_item in planner_data.county_summary %}
+                <div class="list-item">
+                    <div class="list-item-main">
+                        <div class="list-title">{{ county_item.county }}</div>
+                        <div class="list-text">
+                            {{ county_item.count }} account{% if county_item.count != 1 %}s{% endif %} in current view
+                        </div>
+                        <div class="list-meta" style="margin-top: 6px;">
+                            {% for item in county_item.customers[:3] %}
+                                {{ item.customer.company_name }}{% if not loop.last %} • {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">No county summary available.</div>
+    {% endif %}
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>All Matching Accounts</h3>
+            <p>Full account list for the current planner filters.</p>
+        </div>
+    </div>
+
+    {% if planner_data.all_accounts %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Rep</th>
+                        <th>County</th>
+                        <th>Relationship</th>
+                        <th>Opposing Company</th>
+                        <th>Follow-Up</th>
+                        <th>Last Touch</th>
+                        <th>Suggested Action</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in planner_data.all_accounts %}
+                        <tr>
+                            <td><strong>{{ item.customer.company_name }}</strong></td>
+                            <td>{{ item.customer.assigned_rep or "—" }}</td>
+                            <td>{{ item.customer.county or "—" }}</td>
+                            <td>{{ item.relationship_label }}</td>
+                            <td>{{ item.opposing_company or "—" }}</td>
+                            <td>{{ item.customer.follow_up_date or "—" }}</td>
+                            <td>
+                                {% if item.days_since_last_touch is not none %}
+                                    {{ item.days_since_last_touch }}d ago
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>{{ item.suggested_action }}</td>
+                            <td>
+                                <div class="row-actions">
+                                    <a href="{{ url_for('customer_detail', customer_id=item.customer.id) }}" class="btn btn-small btn-primary">Open</a>
+                                    <a href="{{ url_for('add_activity_for_customer', customer_id=item.customer.id) }}" class="btn btn-small btn-secondary">Log Activity</a>
+                                </div>
+
+                                <div class="row-actions" style="margin-top: 8px;">
+                                    <form method="POST" action="{{ url_for('complete_followup', customer_id=item.customer.id) }}">
+                                        <button type="submit" class="btn btn-small btn-secondary">Complete</button>
+                                    </form>
+
+                                    <form method="POST" action="{{ url_for('snooze_followup', customer_id=item.customer.id) }}">
+                                        <input type="hidden" name="days" value="3">
+                                        <button type="submit" class="btn btn-small btn-secondary">Snooze 3 Days</button>
+                                    </form>
+                                </div>
+
+                                <form method="POST" action="{{ url_for('reschedule_followup', customer_id=item.customer.id) }}" style="margin-top: 8px;">
+                                    <div class="row-actions">
+                                        <input type="date" name="follow_up_date" class="planner-inline-date">
+                                        <button type="submit" class="btn btn-small btn-secondary">Reschedule</button>
+                                    </div>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">No accounts available for the selected planner filters.</div>
+    {% endif %}
+</div>
+
+{% endblock %}

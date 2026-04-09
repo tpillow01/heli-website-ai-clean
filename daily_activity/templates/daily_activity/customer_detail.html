@@ -1,0 +1,259 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Customer Detail | Daily Activity App{% endblock %}
+{% block page_title %}Customer Detail{% endblock %}
+{% block page_subtitle %}Review account notes, contacts, fleet, and activity in one clean customer workspace{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Customer Profile</div>
+        <h3>{{ customer.company_name }}</h3>
+        <p>
+            Manage this account from one place, including follow-up timing, notes, contacts,
+            fleet information, and customer activity.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('edit_customer', customer_id=customer.id) }}" class="btn btn-primary">Edit Customer</a>
+            <a href="{{ url_for('add_activity_for_customer', customer_id=customer.id) }}" class="btn btn-secondary">Add Activity</a>
+            <a href="{{ url_for('add_contact', customer_id=customer.id) }}" class="btn btn-secondary">Add Contact</a>
+            <a href="{{ url_for('add_fleet', customer_id=customer.id) }}" class="btn btn-secondary">Add Fleet</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Status</span>
+            <strong>{{ customer.status or "N/A" }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Priority</span>
+            <strong>{{ customer.priority_level or "N/A" }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Assigned Rep</span>
+            <strong>{{ customer.assigned_rep or "N/A" }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Follow-Up</span>
+            <strong>{{ customer.follow_up_date or "N/A" }}</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Account Information</h3>
+            <p>Important account details for quick review and planning.</p>
+        </div>
+    </div>
+
+    <div class="item-list">
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">Address</div>
+                <div class="list-text">
+                    {% if customer.address or customer.city or customer.state or customer.zip_code %}
+                        {{ customer.address or "" }}
+                        {% if customer.address and (customer.city or customer.state or customer.zip_code) %}<br>{% endif %}
+                        {{ customer.city or "" }}{% if customer.city and customer.state %}, {% endif %}{{ customer.state or "" }} {{ customer.zip_code or "" }}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">County</div>
+                <div class="list-text">{{ customer.county or "N/A" }}</div>
+            </div>
+        </div>
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">Last Contact</div>
+                <div class="list-text">{{ customer.last_contact_date or "N/A" }}</div>
+            </div>
+        </div>
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">Last Touch</div>
+                <div class="list-text">{{ customer.last_touch_date or "N/A" }}</div>
+            </div>
+        </div>
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">Map Pin Color</div>
+                <div class="list-text">{{ customer.pin_color or "Default" }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Account Notes</h3>
+                <p>Important notes grouped by account area.</p>
+            </div>
+        </div>
+
+        <div class="item-list">
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-title">General Notes</div>
+                    <div class="list-text">{{ customer.notes or "No notes yet." }}</div>
+                </div>
+            </div>
+
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-title">Quote Notes</div>
+                    <div class="list-text">{{ customer.quote_notes or "No quote notes yet." }}</div>
+                </div>
+            </div>
+
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-title">Service Notes</div>
+                    <div class="list-text">{{ customer.service_notes or "No service notes yet." }}</div>
+                </div>
+            </div>
+
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-title">Rental Notes</div>
+                    <div class="list-text">{{ customer.rental_notes or "No rental notes yet." }}</div>
+                </div>
+            </div>
+
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-title">PM Notes</div>
+                    <div class="list-text">{{ customer.pm_notes or "No PM notes yet." }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Contacts</h3>
+                <p>Saved customer contacts for this account.</p>
+            </div>
+        </div>
+
+        {% if customer.contacts %}
+            <div class="item-list">
+                {% for contact in customer.contacts %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ contact.name }}</div>
+                            <div class="list-text">{{ contact.title or "No Title" }}</div>
+                            <div class="list-meta">{{ contact.phone or "No Phone" }}</div>
+                            <div class="list-meta">{{ contact.email or "No Email" }}</div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No contacts saved for this customer.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Activity History</h3>
+                <p>Recent touchpoints and next steps for this customer.</p>
+            </div>
+        </div>
+
+        {% if customer.activity_logs %}
+            <div class="item-list">
+                {% for log in customer.activity_logs %}
+                    <div class="list-item">
+                        <div class="list-item-main">
+                            <div class="list-title">{{ log.activity_type }}</div>
+                            <div class="list-text">{{ log.summary }}</div>
+                            <div class="list-meta">
+                                {{ log.activity_date or "No Date" }}{% if log.rep_name %} • {{ log.rep_name }}{% endif %}
+                            </div>
+                            <div class="list-meta">
+                                Next Step: {{ log.next_step or "None" }}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">No activity saved for this customer yet.</div>
+        {% endif %}
+    </div>
+
+    <div class="panel-card">
+        <div class="panel-top">
+            <div>
+                <h3>Fleet Information</h3>
+                <p>Customer equipment and fleet records.</p>
+            </div>
+        </div>
+
+        {% if customer.fleet_info %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Make</th>
+                            <th>Model</th>
+                            <th>Capacity</th>
+                            <th>Fuel</th>
+                            <th>Qty</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for unit in customer.fleet_info %}
+                            <tr>
+                                <td>{{ unit.make or "—" }}</td>
+                                <td>{{ unit.model or "—" }}</td>
+                                <td>{{ unit.capacity or "—" }}</td>
+                                <td>{{ unit.fuel_type or "—" }}</td>
+                                <td>{{ unit.quantity or "—" }}</td>
+                                <td>{{ unit.notes or "—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">No fleet info saved for this customer.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Danger Zone</h3>
+            <p>Delete this customer record permanently.</p>
+        </div>
+    </div>
+
+    <form method="POST" action="{{ url_for('delete_customer', customer_id=customer.id) }}" onsubmit="return confirm('Are you sure you want to delete this customer?');">
+        <button type="submit" class="btn btn-danger">Delete Customer</button>
+    </form>
+</div>
+
+{% endblock %}

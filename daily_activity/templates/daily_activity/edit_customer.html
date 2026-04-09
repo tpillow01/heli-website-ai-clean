@@ -1,0 +1,207 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Edit Customer | Daily Activity App{% endblock %}
+{% block page_title %}Edit Customer{% endblock %}
+{% block page_subtitle %}Update customer details, relationship status, follow-up timing, and account notes{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Account Update</div>
+        <h3>Edit customer details and keep the account current</h3>
+        <p>
+            Use this page to update rep ownership, relationship type, competitor information,
+            follow-up timing, and account notes so the planner, map, and dashboard stay accurate.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Back to Customer</a>
+            <a href="{{ url_for('customers') }}" class="btn btn-secondary">Back to Customers</a>
+            <a href="{{ url_for('calendar_page') }}" class="btn btn-secondary">Open Calendar</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Account</span>
+            <strong>{{ customer.company_name }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Relationship</span>
+            <strong>
+                {% if customer.relationship_type %}
+                    {{ customer.relationship_type.replace('_', ' ').title() }}
+                {% else %}
+                    No Relationship
+                {% endif %}
+            </strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Rep</span>
+            <strong>{{ customer.assigned_rep or "Unassigned" }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>County</span>
+            <strong>{{ customer.county or "None" }}</strong>
+        </div>
+    </div>
+</div>
+
+<form method="POST" class="form-stack">
+    <div class="panel-card form-shell">
+        <div class="panel-top">
+            <div>
+                <h3>Customer Information</h3>
+                <p>Update the core account information for this customer.</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="company_name">Company Name</label>
+                <input type="text" id="company_name" name="company_name" value="{{ customer.company_name or '' }}" required>
+            </div>
+
+            <div class="form-row">
+                <label for="assigned_rep">Assigned Rep</label>
+                <input type="text" id="assigned_rep" name="assigned_rep" value="{{ customer.assigned_rep or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="address">Street Address</label>
+                <input type="text" id="address" name="address" value="{{ customer.address or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="city">City</label>
+                <input type="text" id="city" name="city" value="{{ customer.city or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="state">State</label>
+                <input type="text" id="state" name="state" value="{{ customer.state or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="zip_code">Zip Code</label>
+                <input type="text" id="zip_code" name="zip_code" value="{{ customer.zip_code or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="county">County</label>
+                <input type="text" id="county" name="county" value="{{ customer.county or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="relationship_type">Relationship Type</label>
+                <select id="relationship_type" name="relationship_type">
+                    <option value="no_relationship" {% if customer.relationship_type == "no_relationship" %}selected{% endif %}>No Relationship</option>
+                    <option value="quoted" {% if customer.relationship_type == "quoted" %}selected{% endif %}>Quoted</option>
+                    <option value="current_customer" {% if customer.relationship_type == "current_customer" %}selected{% endif %}>Current Customer</option>
+                    <option value="competitor_owned" {% if customer.relationship_type == "competitor_owned" %}selected{% endif %}>Competitor-Owned</option>
+                </select>
+            </div>
+
+            <div class="form-row" id="opposingCompanyRow">
+                <label for="opposing_company">Opposing Company</label>
+                <input type="text" id="opposing_company" name="opposing_company" value="{{ customer.opposing_company or '' }}" placeholder="Example: Pro-Lift">
+            </div>
+
+            <div class="form-row">
+                <label for="follow_up_date">Follow-Up Date</label>
+                <input type="date" id="follow_up_date" name="follow_up_date" value="{{ customer.follow_up_date or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="last_touch_date">Last Touch Date</label>
+                <input type="date" id="last_touch_date" name="last_touch_date" value="{{ customer.last_touch_date or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="last_contact_date">Last Contact Date</label>
+                <input type="date" id="last_contact_date" name="last_contact_date" value="{{ customer.last_contact_date or '' }}">
+            </div>
+
+            <div class="form-row">
+                <label for="status">Legacy Status</label>
+                <select id="status" name="status">
+                    <option value="">Select Status</option>
+                    <option value="Prospect" {% if customer.status == "Prospect" %}selected{% endif %}>Prospect</option>
+                    <option value="Active" {% if customer.status == "Active" %}selected{% endif %}>Active</option>
+                    <option value="Quoted" {% if customer.status == "Quoted" %}selected{% endif %}>Quoted</option>
+                    <option value="Customer" {% if customer.status == "Customer" %}selected{% endif %}>Customer</option>
+                    <option value="Inactive" {% if customer.status == "Inactive" %}selected{% endif %}>Inactive</option>
+                    <option value="Target" {% if customer.status == "Target" %}selected{% endif %}>Target</option>
+                    <option value="Cold Call" {% if customer.status == "Cold Call" %}selected{% endif %}>Cold Call</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label for="priority_level">Legacy Priority</label>
+                <select id="priority_level" name="priority_level">
+                    <option value="">Select Priority</option>
+                    <option value="High" {% if customer.priority_level == "High" %}selected{% endif %}>High</option>
+                    <option value="Medium" {% if customer.priority_level == "Medium" %}selected{% endif %}>Medium</option>
+                    <option value="Low" {% if customer.priority_level == "Low" %}selected{% endif %}>Low</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="notes">General Notes</label>
+            <textarea id="notes" name="notes">{{ customer.notes or '' }}</textarea>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="quote_notes">Quote Notes</label>
+                <textarea id="quote_notes" name="quote_notes">{{ customer.quote_notes or '' }}</textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="service_notes">Service Notes</label>
+                <textarea id="service_notes" name="service_notes">{{ customer.service_notes or '' }}</textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="rental_notes">Rental Notes</label>
+                <textarea id="rental_notes" name="rental_notes">{{ customer.rental_notes or '' }}</textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="pm_notes">PM Notes</label>
+                <textarea id="pm_notes" name="pm_notes">{{ customer.pm_notes or '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="hero-actions">
+        <button type="submit" class="btn btn-primary">Update Customer</button>
+        <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const relationshipType = document.getElementById("relationship_type");
+    const opposingCompanyRow = document.getElementById("opposingCompanyRow");
+    const opposingCompanyInput = document.getElementById("opposing_company");
+
+    function toggleOpposingCompany() {
+        const value = relationshipType.value;
+
+        if (value === "competitor_owned") {
+            opposingCompanyRow.style.display = "block";
+        } else {
+            opposingCompanyRow.style.display = "none";
+            opposingCompanyInput.value = "";
+        }
+    }
+
+    toggleOpposingCompany();
+    relationshipType.addEventListener("change", toggleOpposingCompany);
+});
+</script>
+
+{% endblock %}

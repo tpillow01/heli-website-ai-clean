@@ -1,0 +1,114 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Customers | Daily Activity App{% endblock %}
+{% block page_title %}Customers{% endblock %}
+{% block page_subtitle %}Manage customer records, relationship status, competitor accounts, and follow-up opportunities{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Customer Management</div>
+        <h3>Keep your account list clean, visible, and easy to act on</h3>
+        <p>
+            Use this page to review who owns each account, see which customers are tied to competitors,
+            track quoted opportunities, and move quickly into account details, edits, or follow-up actions.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('add_customer') }}" class="btn btn-primary">Add Customer</a>
+            <a href="{{ url_for('calendar_page') }}" class="btn btn-secondary">Open Calendar</a>
+            <a href="{{ url_for('planner') }}" class="btn btn-secondary">Open Planner</a>
+            <a href="{{ url_for('map_page') }}" class="btn btn-secondary">Open Map</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Total Accounts</span>
+            <strong>{{ customers|length }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Main Focus</span>
+            <strong>Relationships</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Use With</span>
+            <strong>Planner</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Use With</span>
+            <strong>Map</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Customer List</h3>
+            <p>
+                Review rep ownership, location, relationship type, opposing company, and follow-up timing in one place.
+            </p>
+        </div>
+    </div>
+
+    {% if customers %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Rep</th>
+                        <th>City</th>
+                        <th>County</th>
+                        <th>Relationship</th>
+                        <th>Opposing Company</th>
+                        <th>Follow-Up</th>
+                        <th>Last Touch</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for customer in customers %}
+                        <tr>
+                            <td>
+                                <strong>{{ customer.company_name }}</strong>
+                            </td>
+                            <td>{{ customer.assigned_rep or "—" }}</td>
+                            <td>{{ customer.city or "—" }}</td>
+                            <td>{{ customer.county or "—" }}</td>
+                            <td>
+                                {% if customer.relationship_type %}
+                                    {{ customer.relationship_type.replace('_', ' ').title() }}
+                                {% else %}
+                                    No Relationship
+                                {% endif %}
+                            </td>
+                            <td>{{ customer.opposing_company or "—" }}</td>
+                            <td>{{ customer.follow_up_date or "—" }}</td>
+                            <td>{{ customer.last_touch_date or "—" }}</td>
+                            <td>
+                                <div class="row-actions">
+                                    <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-small btn-primary">
+                                        Open
+                                    </a>
+                                    <a href="{{ url_for('edit_customer', customer_id=customer.id) }}" class="btn btn-small btn-secondary">
+                                        Edit
+                                    </a>
+                                    <a href="{{ url_for('add_activity_for_customer', customer_id=customer.id) }}" class="btn btn-small btn-secondary">
+                                        Log Activity
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">No customers found yet. Add your first customer to begin building the account list.</div>
+    {% endif %}
+</div>
+
+{% endblock %}

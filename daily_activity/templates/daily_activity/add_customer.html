@@ -1,0 +1,274 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Add Customer | Daily Activity App{% endblock %}
+{% block page_title %}Add Customer{% endblock %}
+{% block page_subtitle %}Create a new customer account, define the relationship, and capture follow-up details{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">New Account</div>
+        <h3>Add a customer with the right relationship type from the start</h3>
+        <p>
+            Use this page to create a new customer, assign the rep, define whether they are a current customer,
+            quoted account, competitor-owned account, or a no-relationship prospect, and capture any immediate
+            follow-up information that matters.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('customers') }}" class="btn btn-secondary">Back to Customers</a>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Return to Dashboard</a>
+            <a href="{{ url_for('calendar_page') }}" class="btn btn-secondary">Open Calendar</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Step 1</span>
+            <strong>Account</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Step 2</span>
+            <strong>Relationship</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Step 3</span>
+            <strong>Follow-Up</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Step 4</span>
+            <strong>Fleet</strong>
+        </div>
+    </div>
+</div>
+
+<form method="POST" class="form-stack">
+    <div class="panel-card form-shell">
+        <div class="panel-top">
+            <div>
+                <h3>Customer Information</h3>
+                <p>Enter the main account details for the new customer.</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="company_name">Company Name</label>
+                <input type="text" id="company_name" name="company_name" required>
+            </div>
+
+            <div class="form-row">
+                <label for="assigned_rep">Assigned Rep</label>
+                <input type="text" id="assigned_rep" name="assigned_rep">
+            </div>
+
+            <div class="form-row">
+                <label for="address">Street Address</label>
+                <input type="text" id="address" name="address">
+            </div>
+
+            <div class="form-row">
+                <label for="city">City</label>
+                <input type="text" id="city" name="city">
+            </div>
+
+            <div class="form-row">
+                <label for="state">State</label>
+                <input type="text" id="state" name="state">
+            </div>
+
+            <div class="form-row">
+                <label for="zip_code">ZIP Code</label>
+                <input type="text" id="zip_code" name="zip_code">
+            </div>
+
+            <div class="form-row">
+                <label for="county">County</label>
+                <input type="text" id="county" name="county">
+            </div>
+
+            <div class="form-row">
+                <label for="relationship_type">Relationship Type</label>
+                <select id="relationship_type" name="relationship_type">
+                    <option value="no_relationship">No Relationship</option>
+                    <option value="quoted">Quoted</option>
+                    <option value="current_customer">Current Customer</option>
+                    <option value="competitor_owned">Competitor-Owned</option>
+                </select>
+            </div>
+
+            <div class="form-row" id="opposingCompanyRow">
+                <label for="opposing_company">Opposing Company</label>
+                <input type="text" id="opposing_company" name="opposing_company" placeholder="Example: Pro-Lift">
+            </div>
+
+            <div class="form-row">
+                <label for="follow_up_date">Follow-Up Date</label>
+                <input type="date" id="follow_up_date" name="follow_up_date">
+            </div>
+
+            <div class="form-row">
+                <label for="last_touch_date">Last Touch Date</label>
+                <input type="date" id="last_touch_date" name="last_touch_date">
+            </div>
+
+            <div class="form-row">
+                <label for="last_contact_date">Last Contact Date</label>
+                <input type="date" id="last_contact_date" name="last_contact_date">
+            </div>
+
+            <div class="form-row">
+                <label for="status">Legacy Status</label>
+                <select id="status" name="status">
+                    <option value="">Select Status</option>
+                    <option value="Prospect">Prospect</option>
+                    <option value="Active">Active</option>
+                    <option value="Quoted">Quoted</option>
+                    <option value="Customer">Customer</option>
+                    <option value="Inactive">Inactive</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label for="priority_level">Legacy Priority</label>
+                <select id="priority_level" name="priority_level">
+                    <option value="">Select Priority</option>
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="notes">Customer Notes</label>
+            <textarea id="notes" name="notes" placeholder="Enter general notes, opportunity details, service context, or follow-up comments..."></textarea>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="quote_notes">Quote Notes</label>
+                <textarea id="quote_notes" name="quote_notes" placeholder="Quote details, pricing notes, or model discussions..."></textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="service_notes">Service Notes</label>
+                <textarea id="service_notes" name="service_notes" placeholder="Service situation, maintenance opportunities, or repair observations..."></textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="rental_notes">Rental Notes</label>
+                <textarea id="rental_notes" name="rental_notes" placeholder="Rental need, temporary fleet usage, or backup equipment opportunities..."></textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="pm_notes">PM Notes</label>
+                <textarea id="pm_notes" name="pm_notes" placeholder="Preventive maintenance notes or contract opportunities..."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel-card form-shell">
+        <div class="panel-top">
+            <div>
+                <h3>Primary Contact</h3>
+                <p>Optional contact information for the main person at the account.</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="contact_name">Primary Contact Name</label>
+                <input type="text" id="contact_name" name="contact_name">
+            </div>
+
+            <div class="form-row">
+                <label for="contact_phone">Phone</label>
+                <input type="text" id="contact_phone" name="contact_phone">
+            </div>
+
+            <div class="form-row">
+                <label for="contact_email">Email</label>
+                <input type="email" id="contact_email" name="contact_email">
+            </div>
+        </div>
+    </div>
+
+    <div class="panel-card form-shell">
+        <div class="panel-top">
+            <div>
+                <h3>Fleet Information</h3>
+                <p>Capture any equipment details you already know for this customer.</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="fleet_make">Fleet Make</label>
+                <input type="text" id="fleet_make" name="fleet_make" placeholder="Example: Heli, Toyota, Yale">
+            </div>
+
+            <div class="form-row">
+                <label for="fleet_model">Fleet Model</label>
+                <input type="text" id="fleet_model" name="fleet_model" placeholder="Example: CPD25, ERP050">
+            </div>
+
+            <div class="form-row">
+                <label for="fleet_capacity">Capacity</label>
+                <input type="text" id="fleet_capacity" name="fleet_capacity" placeholder="Example: 5000 lb">
+            </div>
+
+            <div class="form-row">
+                <label for="fleet_fuel_type">Fuel Type</label>
+                <select id="fleet_fuel_type" name="fleet_fuel_type">
+                    <option value="">Select Fuel Type</option>
+                    <option value="Electric">Electric</option>
+                    <option value="LP">LP</option>
+                    <option value="Diesel">Diesel</option>
+                    <option value="Gas">Gas</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label for="fleet_quantity">Quantity</label>
+                <input type="number" id="fleet_quantity" name="fleet_quantity" min="1" placeholder="Example: 3">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="fleet_notes">Fleet Notes</label>
+            <textarea id="fleet_notes" name="fleet_notes" placeholder="Enter fleet notes, condition comments, age of units, service concerns, replacement opportunities, or other observations..."></textarea>
+        </div>
+    </div>
+
+    <div class="hero-actions">
+        <button type="submit" class="btn btn-primary">Save Customer</button>
+        <a href="{{ url_for('customers') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const relationshipType = document.getElementById("relationship_type");
+    const opposingCompanyRow = document.getElementById("opposingCompanyRow");
+    const opposingCompanyInput = document.getElementById("opposing_company");
+
+    function toggleOpposingCompany() {
+        const value = relationshipType.value;
+
+        if (value === "competitor_owned") {
+            opposingCompanyRow.style.display = "block";
+        } else {
+            opposingCompanyRow.style.display = "none";
+            opposingCompanyInput.value = "";
+        }
+    }
+
+    toggleOpposingCompany();
+    relationshipType.addEventListener("change", toggleOpposingCompany);
+});
+</script>
+
+{% endblock %}

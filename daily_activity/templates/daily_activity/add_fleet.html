@@ -1,0 +1,92 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Add Fleet | Daily Activity App{% endblock %}
+{% block page_title %}Add Fleet Information{% endblock %}
+{% block page_subtitle %}Capture equipment details for this customer so reps can track fleet mix, size, and replacement opportunities{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Fleet Record</div>
+        <h3>Add fleet information for {{ customer.company_name }}</h3>
+        <p>
+            Save known equipment details for this customer so reps can understand the current fleet,
+            spot replacement opportunities, and keep equipment history organized.
+        </p>
+
+        <div class="hero-actions">
+            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Back to Customer</a>
+            <a href="{{ url_for('customers') }}" class="btn btn-secondary">Back to Customers</a>
+        </div>
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Account</span>
+            <strong>{{ customer.company_name }}</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Purpose</span>
+            <strong>Fleet Tracking</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Used For</span>
+            <strong>Planning</strong>
+        </div>
+        <div class="mini-stat-card">
+            <span>Used For</span>
+            <strong>Replacement</strong>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card form-shell">
+    <div class="panel-top">
+        <div>
+            <h3>Fleet Information</h3>
+            <p>Enter any equipment details already known for this account.</p>
+        </div>
+    </div>
+
+    <form method="POST" class="main-form" autocomplete="on">
+        <div class="form-grid">
+            <div class="form-row">
+                <label for="make">Make</label>
+                <input type="text" id="make" name="make" placeholder="Example: Heli, Toyota, Yale" autofocus>
+            </div>
+
+            <div class="form-row">
+                <label for="model">Model</label>
+                <input type="text" id="model" name="model" placeholder="Example: CPD25, ERP050">
+            </div>
+
+            <div class="form-row">
+                <label for="capacity">Capacity</label>
+                <input type="text" id="capacity" name="capacity" placeholder="Example: 5000 lb">
+            </div>
+
+            <div class="form-row">
+                <label for="fuel_type">Fuel Type</label>
+                <input type="text" id="fuel_type" name="fuel_type" placeholder="Example: Electric, LP, Diesel">
+            </div>
+
+            <div class="form-row">
+                <label for="quantity">Quantity</label>
+                <input type="number" id="quantity" name="quantity" min="1" inputmode="numeric" placeholder="Example: 3">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="notes">Notes</label>
+            <textarea id="notes" name="notes" rows="5" placeholder="Enter condition notes, age of units, usage details, service concerns, replacement timing, or other fleet observations..."></textarea>
+        </div>
+
+        <div class="hero-actions" style="margin-top: 8px;">
+            <button type="submit" class="btn btn-primary">Save Fleet Info</button>
+            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

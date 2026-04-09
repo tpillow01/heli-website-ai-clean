@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#050505">
+    <title>{% block title %}Daily Activity App{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('daily_activity.static', filename='styles.css') }}?v=7">
+</head>
+<body>
+    <div class="site-wrap">
+        <header class="site-header">
+            <div class="header-inner">
+                <div class="brand-block">
+                    <div class="brand-mark">DA</div>
+                    <div class="brand-text">
+                        <h1>Daily Activity</h1>
+                        <p>Sales planning system</p>
+                    </div>
+                </div>
+
+                <nav class="main-nav">
+                    <a href="{{ url_for('daily_activity.dashboard') }}"
+                       class="nav-pill {% if request.endpoint == 'daily_activity.dashboard' %}active{% endif %}">
+                        Dashboard
+                    </a>
+
+                    <a href="{{ url_for('daily_activity.customers') }}"
+                       class="nav-pill {% if request.endpoint in ['daily_activity.customers', 'daily_activity.customer_detail', 'daily_activity.edit_customer', 'daily_activity.add_customer'] %}active{% endif %}">
+                        Customers
+                    </a>
+
+                    <a href="{{ url_for('daily_activity.activity') }}"
+                       class="nav-pill {% if request.endpoint in ['daily_activity.activity', 'daily_activity.add_activity', 'daily_activity.add_activity_for_customer'] %}active{% endif %}">
+                        Activity
+                    </a>
+
+                    <a href="{{ url_for('daily_activity.calendar_page') }}"
+                       class="nav-pill {% if request.endpoint == 'daily_activity.calendar_page' %}active{% endif %}">
+                        Calendar
+                    </a>
+
+                    <a href="{{ url_for('daily_activity.planner') }}"
+                       class="nav-pill {% if request.endpoint == 'daily_activity.planner' %}active{% endif %}">
+                        Planner
+                    </a>
+
+                    <a href="{{ url_for('daily_activity.map_page') }}"
+                       class="nav-pill {% if request.endpoint == 'daily_activity.map_page' %}active{% endif %}">
+                        Map
+                    </a>
+
+                    <a href="{{ url_for('home') }}" class="nav-pill">
+                        Heli AI
+                    </a>
+                </nav>
+            </div>
+        </header>
+
+        <main class="page-shell">
+            <section class="page-hero">
+                <div class="page-hero-inner">
+                    <div class="page-kicker">Sales Workspace</div>
+                    <h2 class="page-title">{% block page_title %}Daily Activity App{% endblock %}</h2>
+                    <p class="page-subtitle">
+                        {% block page_subtitle %}
+                        Customer planning, activity tracking, and map visibility
+                        {% endblock %}
+                    </p>
+                </div>
+            </section>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-wrap">
+                        {% for category, message in messages %}
+                            <div class="flash-message {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <section class="page-content">
+                {% block content %}{% endblock %}
+            </section>
+        </main>
+    </div>
+</body>
+</html>
