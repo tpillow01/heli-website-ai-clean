@@ -868,6 +868,10 @@ def edit_customer(customer_id):
 @daily_activity_bp.route("/customer/<int:customer_id>/delete", methods=["POST"])
 def delete_customer(customer_id):
     customer = get_customer_or_403(customer_id)
+
+    if not user_is_manager():
+        abort(403)
+
     db.session.delete(customer)
     db.session.commit()
 
