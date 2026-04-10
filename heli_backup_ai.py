@@ -664,7 +664,8 @@ def login():
             return render_template("login.html", error="Invalid email or password.", email=email), 401
         session.permanent = True
         session["user_id"] = user["id"]
-        session["email"]   = user["email"]
+        session["email"] = user["email"]
+        session["role"] = user["role"]
         return redirect(request.args.get("next") or url_for("home"))
     return render_template("login.html")
 
@@ -686,7 +687,8 @@ def signup():
             return render_template("signup.html", error=f"Could not create user: {e}", email=email), 500
         user = find_user_by_email(email)
         session["user_id"] = user["id"]
-        session["email"]   = user["email"]
+        session["email"] = user["email"]
+        session["role"] = user["role"]
         return redirect(url_for("home"))
     return render_template("signup.html")
 
