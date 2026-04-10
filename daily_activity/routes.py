@@ -47,11 +47,6 @@ def da_url(endpoint, **kwargs):
         endpoint = f"daily_activity.{endpoint}"
     return flask_url_for(endpoint, **kwargs)
 
-def da_url(endpoint, **kwargs):
-    if "." not in endpoint:
-        endpoint = f"daily_activity.{endpoint}"
-    return flask_url_for(endpoint, **kwargs)
-
 
 def current_user_id():
     return session.get("user_id")
@@ -66,7 +61,7 @@ def user_is_manager():
 
 
 def scoped_customer_query():
-    query = scoped_customer_query()
+    query = Customer.query
     if not user_is_manager():
         query = query.filter(Customer.user_id == current_user_id())
     return query
@@ -94,7 +89,7 @@ def scoped_fleet_query():
 
 
 def get_customer_or_403(customer_id):
-    customer = get_customer_or_403(customer_id)
+    customer = Customer.query.get_or_404(customer_id)
     if not user_is_manager() and customer.user_id != current_user_id():
         abort(403)
     return customer
@@ -328,7 +323,7 @@ def sort_accounts_for_planning(customers, competitor_name=None):
 
 
 def build_planner_data(rep_name=None, county=None, opposing_company=None, max_stops=10):
-    query = scoped_customer_query()
+    query = Customer.query
 
     if rep_name:
         query = query.filter(Customer.assigned_rep == rep_name)
