@@ -495,9 +495,16 @@ def init_user_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'rep',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Safe upgrade for older DBs that do not yet have a role column
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+    if "role" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'rep'")
+
     conn.commit()
     conn.close()
 
@@ -574,14 +581,29 @@ def find_user_by_email(email: str):
     conn.close()
     return row
 
-def create_user(email: str, password: str):
+def create_user(email: str, password: str, role: str = "rep"):
     conn = get_user_db()
     conn.execute(
-        "INSERT INTO users (email, password_hash) VALUES (?, ?)",
-        (email.lower().strip(), generate_password_hash(password))
+        "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)",
+        (email.lower().strip(), generate_password_hash(password), role)
     )
     conn.commit()
     conn.close()
+
+def get_current_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+
+    conn = get_user_db()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return user
+
+
+def is_manager():
+    user = get_current_user()
+    return bool(user and user["role"] == "manager")
 
 # ─────────────────────────────────────────────────────────────────────────
 # Auth decorator
