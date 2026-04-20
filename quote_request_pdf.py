@@ -3,11 +3,12 @@
 from typing import Dict, List, Tuple
 from datetime import datetime
 import io
+import html
 
 from reportlab.lib.pagesizes import LETTER
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 
 QUOTE_FIELD_LABELS: List[Tuple[str, str]] = [
@@ -133,6 +134,18 @@ def _clean(v) -> str:
     return ("" if v is None else str(v)).strip()
 
 
+def _to_multiline_paragraph(text: str, style: ParagraphStyle, default_text: str = "") -> Paragraph:
+    cleaned = _clean(text)
+    if not cleaned:
+        cleaned = default_text
+
+    escaped = html.escape(cleaned)
+    escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
+    escaped = escaped.replace("\n", "<br/>")
+
+    return Paragraph(escaped, style)
+
+
 def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], form_data: Dict[str, str]) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -145,12 +158,47 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
     )
 
     styles = getSampleStyleSheet()
+
+    title_style = styles["Title"]
+    subtitle_style = styles["Normal"]
+
+    label_style = ParagraphStyle(
+        "FieldLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        spaceAfter=0,
+        spaceBefore=0,
+    )
+
+    value_style = ParagraphStyle(
+        "FieldValue",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+        spaceAfter=0,
+        spaceBefore=0,
+        wordWrap="LTR",
+    )
+
+    section_style = ParagraphStyle(
+        "SectionHeader",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        spaceAfter=0,
+        spaceBefore=0,
+    )
+
     elements = []
 
-    title = Paragraph(title_text, styles["Title"])
+    title = Paragraph(title_text, title_style)
     subtitle = Paragraph(
         datetime.now().strftime("Generated on %Y-%m-%d at %H:%M"),
-        styles["Normal"],
+        subtitle_style,
     )
     elements.extend([title, subtitle, Spacer(1, 18)])
 
@@ -160,24 +208,28 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
     for key, label in field_labels:
         if key == "__SECTION__":
             section_row_indexes.append(len(rows))
-            rows.append([label, ""])
+            rows.append([Paragraph(html.escape(label), section_style), ""])
         else:
-            rows.append([label, _clean(form_data.get(key))])
+            value_text = _clean(form_data.get(key))
 
-    table = Table(rows, colWidths=[180, 350])
+            # Notes and similar long-text fields should always render as wrapping paragraphs
+            if key in {"notes", "special_instructions", "additional_notes", "local_options", "attachment"}:
+                value_cell = _to_multiline_paragraph(value_text, value_style, default_text="-")
+            else:
+                value_cell = _to_multiline_paragraph(value_text, value_style, default_text="-")
+
+            label_cell = Paragraph(html.escape(label), label_style)
+            rows.append([label_cell, value_cell])
+
+    table = Table(rows, colWidths=[180, 350], repeatRows=0)
 
     base_style = [
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("ALIGN", (0, 0), (0, -1), "LEFT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]
 
     # Style section header rows (Used Equipment: Internal Information)
@@ -185,7 +237,6 @@ def _build_request_pdf(title_text: str, field_labels: List[Tuple[str, str]], for
         base_style += [
             ("SPAN", (0, r), (1, r)),
             ("BACKGROUND", (0, r), (1, r), colors.lightgrey),
-            ("FONTNAME", (0, r), (1, r), "Helvetica-Bold"),
         ]
 
     table.setStyle(TableStyle(base_style))

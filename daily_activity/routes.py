@@ -1,8 +1,18 @@
 import os
+import re
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 
-from flask import render_template, request, redirect, url_for as flask_url_for, flash, session, abort
+from flask import (
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+    abort,
+)
+
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
@@ -22,6 +32,7 @@ DA_ENDPOINTS = {
     "add_activity",
     "add_activity_for_customer",
     "add_contact",
+    "edit_contact",
     "add_fleet",
     "complete_followup",
     "snooze_followup",
@@ -37,7 +48,7 @@ def inject_daily_activity_url_for():
     def scoped_url_for(endpoint, **kwargs):
         if "." not in endpoint and endpoint in DA_ENDPOINTS:
             endpoint = f"daily_activity.{endpoint}"
-        return flask_url_for(endpoint, **kwargs)
+        return url_for(endpoint, **kwargs)
 
     return {"url_for": scoped_url_for}
 
@@ -45,7 +56,7 @@ def inject_daily_activity_url_for():
 def da_url(endpoint, **kwargs):
     if "." not in endpoint:
         endpoint = f"daily_activity.{endpoint}"
-    return flask_url_for(endpoint, **kwargs)
+    return url_for(endpoint, **kwargs)
 
 
 def current_user_id():
@@ -93,6 +104,7 @@ def get_customer_or_403(customer_id):
     if not user_is_manager() and customer.user_id != current_user_id():
         abort(403)
     return customer
+
 
 # ----------------------------
 # Address / geocoding helpers
@@ -324,6 +336,9 @@ def sort_accounts_for_planning(customers, competitor_name=None):
 
 def build_planner_data(rep_name=None, county=None, opposing_company=None, max_stops=10):
     query = Customer.query
+
+    if not user_is_manager():
+        query = query.filter(Customer.user_id == current_user_id())
 
     if rep_name:
         query = query.filter(Customer.assigned_rep == rep_name)
@@ -582,6 +597,23 @@ def build_calendar_followups(days_ahead=21):
     return grouped_sorted
 
 
+def format_phone_number(value):
+    raw = (value or "").strip()
+    digits = re.sub(r"\D", "", raw)
+
+    if not digits:
+        return ""
+
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    if len(digits) == 7:
+        return f"{digits[:3]}-{digits[3:]}"
+    return raw
+
+
 # ----------------------------
 # Activity update helpers
 # ----------------------------
@@ -682,6 +714,7 @@ def customers():
         is_manager=user_is_manager(),
     )
 
+
 @daily_activity_bp.route("/customers/add", methods=["GET", "POST"])
 def add_customer():
     if request.method == "POST":
@@ -724,29 +757,29 @@ def add_customer():
         latitude, longitude = geocode_customer_address(address, city, state, zip_code)
 
         customer = Customer(
-        user_id=current_user_id(),
-        company_name=company_name,
-        assigned_rep=assigned_rep,
-        address=address,
-        city=city,
-        state=state,
-        zip_code=zip_code,
-        county=county,
-        status=status,
-        priority_level=priority_level,
-        relationship_type=relationship_type,
-        opposing_company=opposing_company if relationship_type == "competitor_owned" else "",
-        last_contact_date=last_contact_date,
-        follow_up_date=follow_up_date,
-        last_touch_date=last_touch_date,
-        notes=notes,
-        quote_notes=quote_notes,
-        service_notes=service_notes,
-        rental_notes=rental_notes,
-        pm_notes=pm_notes,
-        latitude=latitude,
-        longitude=longitude,
-    )
+            user_id=current_user_id(),
+            company_name=company_name,
+            assigned_rep=assigned_rep,
+            address=address,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            county=county,
+            status=status,
+            priority_level=priority_level,
+            relationship_type=relationship_type,
+            opposing_company=opposing_company if relationship_type == "competitor_owned" else "",
+            last_contact_date=last_contact_date,
+            follow_up_date=follow_up_date,
+            last_touch_date=last_touch_date,
+            notes=notes,
+            quote_notes=quote_notes,
+            service_notes=service_notes,
+            rental_notes=rental_notes,
+            pm_notes=pm_notes,
+            latitude=latitude,
+            longitude=longitude,
+        )
 
         db.session.add(customer)
         db.session.commit()
@@ -755,16 +788,16 @@ def add_customer():
         contact_phone = request.form.get("contact_phone", "").strip()
         contact_email = request.form.get("contact_email", "").strip()
 
-        if contact_name:
+        if contact_name or contact_phone or contact_email:
             contact = Contact(
-            user_id=current_user_id(),
-            customer_id=customer.id,
-            name=contact_name,
-            phone=contact_phone,
-            email=contact_email,
-            title="Primary Contact",
-        )
-        db.session.add(contact)
+                user_id=current_user_id(),
+                customer_id=customer.id,
+                name=contact_name or "Primary Contact",
+                phone=format_phone_number(contact_phone),
+                email=contact_email,
+                title="Primary Contact",
+            )
+            db.session.add(contact)
 
         fleet_make = request.form.get("fleet_make", "").strip()
         fleet_model = request.form.get("fleet_model", "").strip()
@@ -780,15 +813,15 @@ def add_customer():
                 fleet_quantity = None
 
             fleet = FleetInfo(
-            user_id=current_user_id(),
-            customer_id=customer.id,
-            make=fleet_make,
-            model=fleet_model,
-            capacity=fleet_capacity,
-            fuel_type=fleet_fuel_type,
-            quantity=fleet_quantity,
-            notes=fleet_notes,
-        )
+                user_id=current_user_id(),
+                customer_id=customer.id,
+                make=fleet_make,
+                model=fleet_model,
+                capacity=fleet_capacity,
+                fuel_type=fleet_fuel_type,
+                quantity=fleet_quantity,
+                notes=fleet_notes,
+            )
             db.session.add(fleet)
 
         db.session.commit()
@@ -796,13 +829,17 @@ def add_customer():
         flash("Customer added successfully.", "success")
         return redirect(da_url("customers"))
 
-    return render_template("daily_activity/add_customer.html")
+    return render_template("daily_activity/add_customer.html", is_manager=user_is_manager())
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>")
 def customer_detail(customer_id):
     customer = get_customer_or_403(customer_id)
-    return render_template("daily_activity/customer_detail.html", customer=customer)
+    return render_template(
+        "daily_activity/customer_detail.html",
+        customer=customer,
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>/edit", methods=["GET", "POST"])
@@ -862,7 +899,54 @@ def edit_customer(customer_id):
         flash("Customer updated successfully.", "success")
         return redirect(da_url("customer_detail", customer_id=customer.id))
 
-    return render_template("daily_activity/edit_customer.html", customer=customer)
+    return render_template(
+        "daily_activity/edit_customer.html",
+        customer=customer,
+        is_manager=user_is_manager(),
+    )
+
+
+@daily_activity_bp.route("/customer/<int:customer_id>/contact/<int:contact_id>/edit", methods=["GET", "POST"])
+def edit_contact(customer_id, contact_id):
+    customer = get_customer_or_403(customer_id)
+
+    if user_is_manager():
+        contact = Contact.query.filter_by(
+            id=contact_id,
+            customer_id=customer.id,
+        ).first_or_404()
+    else:
+        contact = Contact.query.filter_by(
+            id=contact_id,
+            customer_id=customer.id,
+            user_id=current_user_id(),
+        ).first_or_404()
+
+    if request.method == "POST":
+        contact_name = request.form.get("name", "").strip()
+        contact_title = request.form.get("title", "").strip()
+        contact_phone = request.form.get("phone", "").strip()
+        contact_email = request.form.get("email", "").strip()
+
+        if not contact_name:
+            flash("Contact name is required.", "error")
+            return redirect(da_url("edit_contact", customer_id=customer.id, contact_id=contact.id))
+
+        contact.name = contact_name
+        contact.title = contact_title
+        contact.phone = format_phone_number(contact_phone)
+        contact.email = contact_email
+
+        db.session.commit()
+        flash("Contact updated successfully.", "success")
+        return redirect(da_url("customer_detail", customer_id=customer.id))
+
+    return render_template(
+        "daily_activity/edit_contact.html",
+        customer=customer,
+        contact=contact,
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>/delete", methods=["POST"])
@@ -871,6 +955,10 @@ def delete_customer(customer_id):
 
     if not user_is_manager():
         abort(403)
+
+    Contact.query.filter_by(customer_id=customer.id).delete()
+    ActivityLog.query.filter_by(customer_id=customer.id).delete()
+    FleetInfo.query.filter_by(customer_id=customer.id).delete()
 
     db.session.delete(customer)
     db.session.commit()
@@ -882,7 +970,11 @@ def delete_customer(customer_id):
 @daily_activity_bp.route("/activity")
 def activity():
     logs = scoped_activity_query().order_by(ActivityLog.created_at.desc()).all()
-    return render_template("daily_activity/activity.html", logs=logs)
+    return render_template(
+        "daily_activity/activity.html",
+        logs=logs,
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/activity/add", methods=["GET", "POST"])
@@ -927,12 +1019,17 @@ def add_activity():
 
         flash(
             build_activity_update_message(activity_type, activity_date, follow_up_date),
-            "success"
+            "success",
         )
 
         return redirect(da_url("planner"))
 
-    return render_template("daily_activity/add_activity.html", customers=customers, selected_customer_id=None)
+    return render_template(
+        "daily_activity/add_activity.html",
+        customers=customers,
+        selected_customer_id=None,
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>/add-activity", methods=["GET", "POST"])
@@ -975,7 +1072,7 @@ def add_activity_for_customer(customer_id):
 
         flash(
             build_activity_update_message(activity_type, activity_date, follow_up_date),
-            "success"
+            "success",
         )
 
         return redirect(da_url("customer_detail", customer_id=customer.id))
@@ -984,6 +1081,7 @@ def add_activity_for_customer(customer_id):
         "daily_activity/add_activity.html",
         customers=customers,
         selected_customer_id=customer.id,
+        is_manager=user_is_manager(),
     )
 
 
@@ -1003,7 +1101,7 @@ def add_contact(customer_id):
             customer_id=customer.id,
             name=name,
             title=request.form.get("title", "").strip(),
-            phone=request.form.get("phone", "").strip(),
+            phone=format_phone_number(request.form.get("phone", "").strip()),
             email=request.form.get("email", "").strip(),
         )
 
@@ -1013,7 +1111,11 @@ def add_contact(customer_id):
         flash("Contact added successfully.", "success")
         return redirect(da_url("customer_detail", customer_id=customer.id))
 
-    return render_template("daily_activity/add_contact.html", customer=customer)
+    return render_template(
+        "daily_activity/add_contact.html",
+        customer=customer,
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>/add-fleet", methods=["GET", "POST"])
@@ -1040,7 +1142,11 @@ def add_fleet(customer_id):
         flash("Fleet info added successfully.", "success")
         return redirect(da_url("customer_detail", customer_id=customer.id))
 
-    return render_template("daily_activity/add_fleet.html", customer=customer)
+    return render_template(
+        "daily_activity/add_fleet.html",
+        customer=customer,
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>/complete-followup", methods=["POST"])
@@ -1069,7 +1175,7 @@ def snooze_followup(customer_id):
 
     flash(
         f"Follow-up snoozed for {customer.company_name} by {days} day{'s' if days != 1 else ''}.",
-        "success"
+        "success",
     )
     return redirect_back("planner")
 
@@ -1124,6 +1230,7 @@ def map_page():
         "daily_activity/map.html",
         customers=customers,
         map_customers=map_customers,
+        is_manager=user_is_manager(),
     )
 
 
@@ -1194,6 +1301,7 @@ def planner():
         selected_county=county,
         selected_opposing_company=opposing_company,
         selected_max_stops=max_stops,
+        is_manager=user_is_manager(),
     )
 
 
