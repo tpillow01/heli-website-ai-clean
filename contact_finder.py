@@ -221,6 +221,7 @@ def _resolve_csv_path() -> str:
     project_root = os.path.dirname(base_dir)
 
     candidates = [
+        os.path.join(project_root, "data", "customer_contact.csv"),
         os.path.join(project_root, "customer_contact.csv"),
         os.path.join(base_dir, "customer_contact.csv"),
         "customer_contact.csv",
@@ -244,7 +245,7 @@ def _load_csv_if_changed(force: bool = False):
     except FileNotFoundError:
         raise RuntimeError(
             f"Contacts CSV not found at: {path}. "
-            f"Set {CSV_PATH_ENV} or place customer_contact.csv in the project root."
+            f"Set {CSV_PATH_ENV} or place customer_contact.csv in the expected project location."
         )
 
     if force or mtime != _csv_mtime:
@@ -345,7 +346,7 @@ def _dedupe_by_person(records: List[Dict]) -> List[Dict]:
 def _format_contact_line(r: Dict) -> str:
     first = (r.get("First Name", "") or "").strip()
     last = (r.get("Last Name", "") or "").strip()
-    name = " ".join([x for x in [first, last] if x])
+    name = " ".join([x for x in [first, last] if x]) or "Name not specified"
 
     title = (r.get("Title", "") or "").strip()
     city = (r.get("Contact City", "") or "").strip()
@@ -353,47 +354,62 @@ def _format_contact_line(r: Dict) -> str:
     postal_code = (r.get("Postal Code", "") or "").strip()
     country = (r.get("Country", "") or "").strip()
 
-    emails = ", ".join([
-        e for e in [(r.get("Email 1") or "").strip(), (r.get("Email 2") or "").strip()] if e
-    ])
-    phones = ", ".join([
-        p for p in [(r.get("Company Phone 1") or "").strip(), (r.get("Company Phone 2") or "").strip()] if p
-    ])
-    website = (r.get("Website", "") or "").strip()
+    emails = [
+        (r.get("Email 1") or "").strip(),
+        (r.get("Email 2") or "").strip(),
+    ]
+    emails = [e for e in emails if e]
+    emails = list(dict.fromkeys(emails))
+
+    phones = [
+        (r.get("Company Phone 1") or "").strip(),
+        (r.get("Company Phone 2") or "").strip(),
+    ]
+    phones = [p for p in phones if p]
+    phones = list(dict.fromkeys(phones))
+
     location = (r.get("Company Location", "") or "").strip()
+    website = (r.get("Website", "") or "").strip()
 
-    top = f"- **{name}**" if name else "- **(Name not specified)**"
+    lines = [f"**{name}**"]
+
     if title:
-        top += f" — {title}"
+        lines.append(f"**Title:** {title}")
 
-    lines = [top]
-
-    loc_bits = ", ".join([b for b in [city, state] if b])
-    if loc_bits:
-        lines.append(f"  • Location: {loc_bits}")
+    location_bits = ", ".join([b for b in [city, state] if b])
+    if location_bits:
+        lines.append(f"**Location:** {location_bits}")
 
     address_bits = ", ".join([b for b in [location, postal_code, country] if b])
     if address_bits:
-        lines.append(f"  • Address: {address_bits}")
+        lines.append(f"**Address:** {address_bits}")
 
     if emails:
-        lines.append(f"  • Email: {emails}")
+        lines.append(f"**Email:** {' | '.join(emails)}")
+
     if phones:
-        lines.append(f"  • Phone: {phones}")
+        lines.append(f"**Phone:** {' | '.join(phones)}")
+
     if website:
-        lines.append(f"  • Website: {website}")
+        lines.append(f"**Website:** {website}")
 
     return "\n".join(lines)
 
 
 def _format_company_block(company: str, rows: List[Dict], page: int, page_size: int, total: int) -> str:
-    header = f"**Contacts for:** {company}\n\n"
-    body = "\n\n".join(_format_contact_line(r) for r in rows) if rows else "_No contacts found._"
+    header = f"**Contacts for: {company}**"
+
+    if not rows:
+        return header + "\n\n_No contacts found._"
+
+    body = "\n\n".join(_format_contact_line(r) for r in rows)
+
     footer = ""
     if total > page_size:
         last_page = (total + page_size - 1) // page_size
-        footer = f"\n\n_Page {page} of {last_page} • {total} matches_"
-    return header + body + footer
+        footer = f"\n\n_Page {page} of {last_page} • {total} total contacts_"
+
+    return header + "\n\n" + body + footer
 
 
 def _extract_company_query(raw: str) -> str:
@@ -460,11 +476,13 @@ def contacts_search():
 
     records = _dedupe_by_person(records)
     company_display = records[0].get("Company Name") if records else query_display
-    records.sort(key=lambda r: (
-        r.get("Company Name", "").lower(),
-        r.get("Last Name", "").lower(),
-        r.get("First Name", "").lower(),
-    ))
+    records.sort(
+        key=lambda r: (
+            r.get("Company Name", "").lower(),
+            r.get("Last Name", "").lower(),
+            r.get("First Name", "").lower(),
+        )
+    )
 
     page_rows, total = _paginate(records, page, page_size)
 
@@ -538,11 +556,13 @@ def chat_contact_finder():
 
     records = _dedupe_by_person(records)
     company_display = records[0].get("Company Name") if records else query_display
-    records.sort(key=lambda r: (
-        r.get("Company Name", "").lower(),
-        r.get("Last Name", "").lower(),
-        r.get("First Name", "").lower(),
-    ))
+    records.sort(
+        key=lambda r: (
+            r.get("Company Name", "").lower(),
+            r.get("Last Name", "").lower(),
+            r.get("First Name", "").lower(),
+        )
+    )
 
     page_rows, total = _paginate(records, page, page_size)
     text = _format_company_block(company_display, page_rows, page, page_size, total)
