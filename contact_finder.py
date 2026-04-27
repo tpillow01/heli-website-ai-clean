@@ -32,6 +32,8 @@ OPTIONAL_HEADERS = [
     "Contact City",
     "Contact State",
     "Company Location",
+    "Postal Code",
+    "Country",
 ]
 
 # Common alternate header names mapped to canonical names
@@ -79,19 +81,30 @@ HEADER_ALIASES = {
     "company phone 1": "Company Phone 1",
     "main phone": "Company Phone 1",
 
+    "mobile": "Company Phone 2",
     "phone 2": "Company Phone 2",
     "company phone 2": "Company Phone 2",
     "secondary phone": "Company Phone 2",
 
     "city": "Contact City",
     "contact city": "Contact City",
+    "mailing city": "Contact City",
 
     "state": "Contact State",
     "contact state": "Contact State",
+    "mailing state": "Contact State",
+    "mailing state/province": "Contact State",
 
     "location": "Company Location",
     "company location": "Company Location",
     "mailing street": "Company Location",
+
+    "mailing zip/postal code": "Postal Code",
+    "zip": "Postal Code",
+    "postal code": "Postal Code",
+
+    "mailing country": "Country",
+    "country": "Country",
 }
 
 # ---- In-memory index ----
@@ -134,6 +147,8 @@ def _normalize_company_name(company_name: str) -> str:
     company_name = (company_name or "").strip()
     # Strip leading prefixes like "(Maxon Corp)Honeywell International Inc."
     company_name = re.sub(r"^\([^)]*\)", "", company_name).strip()
+    # Normalize repeated whitespace
+    company_name = re.sub(r"\s+", " ", company_name)
     return company_name
 
 
@@ -288,6 +303,9 @@ def _format_contact_line(r: Dict) -> str:
     title = (r.get("Title", "") or "").strip()
     city = (r.get("Contact City", "") or "").strip()
     state = (r.get("Contact State", "") or "").strip()
+    postal_code = (r.get("Postal Code", "") or "").strip()
+    country = (r.get("Country", "") or "").strip()
+
     emails = ", ".join([
         e for e in [
             (r.get("Email 1") or "").strip(),
@@ -314,6 +332,10 @@ def _format_contact_line(r: Dict) -> str:
         lines.append(f"  • Location: {loc_bits}")
     elif location:
         lines.append(f"  • Address: {location}")
+
+    address_bits = ", ".join([b for b in [location, postal_code, country] if b])
+    if address_bits and not loc_bits:
+        lines.append(f"  • Address: {address_bits}")
 
     if emails:
         lines.append(f"  • Email: {emails}")
@@ -417,6 +439,8 @@ def contacts_search():
                 "contact_city": r.get("Contact City", ""),
                 "contact_state": r.get("Contact State", ""),
                 "company_location": r.get("Company Location", ""),
+                "postal_code": r.get("Postal Code", ""),
+                "country": r.get("Country", ""),
             }
             for r in page_rows
         ],
