@@ -9,7 +9,6 @@ from functools import lru_cache
 
 contact_finder_bp = Blueprint("contact_finder", __name__)
 
-# ---- Config ----
 CSV_PATH_ENV = "CONTACTS_CSV"
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
@@ -37,8 +36,8 @@ OPTIONAL_HEADERS = [
 HEADER_ALIASES = {
     "company": "Company Name",
     "company name": "Company Name",
-    "account name": "Company Name",
     "account": "Company Name",
+    "account name": "Company Name",
     "customer": "Company Name",
     "customer name": "Company Name",
     "business": "Company Name",
@@ -215,7 +214,6 @@ def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
 
 def _resolve_csv_path() -> str:
     env_path = os.environ.get(CSV_PATH_ENV, "").strip()
-
     if env_path:
         return env_path
 
@@ -235,7 +233,7 @@ def _resolve_csv_path() -> str:
     return candidates[0]
 
 
-def _load_csv_if_changed(force=False):
+def _load_csv_if_changed(force: bool = False):
     global _contacts, _csv_mtime, _csv_path
 
     path = _resolve_csv_path()
@@ -250,11 +248,10 @@ def _load_csv_if_changed(force=False):
         )
 
     if force or mtime != _csv_mtime:
-        rows = []
+        rows: List[Dict] = []
 
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f, delimiter=",")
-
             raw_headers = reader.fieldnames or []
             _, missing_required = _prepare_headers(raw_headers)
 
@@ -266,23 +263,19 @@ def _load_csv_if_changed(force=False):
 
             for raw_row in reader:
                 row = _normalize_row(raw_row)
-
                 if not row.get("Company Name") and not row.get("First Name") and not row.get("Last Name"):
                     continue
-
                 rows.append(row)
 
         _contacts = rows
         _csv_mtime = mtime
         _search_company_cached.cache_clear()
 
-        sample_companies = [r.get("Company Name", "") for r in rows[:10]]
-        nonblank_company_count = sum(1 for r in rows if (r.get("Company Name") or "").strip())
-
         current_app.logger.info(f"[Contact Finder] FINAL CSV PATH USED: {path}")
         current_app.logger.info(f"[Contact Finder] Loaded {len(_contacts)} contacts from {path}")
-        current_app.logger.info(f"[Contact Finder] Nonblank Company Name count: {nonblank_company_count}")
-        current_app.logger.info(f"[Contact Finder] Sample Company Name values: {sample_companies}")
+        current_app.logger.info(
+            f"[Contact Finder] Sample Company Name values: {[r.get('Company Name', '') for r in rows[:10]]}"
+        )
 
 
 def _ensure_loaded():
@@ -361,16 +354,10 @@ def _format_contact_line(r: Dict) -> str:
     country = (r.get("Country", "") or "").strip()
 
     emails = ", ".join([
-        e for e in [
-            (r.get("Email 1") or "").strip(),
-            (r.get("Email 2") or "").strip(),
-        ] if e
+        e for e in [(r.get("Email 1") or "").strip(), (r.get("Email 2") or "").strip()] if e
     ])
     phones = ", ".join([
-        p for p in [
-            (r.get("Company Phone 1") or "").strip(),
-            (r.get("Company Phone 2") or "").strip(),
-        ] if p
+        p for p in [(r.get("Company Phone 1") or "").strip(), (r.get("Company Phone 2") or "").strip()] if p
     ])
     website = (r.get("Website", "") or "").strip()
     location = (r.get("Company Location", "") or "").strip()
@@ -473,13 +460,11 @@ def contacts_search():
 
     records = _dedupe_by_person(records)
     company_display = records[0].get("Company Name") if records else query_display
-    records.sort(
-        key=lambda r: (
-            r.get("Company Name", "").lower(),
-            r.get("Last Name", "").lower(),
-            r.get("First Name", "").lower(),
-        )
-    )
+    records.sort(key=lambda r: (
+        r.get("Company Name", "").lower(),
+        r.get("Last Name", "").lower(),
+        r.get("First Name", "").lower(),
+    ))
 
     page_rows, total = _paginate(records, page, page_size)
 
@@ -528,7 +513,7 @@ def chat_contact_finder():
     query_display, qn = _normalize_user_query(extracted_query)
 
     if not qn:
-        return jsonify({"text": "_Please give me a company name, for example: contacts for Honeywell._"}), 400
+        return jsonify({"text": "_Please give me a company name, for example: contacts for Ag Alumni Seed._"}), 400
 
     _load_csv_if_changed(force=False)
 
@@ -553,13 +538,11 @@ def chat_contact_finder():
 
     records = _dedupe_by_person(records)
     company_display = records[0].get("Company Name") if records else query_display
-    records.sort(
-        key=lambda r: (
-            r.get("Company Name", "").lower(),
-            r.get("Last Name", "").lower(),
-            r.get("First Name", "").lower(),
-        )
-    )
+    records.sort(key=lambda r: (
+        r.get("Company Name", "").lower(),
+        r.get("Last Name", "").lower(),
+        r.get("First Name", "").lower(),
+    ))
 
     page_rows, total = _paginate(records, page, page_size)
     text = _format_company_block(company_display, page_rows, page, page_size, total)
