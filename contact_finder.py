@@ -145,9 +145,54 @@ def _prepare_headers(headers: List[str]) -> Tuple[List[str], List[str]]:
 
 def _normalize_company_name(company_name: str) -> str:
     company_name = (company_name or "").strip()
+    # Strip leading prefixes like "(Maxon Corp)Honeywell International Inc."
     company_name = re.sub(r"^\([^)]*\)", "", company_name).strip()
     company_name = re.sub(r"\s+", " ", company_name)
     return company_name
+
+
+def _simplify_company_name(company_name: str) -> str:
+    """
+    Create a looser normalized version for matching.
+    Example:
+    'Honeywell International Inc.' -> 'honeywell'
+    """
+    value = _normalize_company_name(company_name)
+    value = _normalize(value)
+
+    suffixes = [
+        " incorporated",
+        " inc",
+        " inc.",
+        " llc",
+        " ltd",
+        " ltd.",
+        " corp",
+        " corp.",
+        " corporation",
+        " co",
+        " co.",
+        " company",
+        " lp",
+        " l.p.",
+        " plc",
+        " group",
+        " holdings",
+        " systems",
+        " international",
+    ]
+
+    changed = True
+    while changed:
+        changed = False
+        for suffix in suffixes:
+            if value.endswith(suffix):
+                value = value[: -len(suffix)].strip()
+                changed = True
+
+    value = re.sub(r"[^a-z0-9\s&-]", "", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
 
 
 def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
@@ -163,6 +208,7 @@ def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
     for col in REQUIRED_HEADERS:
         row.setdefault(col, "")
 
+    # Support CSVs with a single name column
     if (not row.get("First Name") and not row.get("Last Name")) and row.get("Full Name"):
         first, last = _split_full_name(row.get("Full Name", ""))
         row["First Name"] = first
@@ -171,6 +217,7 @@ def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
     row["Company Name"] = _normalize_company_name(row.get("Company Name", ""))
 
     row["_company_norm"] = _normalize(row.get("Company Name", ""))
+    row["_company_simple_norm"] = _simplify_company_name(row.get("Company Name", ""))
     row["_person_norm"] = _normalize(
         f"{row.get('First Name', '')} {row.get('Last Name', '')}"
     )
@@ -241,22 +288,34 @@ def _ensure_loaded():
 
 @lru_cache(maxsize=512)
 def _search_company_cached(query_norm: str) -> List[int]:
-    exact_idx = [i for i, r in enumerate(_contacts) if r["_company_norm"] == query_norm]
+    """
+    query_norm can be full normalized company name OR simplified company name.
+    """
+    exact_idx = [
+        i for i, r in enumerate(_contacts)
+        if r["_company_norm"] == query_norm or r["_company_simple_norm"] == query_norm
+    ]
     if exact_idx:
         return exact_idx
 
-    contains_idx = [i for i, r in enumerate(_contacts) if query_norm in r["_company_norm"]]
+    contains_idx = [
+        i for i, r in enumerate(_contacts)
+        if query_norm in r["_company_norm"] or query_norm in r["_company_simple_norm"]
+    ]
 
-    if not contains_idx:
-        scored = []
-        for i, r in enumerate(_contacts):
-            score = _similar(query_norm, r["_company_norm"])
-            if score >= 0.60:
-                scored.append((score, i))
-        scored.sort(reverse=True, key=lambda t: t[0])
-        return [i for _, i in scored[:500]]
+    if contains_idx:
+        return contains_idx
 
-    return contains_idx
+    scored = []
+    for i, r in enumerate(_contacts):
+        score_full = _similar(query_norm, r["_company_norm"])
+        score_simple = _similar(query_norm, r["_company_simple_norm"])
+        score = max(score_full, score_simple)
+        if score >= 0.55:
+            scored.append((score, i))
+
+    scored.sort(reverse=True, key=lambda t: t[0])
+    return [i for _, i in scored[:500]]
 
 
 def _paginate(items: List[Dict], page: int, page_size: int) -> Tuple[List[Dict], int]:
@@ -370,6 +429,20 @@ def _extract_company_query(raw: str) -> str:
     return q
 
 
+def _normalize_user_query(raw_query: str) -> Tuple[str, str]:
+    """
+    Returns:
+      query_display: cleaned company text for UI
+      query_norm: normalized query for searching
+    """
+    query_display = _normalize_company_name(raw_query)
+    query_simple = _simplify_company_name(query_display)
+
+    # Prefer simplified query if it has content, otherwise fall back
+    query_norm = query_simple or _normalize(query_display)
+    return query_display, query_norm
+
+
 @contact_finder_bp.route("/api/contacts/search", methods=["POST"])
 def contacts_search():
     _ensure_loaded()
@@ -383,8 +456,9 @@ def contacts_search():
     page_size = int(data.get("page_size", DEFAULT_PAGE_SIZE) or DEFAULT_PAGE_SIZE)
     page_size = max(1, min(page_size, MAX_PAGE_SIZE))
 
-    query = _extract_company_query(raw_q)
-    qn = _normalize(query)
+    extracted_query = _extract_company_query(raw_q)
+    query_display, qn = _normalize_user_query(extracted_query)
+
     if not qn:
         return jsonify({"error": "Empty query after parsing"}), 400
 
@@ -395,10 +469,14 @@ def contacts_search():
 
     words = [w for w in qn.split() if w]
     if words:
-        records = [r for r in records if all(w in r["_company_norm"] for w in words)] or records
+        filtered = [
+            r for r in records
+            if all(w in r["_company_norm"] or w in r["_company_simple_norm"] for w in words)
+        ]
+        records = filtered or records
 
     records = _dedupe_by_person(records)
-    company_display = records[0].get("Company Name") if records else query
+    company_display = records[0].get("Company Name") if records else query_display
     records.sort(
         key=lambda r: (
             r.get("Company Name", "").lower(),
@@ -410,7 +488,7 @@ def contacts_search():
     page_rows, total = _paginate(records, page, page_size)
 
     return jsonify({
-        "query": query,
+        "query": query_display,
         "company_display": company_display,
         "total": total,
         "page": page,
@@ -450,8 +528,9 @@ def chat_contact_finder():
     if not raw.strip():
         return jsonify({"text": "_Please type a company name, e.g., ‘contacts for Acme Corp’._"}), 400
 
-    query = _extract_company_query(raw)
-    qn = _normalize(query)
+    extracted_query = _extract_company_query(raw)
+    query_display, qn = _normalize_user_query(extracted_query)
+
     if not qn:
         return jsonify({"text": "_Please give me a company name, for example: contacts for Honeywell._"}), 400
 
@@ -460,7 +539,7 @@ def chat_contact_finder():
     idx_list = _search_company_cached(qn)
     records = [_contacts[i] for i in idx_list]
 
-    current_app.logger.info(f"[Contact Finder] Query='{query}' normalized='{qn}' raw_matches={len(records)}")
+    current_app.logger.info(f"[Contact Finder] Query='{query_display}' normalized='{qn}' raw_matches={len(records)}")
     if records[:5]:
         current_app.logger.info(
             f"[Contact Finder] Top raw company matches: {[r.get('Company Name', '') for r in records[:5]]}"
@@ -468,12 +547,16 @@ def chat_contact_finder():
 
     words = [w for w in qn.split() if w]
     if words:
-        records = [r for r in records if all(w in r['_company_norm'] for w in words)] or records
+        filtered = [
+            r for r in records
+            if all(w in r["_company_norm"] or w in r["_company_simple_norm"] for w in words)
+        ]
+        records = filtered or records
 
     current_app.logger.info(f"[Contact Finder] Filtered matches after word check: {len(records)}")
 
     records = _dedupe_by_person(records)
-    company_display = records[0].get("Company Name") if records else query
+    company_display = records[0].get("Company Name") if records else query_display
     records.sort(
         key=lambda r: (
             r.get("Company Name", "").lower(),
