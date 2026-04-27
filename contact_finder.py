@@ -145,9 +145,7 @@ def _prepare_headers(headers: List[str]) -> Tuple[List[str], List[str]]:
 
 def _normalize_company_name(company_name: str) -> str:
     company_name = (company_name or "").strip()
-    # Strip leading prefixes like "(Maxon Corp)Honeywell International Inc."
     company_name = re.sub(r"^\([^)]*\)", "", company_name).strip()
-    # Normalize repeated whitespace
     company_name = re.sub(r"\s+", " ", company_name)
     return company_name
 
@@ -165,7 +163,6 @@ def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
     for col in REQUIRED_HEADERS:
         row.setdefault(col, "")
 
-    # Support CSVs with a single name column
     if (not row.get("First Name") and not row.get("Last Name")) and row.get("Full Name"):
         first, last = _split_full_name(row.get("Full Name", ""))
         row["First Name"] = first
@@ -228,15 +225,10 @@ def _load_csv_if_changed(force=False):
         sample_companies = [r.get("Company Name", "") for r in rows[:10]]
         nonblank_company_count = sum(1 for r in rows if (r.get("Company Name") or "").strip())
 
-        current_app.logger.info(
-            f"[Contact Finder] Loaded {len(_contacts)} contacts from {path}"
-        )
-        current_app.logger.info(
-            f"[Contact Finder] Nonblank Company Name count: {nonblank_company_count}"
-        )
-        current_app.logger.info(
-            f"[Contact Finder] Sample Company Name values: {sample_companies}"
-        )
+        current_app.logger.info(f"[Contact Finder] Using CSV path: {path}")
+        current_app.logger.info(f"[Contact Finder] Loaded {len(_contacts)} contacts from {path}")
+        current_app.logger.info(f"[Contact Finder] Nonblank Company Name count: {nonblank_company_count}")
+        current_app.logger.info(f"[Contact Finder] Sample Company Name values: {sample_companies}")
 
 
 def _ensure_loaded():
@@ -330,11 +322,9 @@ def _format_contact_line(r: Dict) -> str:
     loc_bits = ", ".join([b for b in [city, state] if b])
     if loc_bits:
         lines.append(f"  • Location: {loc_bits}")
-    elif location:
-        lines.append(f"  • Address: {location}")
 
     address_bits = ", ".join([b for b in [location, postal_code, country] if b])
-    if address_bits and not loc_bits:
+    if address_bits:
         lines.append(f"  • Address: {address_bits}")
 
     if emails:
@@ -470,9 +460,7 @@ def chat_contact_finder():
     idx_list = _search_company_cached(qn)
     records = [_contacts[i] for i in idx_list]
 
-    current_app.logger.info(
-        f"[Contact Finder] Query='{query}' normalized='{qn}' raw_matches={len(records)}"
-    )
+    current_app.logger.info(f"[Contact Finder] Query='{query}' normalized='{qn}' raw_matches={len(records)}")
     if records[:5]:
         current_app.logger.info(
             f"[Contact Finder] Top raw company matches: {[r.get('Company Name', '') for r in records[:5]]}"
@@ -480,11 +468,9 @@ def chat_contact_finder():
 
     words = [w for w in qn.split() if w]
     if words:
-        records = [r for r in records if all(w in r["_company_norm"] for w in words)] or records
+        records = [r for r in records if all(w in r['_company_norm'] for w in words)] or records
 
-    current_app.logger.info(
-        f"[Contact Finder] Filtered matches after word check: {len(records)}"
-    )
+    current_app.logger.info(f"[Contact Finder] Filtered matches after word check: {len(records)}")
 
     records = _dedupe_by_person(records)
     company_display = records[0].get("Company Name") if records else query
