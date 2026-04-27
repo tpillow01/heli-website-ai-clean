@@ -10,18 +10,16 @@ from functools import lru_cache
 contact_finder_bp = Blueprint("contact_finder", __name__)
 
 # ---- Config ----
-CSV_PATH_ENV = "CONTACTS_CSV"  # set this in your env (absolute or relative path)
+CSV_PATH_ENV = "CONTACTS_CSV"
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
 
-# Only truly required columns should be enforced
 REQUIRED_HEADERS = [
     "Company Name",
     "First Name",
     "Last Name",
 ]
 
-# Optional columns should not crash the app if missing
 OPTIONAL_HEADERS = [
     "Title",
     "Website",
@@ -36,7 +34,6 @@ OPTIONAL_HEADERS = [
     "Country",
 ]
 
-# Common alternate header names mapped to canonical names
 HEADER_ALIASES = {
     "company": "Company Name",
     "company name": "Company Name",
@@ -107,7 +104,6 @@ HEADER_ALIASES = {
     "country": "Country",
 }
 
-# ---- In-memory index ----
 _contacts: List[Dict] = []
 _csv_mtime: float = -1.0
 _csv_path: str = ""
@@ -123,8 +119,7 @@ def _similar(a: str, b: str) -> float:
 
 def _canonicalize_header(header: str) -> str:
     raw = (header or "").strip()
-    key = raw.lower()
-    return HEADER_ALIASES.get(key, raw)
+    return HEADER_ALIASES.get(raw.lower(), raw)
 
 
 def _split_full_name(full_name: str) -> Tuple[str, str]:
@@ -145,18 +140,12 @@ def _prepare_headers(headers: List[str]) -> Tuple[List[str], List[str]]:
 
 def _normalize_company_name(company_name: str) -> str:
     company_name = (company_name or "").strip()
-    # Strip leading prefixes like "(Maxon Corp)Honeywell International Inc."
     company_name = re.sub(r"^\([^)]*\)", "", company_name).strip()
     company_name = re.sub(r"\s+", " ", company_name)
     return company_name
 
 
 def _simplify_company_name(company_name: str) -> str:
-    """
-    Create a looser normalized version for matching.
-    Example:
-    'Honeywell International Inc.' -> 'honeywell'
-    """
     value = _normalize_company_name(company_name)
     value = _normalize(value)
 
@@ -208,7 +197,6 @@ def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
     for col in REQUIRED_HEADERS:
         row.setdefault(col, "")
 
-    # Support CSVs with a single name column
     if (not row.get("First Name") and not row.get("Last Name")) and row.get("Full Name"):
         first, last = _split_full_name(row.get("Full Name", ""))
         row["First Name"] = first
@@ -225,22 +213,41 @@ def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
     return row
 
 
+def _resolve_csv_path() -> str:
+    env_path = os.environ.get(CSV_PATH_ENV, "").strip()
+
+    if env_path:
+        return env_path
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(base_dir)
+
+    candidates = [
+        os.path.join(project_root, "customer_contact.csv"),
+        os.path.join(base_dir, "customer_contact.csv"),
+        "customer_contact.csv",
+    ]
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    return candidates[0]
+
+
 def _load_csv_if_changed(force=False):
     global _contacts, _csv_mtime, _csv_path
 
-    path = os.environ.get(CSV_PATH_ENV, "").strip()
-    if not path:
-        raise RuntimeError(
-            f"Environment variable {CSV_PATH_ENV} is not set. "
-            "Point it to your contacts CSV file."
-        )
-
+    path = _resolve_csv_path()
     _csv_path = path
 
     try:
         mtime = os.path.getmtime(path)
     except FileNotFoundError:
-        raise RuntimeError(f"Contacts CSV not found at: {path}")
+        raise RuntimeError(
+            f"Contacts CSV not found at: {path}. "
+            f"Set {CSV_PATH_ENV} or place customer_contact.csv in the project root."
+        )
 
     if force or mtime != _csv_mtime:
         rows = []
@@ -272,7 +279,7 @@ def _load_csv_if_changed(force=False):
         sample_companies = [r.get("Company Name", "") for r in rows[:10]]
         nonblank_company_count = sum(1 for r in rows if (r.get("Company Name") or "").strip())
 
-        current_app.logger.info(f"[Contact Finder] Using CSV path: {path}")
+        current_app.logger.info(f"[Contact Finder] FINAL CSV PATH USED: {path}")
         current_app.logger.info(f"[Contact Finder] Loaded {len(_contacts)} contacts from {path}")
         current_app.logger.info(f"[Contact Finder] Nonblank Company Name count: {nonblank_company_count}")
         current_app.logger.info(f"[Contact Finder] Sample Company Name values: {sample_companies}")
@@ -288,9 +295,6 @@ def _ensure_loaded():
 
 @lru_cache(maxsize=512)
 def _search_company_cached(query_norm: str) -> List[int]:
-    """
-    query_norm can be full normalized company name OR simplified company name.
-    """
     exact_idx = [
         i for i, r in enumerate(_contacts)
         if r["_company_norm"] == query_norm or r["_company_simple_norm"] == query_norm
@@ -302,7 +306,6 @@ def _search_company_cached(query_norm: str) -> List[int]:
         i for i, r in enumerate(_contacts)
         if query_norm in r["_company_norm"] or query_norm in r["_company_simple_norm"]
     ]
-
     if contains_idx:
         return contains_idx
 
@@ -430,15 +433,8 @@ def _extract_company_query(raw: str) -> str:
 
 
 def _normalize_user_query(raw_query: str) -> Tuple[str, str]:
-    """
-    Returns:
-      query_display: cleaned company text for UI
-      query_norm: normalized query for searching
-    """
     query_display = _normalize_company_name(raw_query)
     query_simple = _simplify_company_name(query_display)
-
-    # Prefer simplified query if it has content, otherwise fall back
     query_norm = query_simple or _normalize(query_display)
     return query_display, query_norm
 
