@@ -21,7 +21,7 @@ REQUIRED_HEADERS = [
     "Last Name",
 ]
 
-# These are nice to have, but should not crash the app if absent
+# Optional columns should not crash the app if missing
 OPTIONAL_HEADERS = [
     "Title",
     "Website",
@@ -39,6 +39,11 @@ HEADER_ALIASES = {
     "company": "Company Name",
     "company name": "Company Name",
     "account name": "Company Name",
+    "account": "Company Name",
+    "customer": "Company Name",
+    "customer name": "Company Name",
+    "business": "Company Name",
+    "business name": "Company Name",
 
     "first": "First Name",
     "first name": "First Name",
@@ -86,6 +91,7 @@ HEADER_ALIASES = {
 
     "location": "Company Location",
     "company location": "Company Location",
+    "mailing street": "Company Location",
 }
 
 # ---- In-memory index ----
@@ -124,24 +130,34 @@ def _prepare_headers(headers: List[str]) -> Tuple[List[str], List[str]]:
     return canonical_headers, missing_required
 
 
-def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
-    row = {(_canonicalize_header(k)): (v or "").strip() for k, v in raw_row.items() if k is not None}
+def _normalize_company_name(company_name: str) -> str:
+    company_name = (company_name or "").strip()
+    # Strip leading prefixes like "(Maxon Corp)Honeywell International Inc."
+    company_name = re.sub(r"^\([^)]*\)", "", company_name).strip()
+    return company_name
 
-    # Fill all optional fields so downstream formatting never crashes
+
+def _normalize_row(raw_row: Dict[str, str]) -> Dict[str, str]:
+    row = {
+        _canonicalize_header(k): (v or "").strip()
+        for k, v in raw_row.items()
+        if k is not None
+    }
+
     for col in OPTIONAL_HEADERS:
         row.setdefault(col, "")
 
-    # Support CSVs that only have a single contact name column
+    for col in REQUIRED_HEADERS:
+        row.setdefault(col, "")
+
+    # Support CSVs with a single name column
     if (not row.get("First Name") and not row.get("Last Name")) and row.get("Full Name"):
         first, last = _split_full_name(row.get("Full Name", ""))
         row["First Name"] = first
         row["Last Name"] = last
 
-    # Ensure required keys exist even if blank after normalization
-    for col in REQUIRED_HEADERS:
-        row.setdefault(col, "")
+    row["Company Name"] = _normalize_company_name(row.get("Company Name", ""))
 
-    # Precompute normalized fields
     row["_company_norm"] = _normalize(row.get("Company Name", ""))
     row["_person_norm"] = _normalize(
         f"{row.get('First Name', '')} {row.get('Last Name', '')}"
@@ -174,7 +190,7 @@ def _load_csv_if_changed(force=False):
             reader = csv.DictReader(f, delimiter=",")
 
             raw_headers = reader.fieldnames or []
-            canonical_headers, missing_required = _prepare_headers(raw_headers)
+            _, missing_required = _prepare_headers(raw_headers)
 
             if missing_required:
                 raise RuntimeError(
@@ -185,7 +201,6 @@ def _load_csv_if_changed(force=False):
             for raw_row in reader:
                 row = _normalize_row(raw_row)
 
-                # Skip rows with no company and no person data
                 if not row.get("Company Name") and not row.get("First Name") and not row.get("Last Name"):
                     continue
 
@@ -195,8 +210,17 @@ def _load_csv_if_changed(force=False):
         _csv_mtime = mtime
         _search_company_cached.cache_clear()
 
+        sample_companies = [r.get("Company Name", "") for r in rows[:10]]
+        nonblank_company_count = sum(1 for r in rows if (r.get("Company Name") or "").strip())
+
         current_app.logger.info(
             f"[Contact Finder] Loaded {len(_contacts)} contacts from {path}"
+        )
+        current_app.logger.info(
+            f"[Contact Finder] Nonblank Company Name count: {nonblank_company_count}"
+        )
+        current_app.logger.info(
+            f"[Contact Finder] Sample Company Name values: {sample_companies}"
         )
 
 
@@ -210,10 +234,6 @@ def _ensure_loaded():
 
 @lru_cache(maxsize=512)
 def _search_company_cached(query_norm: str) -> List[int]:
-    """
-    Returns a list of indices into _contacts ranked by relevance to query_norm.
-    Cache key is the normalized query.
-    """
     exact_idx = [i for i, r in enumerate(_contacts) if r["_company_norm"] == query_norm]
     if exact_idx:
         return exact_idx
@@ -224,7 +244,7 @@ def _search_company_cached(query_norm: str) -> List[int]:
         scored = []
         for i, r in enumerate(_contacts):
             score = _similar(query_norm, r["_company_norm"])
-            if score >= 0.65:
+            if score >= 0.60:
                 scored.append((score, i))
         scored.sort(reverse=True, key=lambda t: t[0])
         return [i for _, i in scored[:500]]
@@ -281,6 +301,7 @@ def _format_contact_line(r: Dict) -> str:
         ] if p
     ])
     website = (r.get("Website", "") or "").strip()
+    location = (r.get("Company Location", "") or "").strip()
 
     top = f"- **{name}**" if name else "- **(Name not specified)**"
     if title:
@@ -291,6 +312,9 @@ def _format_contact_line(r: Dict) -> str:
     loc_bits = ", ".join([b for b in [city, state] if b])
     if loc_bits:
         lines.append(f"  • Location: {loc_bits}")
+    elif location:
+        lines.append(f"  • Address: {location}")
+
     if emails:
         lines.append(f"  • Email: {emails}")
     if phones:
@@ -312,9 +336,25 @@ def _format_company_block(company: str, rows: List[Dict], page: int, page_size: 
 
 
 def _extract_company_query(raw: str) -> str:
+    raw = (raw or "").strip()
+
     m = re.search(r"(?:for|at|from)\s+(.+)$", raw, re.IGNORECASE)
-    q = m.group(1).strip() if m else raw.strip()
+    q = m.group(1).strip() if m else raw
+
     q = re.sub(r"^(contacts?\s+for|find\s+contacts\s+for)\s+", "", q, flags=re.IGNORECASE)
+    q = re.sub(r"^(find me\s+contacts\s+for)\s+", "", q, flags=re.IGNORECASE)
+
+    generic_phrases = {
+        "i need contacts",
+        "need contacts",
+        "contacts",
+        "find contacts",
+        "find me contacts",
+    }
+
+    if q.lower() in generic_phrases:
+        return ""
+
     return q
 
 
@@ -399,16 +439,28 @@ def chat_contact_finder():
     query = _extract_company_query(raw)
     qn = _normalize(query)
     if not qn:
-        return jsonify({"text": "_I couldn’t parse a company from that. Try ‘contacts for Acme Corp’._"}), 400
+        return jsonify({"text": "_Please give me a company name, for example: contacts for Honeywell._"}), 400
 
     _load_csv_if_changed(force=False)
 
     idx_list = _search_company_cached(qn)
     records = [_contacts[i] for i in idx_list]
 
+    current_app.logger.info(
+        f"[Contact Finder] Query='{query}' normalized='{qn}' raw_matches={len(records)}"
+    )
+    if records[:5]:
+        current_app.logger.info(
+            f"[Contact Finder] Top raw company matches: {[r.get('Company Name', '') for r in records[:5]]}"
+        )
+
     words = [w for w in qn.split() if w]
     if words:
         records = [r for r in records if all(w in r["_company_norm"] for w in words)] or records
+
+    current_app.logger.info(
+        f"[Contact Finder] Filtered matches after word check: {len(records)}"
+    )
 
     records = _dedupe_by_person(records)
     company_display = records[0].get("Company Name") if records else query
