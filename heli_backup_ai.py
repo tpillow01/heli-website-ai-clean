@@ -3338,6 +3338,225 @@ from docx.shared import Inches, Pt
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+
+# Additional product-specific request forms. Each form uses the same branded
+# Word layout as the existing quote, demo, rental, and used-equipment forms.
+SPECIALTY_REQUESTS = {
+    "battery": {
+        "title": "Forklift Battery Quote Request",
+        "product_key": "equipment_model",
+        "required": [
+            ("Customer Name", "customer_name"),
+            ("Contact Name", "contact_name"),
+            ("Equipment Model", "equipment_model"),
+            ("Battery Type", "battery_type"),
+            ("Voltage", "voltage"),
+            ("Quantity", "quantity"),
+            ("Salesperson Name", "salesperson_name"),
+        ],
+        "left": [
+            ("Customer Information", [
+                ("Customer", "customer_name"),
+                ("Contact", "contact_name"),
+                ("Phone", "phone"),
+                ("Address", "address"),
+                ("City/State/Zip", "city_state_zip"),
+            ]),
+            ("Equipment Information", [
+                ("Equipment Make", "equipment_make"),
+                ("Equipment Model", "equipment_model"),
+                ("Serial Number", "serial_number"),
+                ("Battery Compartment", "compartment_dimensions"),
+                ("Application", "application"),
+            ]),
+        ],
+        "right": [
+            ("Battery Requirements", [
+                ("Battery Type", "battery_type"),
+                ("Voltage", "voltage"),
+                ("Amp Hours", "amp_hours"),
+                ("Battery Dimensions", "battery_dimensions"),
+                ("Connector Type", "connector_type"),
+                ("Connector Color", "connector_color"),
+                ("Connector Position", "connector_position"),
+                ("Cable Length", "cable_length"),
+                ("Watering System", "watering_system"),
+                ("Quantity", "quantity"),
+                ("Requested Delivery", "requested_delivery"),
+            ]),
+        ],
+    },
+    "attachment": {
+        "title": "Forklift Attachment Quote Request",
+        "product_key": "attachment_type",
+        "required": [
+            ("Customer Name", "customer_name"),
+            ("Contact Name", "contact_name"),
+            ("Truck Model", "truck_model"),
+            ("Truck Capacity", "truck_capacity"),
+            ("Attachment Type", "attachment_type"),
+            ("Quantity", "quantity"),
+            ("Salesperson Name", "salesperson_name"),
+        ],
+        "left": [
+            ("Customer Information", [
+                ("Customer", "customer_name"),
+                ("Contact", "contact_name"),
+                ("Phone", "phone"),
+                ("Address", "address"),
+                ("City/State/Zip", "city_state_zip"),
+            ]),
+            ("Truck Information", [
+                ("Truck Make", "truck_make"),
+                ("Truck Model", "truck_model"),
+                ("Serial Number", "serial_number"),
+                ("Truck Capacity", "truck_capacity"),
+                ("Carriage Class", "carriage_class"),
+            ]),
+        ],
+        "right": [
+            ("Attachment Requirements", [
+                ("Attachment Type", "attachment_type"),
+                ("Preferred Make/Model", "attachment_make_model"),
+                ("Required Capacity", "attachment_capacity"),
+                ("Load Center", "load_center"),
+                ("Hydraulic Functions", "hydraulic_functions"),
+                ("Opening Range", "opening_range"),
+                ("Fork Dimensions", "fork_dimensions"),
+                ("Load Description", "load_description"),
+                ("Quantity", "quantity"),
+                ("Requested Delivery", "requested_delivery"),
+            ]),
+        ],
+    },
+    "charger": {
+        "title": "Forklift Charger Quote Request",
+        "product_key": "charger_type",
+        "required": [
+            ("Customer Name", "customer_name"),
+            ("Contact Name", "contact_name"),
+            ("Battery Voltage", "battery_voltage"),
+            ("Input Voltage", "input_voltage"),
+            ("Phase", "phase"),
+            ("Charger Type", "charger_type"),
+            ("Quantity", "quantity"),
+            ("Salesperson Name", "salesperson_name"),
+        ],
+        "left": [
+            ("Customer Information", [
+                ("Customer", "customer_name"),
+                ("Contact", "contact_name"),
+                ("Phone", "phone"),
+                ("Address", "address"),
+                ("City/State/Zip", "city_state_zip"),
+            ]),
+            ("Battery Information", [
+                ("Battery Type", "battery_type"),
+                ("Battery Voltage", "battery_voltage"),
+                ("Battery Amp Hours", "battery_amp_hours"),
+                ("Battery Model", "battery_model"),
+            ]),
+        ],
+        "right": [
+            ("Charger Requirements", [
+                ("Charger Type", "charger_type"),
+                ("Input Voltage", "input_voltage"),
+                ("Phase", "phase"),
+                ("Output Voltage", "output_voltage"),
+                ("Connector Type", "connector_type"),
+                ("Connector Color", "connector_color"),
+                ("Cable Length", "cable_length"),
+                ("Mounting Location", "mounting_location"),
+                ("Quantity", "quantity"),
+                ("Requested Delivery", "requested_delivery"),
+            ]),
+        ],
+    },
+    "cushman": {
+        "title": "Cushman Cart Quote Request",
+        "product_key": "cushman_model",
+        "required": [
+            ("Customer Name", "customer_name"),
+            ("Contact Name", "contact_name"),
+            ("Cushman Model", "cushman_model"),
+            ("Power Type", "power_type"),
+            ("Quantity", "quantity"),
+            ("Salesperson Name", "salesperson_name"),
+        ],
+        "left": [
+            ("Customer Information", [
+                ("Customer", "customer_name"),
+                ("Contact", "contact_name"),
+                ("Phone", "phone"),
+                ("Address", "address"),
+                ("City/State/Zip", "city_state_zip"),
+                ("Application", "application"),
+            ]),
+            ("Performance Requirements", [
+                ("Passenger Capacity", "passenger_capacity"),
+                ("Payload Capacity", "payload_capacity"),
+                ("Towing Capacity", "towing_capacity"),
+            ]),
+        ],
+        "right": [
+            ("Cart Requirements", [
+                ("Cushman Model", "cushman_model"),
+                ("Power Type", "power_type"),
+                ("Bed Configuration", "bed_configuration"),
+                ("Cab/Enclosure", "cab_enclosure"),
+                ("Tires", "tires"),
+                ("Color", "color"),
+                ("Accessories", "accessories"),
+                ("Quantity", "quantity"),
+                ("Requested Delivery", "requested_delivery"),
+            ]),
+        ],
+    },
+    "snorkel": {
+        "title": "Snorkel Product Quote Request",
+        "product_key": "model",
+        "required": [
+            ("Customer Name", "customer_name"),
+            ("Contact Name", "contact_name"),
+            ("Product Type", "product_type"),
+            ("Model", "model"),
+            ("Power Type", "power_type"),
+            ("Quantity", "quantity"),
+            ("Salesperson Name", "salesperson_name"),
+        ],
+        "left": [
+            ("Customer Information", [
+                ("Customer", "customer_name"),
+                ("Contact", "contact_name"),
+                ("Phone", "phone"),
+                ("Address", "address"),
+                ("City/State/Zip", "city_state_zip"),
+                ("Application", "application"),
+            ]),
+            ("Operating Environment", [
+                ("Indoor/Outdoor", "indoor_outdoor"),
+                ("Terrain", "terrain"),
+                ("Maximum Width", "overall_width_limit"),
+                ("Maximum Height", "overall_height_limit"),
+            ]),
+        ],
+        "right": [
+            ("Product Requirements", [
+                ("Product Type", "product_type"),
+                ("Model", "model"),
+                ("Platform Height", "platform_height"),
+                ("Working Height", "working_height"),
+                ("Platform Capacity", "platform_capacity"),
+                ("Power Type", "power_type"),
+                ("Tires", "tires"),
+                ("Options", "options"),
+                ("Quantity", "quantity"),
+                ("Requested Delivery", "requested_delivery"),
+            ]),
+        ],
+    },
+}
+
 # ============================================================
 # TOP-LEVEL DOCX BUILDER
 # - QUOTE: one-page, two-column, category bars, clamps long text
@@ -3517,7 +3736,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
 
     if rt == "quote":
         # Notes + salesperson exist
-        notes_text = clamp_text(form_data.get("notes", ""), 160)
+        notes_text = s(form_data.get("notes", ""))
 
         # LEFT: Customer + Options
         left_sections = [
@@ -3566,7 +3785,7 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
 
     elif rt in {"demo", "rental"}:
         # Use special instructions as notes (clamped)
-        notes_text = clamp_text(form_data.get("special_instructions", ""), 160)
+        notes_text = s(form_data.get("special_instructions", ""))
 
         # LEFT: "Customer/Order" + "Options" (still quote-style)
         left_sections = [
@@ -3613,9 +3832,21 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
             ]),
         ]
 
+    elif rt in SPECIALTY_REQUESTS:
+        config = SPECIALTY_REQUESTS[rt]
+        notes_text = s(form_data.get("notes", ""))
+        left_sections = [
+            (section_title, [(label, form_data.get(key, "")) for label, key in fields])
+            for section_title, fields in config["left"]
+        ]
+        right_sections = [
+            (section_title, [(label, form_data.get(key, "")) for label, key in fields])
+            for section_title, fields in config["right"]
+        ]
+
     else:
         # USED EQUIPMENT
-        notes_text = clamp_text(form_data.get("additional_notes", ""), 160)
+        notes_text = s(form_data.get("additional_notes", ""))
 
         left_sections = [
             ("Customer Information", [
@@ -3662,7 +3893,8 @@ def build_request_docx(form_data: dict, req_type: str) -> bytes:
     # -----------------------------
     # Render document
     # -----------------------------
-    add_title(title_map.get(rt, "HELI Request"))
+    document_title = SPECIALTY_REQUESTS.get(rt, {}).get("title", title_map.get(rt, "HELI Request"))
+    add_title(document_title)
 
     # Two columns main area
     outer = doc.add_table(rows=1, cols=2)
@@ -4046,6 +4278,49 @@ def quote_request():
         safe_desc = _sanitize_filename_part(description_model, "model")
         date_prefix = datetime.now().strftime("%Y-%m-%d")
         filename = f"{date_prefix}-{safe_company}-{safe_desc}.docx"
+
+        return send_file(
+            io.BytesIO(docx_bytes),
+            mimetype=DOCX_MIME,
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    # -----------------------------
+    # BATTERY / ATTACHMENT / CHARGER / CUSHMAN / SNORKEL
+    # -----------------------------
+    if request_type in SPECIALTY_REQUESTS:
+        config = SPECIALTY_REQUESTS[request_type]
+
+        field_keys = {"notes", "salesperson_name"}
+        for section_name in ("left", "right"):
+            for _section_title, fields in config[section_name]:
+                field_keys.update(key for _label, key in fields)
+
+        form_data = {key: _s(form.get(key)) for key in field_keys}
+
+        errors = []
+        for label, key in config["required"]:
+            if not form_data.get(key):
+                errors.append(f"{label} is required.")
+
+        if errors:
+            for error in errors:
+                flash(error, "error")
+            return _render_with_lists()
+
+        docx_bytes = build_request_docx(form_data, request_type)
+        if not docx_bytes:
+            flash("Document generation failed (empty doc). Check server logs.", "error")
+            return _render_with_lists()
+
+        safe_customer = _sanitize_filename_part(form_data.get("customer_name"), "customer")
+        safe_product = _sanitize_filename_part(
+            form_data.get(config["product_key"]),
+            request_type,
+        )
+        date_prefix = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{date_prefix}-{safe_customer}-{safe_product}.docx"
 
         return send_file(
             io.BytesIO(docx_bytes),

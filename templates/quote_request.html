@@ -38,6 +38,32 @@
 </head>
 
 <body class="quote-request-page">
+{% macro specialty_input(prefix, name, label, hint='', required=false, input_type='text', full=false) -%}
+<div class="qr-group{% if full %} qr-group-full{% endif %}">
+    <label for="{{ prefix }}_{{ name }}">{{ label }}</label>
+    {% if hint %}<div class="qr-hint">{{ hint }}</div>{% endif %}
+    <input type="{{ input_type }}" id="{{ prefix }}_{{ name }}" name="{{ name }}" class="qr-input"{% if required %} required{% endif %} />
+</div>
+{%- endmacro %}
+
+{% macro specialty_select(prefix, name, label, options, hint='', required=false, full=false) -%}
+<div class="qr-group{% if full %} qr-group-full{% endif %}">
+    <label for="{{ prefix }}_{{ name }}">{{ label }}</label>
+    {% if hint %}<div class="qr-hint">{{ hint }}</div>{% endif %}
+    <select id="{{ prefix }}_{{ name }}" name="{{ name }}" class="qr-select"{% if required %} required{% endif %}>
+        <option value="" disabled selected>Select</option>
+        {% for option in options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}
+    </select>
+</div>
+{%- endmacro %}
+
+{% macro specialty_notes(prefix, label='Notes / Special Requirements') -%}
+<div class="qr-group qr-group-full">
+    <label for="{{ prefix }}_notes">{{ label }}</label>
+    <textarea id="{{ prefix }}_notes" name="notes" class="qr-textarea" rows="5"></textarea>
+</div>
+{%- endmacro %}
+
 <div class="app-shell">
 
 <header class="top-header qr-brand-header">
@@ -97,6 +123,11 @@
                     <option value="demo">Demo Request</option>
                     <option value="rental">Rental Request</option>
                     <option value="used">Used Equipment Request</option>
+                    <option value="battery">Forklift Battery Request</option>
+                    <option value="attachment">Forklift Attachment Request</option>
+                    <option value="charger">Forklift Charger Request</option>
+                    <option value="cushman">Cushman Cart Request</option>
+                    <option value="snorkel">Snorkel Product Request</option>
                 </select>
             </div>
 
@@ -1002,6 +1033,184 @@
                 </form>
             </div>
 
+            <!-- ========================= -->
+            <!-- FORKLIFT BATTERY REQUEST  -->
+            <!-- ========================= -->
+            <div id="form_wrap_battery" class="request-form-wrap" style="display:none;">
+                <form id="batteryRequestForm" method="post" action="{{ url_for('quote_request') }}"
+                      class="quote-request-form" novalidate data-request-type="battery"
+                      data-doc-title="Forklift Battery Quote Request">
+                    <input type="hidden" name="request_type" value="battery" />
+                    <div class="quote-request-grid">
+                        {{ specialty_input('battery', 'customer_name', 'Customer Name', 'Company name', true, 'text', true) }}
+                        {{ specialty_input('battery', 'contact_name', 'Contact Name', '', true) }}
+                        {{ specialty_input('battery', 'phone', 'Phone') }}
+                        {{ specialty_input('battery', 'address', 'Address', '', false, 'text', true) }}
+                        {{ specialty_input('battery', 'city_state_zip', 'City / State / Zip', '', false, 'text', true) }}
+                        {{ specialty_input('battery', 'equipment_make', 'Equipment Make') }}
+                        {{ specialty_input('battery', 'equipment_model', 'Equipment Model', '', true) }}
+                        {{ specialty_input('battery', 'serial_number', 'Equipment Serial Number') }}
+                        {{ specialty_select('battery', 'battery_type', 'Battery Type', ['Lead Acid', 'Lithium-Ion', 'Thin Plate Pure Lead', 'Other'], '', true) }}
+                        {{ specialty_input('battery', 'voltage', 'Voltage', 'Example: 24V, 36V, 48V, or 80V', true) }}
+                        {{ specialty_input('battery', 'amp_hours', 'Amp Hours') }}
+                        {{ specialty_input('battery', 'battery_dimensions', 'Battery Dimensions', 'Length × width × height') }}
+                        {{ specialty_input('battery', 'compartment_dimensions', 'Battery Compartment Dimensions') }}
+                        {{ specialty_input('battery', 'connector_type', 'Connector Type') }}
+                        {{ specialty_input('battery', 'connector_color', 'Connector Color') }}
+                        {{ specialty_input('battery', 'connector_position', 'Connector Position') }}
+                        {{ specialty_input('battery', 'cable_length', 'Cable Length') }}
+                        {{ specialty_select('battery', 'watering_system', 'Watering System', ['Yes', 'No', 'Not Sure']) }}
+                        {{ specialty_input('battery', 'quantity', 'Quantity', '', true, 'number') }}
+                        {{ specialty_input('battery', 'requested_delivery', 'Customer Requested Delivery', '', false, 'date') }}
+                        {{ specialty_input('battery', 'application', 'Application / Usage', '', false, 'text', true) }}
+                        {{ specialty_notes('battery') }}
+                        {{ specialty_input('battery', 'salesperson_name', 'Salesperson Name', '', true, 'text', true) }}
+                    </div>
+                    <div class="qr-actions"><button type="submit" class="primary-button">Generate Battery Request Word Doc</button></div>
+                </form>
+            </div>
+
+            <!-- ========================= -->
+            <!-- ATTACHMENT REQUEST        -->
+            <!-- ========================= -->
+            <div id="form_wrap_attachment" class="request-form-wrap" style="display:none;">
+                <form id="attachmentRequestForm" method="post" action="{{ url_for('quote_request') }}"
+                      class="quote-request-form" novalidate data-request-type="attachment"
+                      data-doc-title="Forklift Attachment Quote Request">
+                    <input type="hidden" name="request_type" value="attachment" />
+                    <div class="quote-request-grid">
+                        {{ specialty_input('attachment', 'customer_name', 'Customer Name', 'Company name', true, 'text', true) }}
+                        {{ specialty_input('attachment', 'contact_name', 'Contact Name', '', true) }}
+                        {{ specialty_input('attachment', 'phone', 'Phone') }}
+                        {{ specialty_input('attachment', 'address', 'Address', '', false, 'text', true) }}
+                        {{ specialty_input('attachment', 'city_state_zip', 'City / State / Zip', '', false, 'text', true) }}
+                        {{ specialty_input('attachment', 'truck_make', 'Truck Make') }}
+                        {{ specialty_input('attachment', 'truck_model', 'Truck Model', '', true) }}
+                        {{ specialty_input('attachment', 'serial_number', 'Truck Serial Number') }}
+                        {{ specialty_input('attachment', 'truck_capacity', 'Truck Capacity', '', true) }}
+                        {{ specialty_select('attachment', 'carriage_class', 'Carriage Class', ['Class I', 'Class II', 'Class III', 'Class IV', 'Class V', 'Not Sure']) }}
+                        {{ specialty_select('attachment', 'attachment_type', 'Attachment Type', ['Side Shifter', 'Fork Positioner', 'Side-Shifting Fork Positioner', 'Paper Roll Clamp', 'Bale Clamp', 'Carton Clamp', 'Rotator', 'Push/Pull', 'Multiple Load Handler', 'Other'], '', true, true) }}
+                        {{ specialty_input('attachment', 'attachment_make_model', 'Preferred Attachment Make / Model', '', false, 'text', true) }}
+                        {{ specialty_input('attachment', 'attachment_capacity', 'Required Attachment Capacity') }}
+                        {{ specialty_input('attachment', 'load_center', 'Load Center') }}
+                        {{ specialty_input('attachment', 'hydraulic_functions', 'Hydraulic Functions Required') }}
+                        {{ specialty_input('attachment', 'opening_range', 'Opening Range') }}
+                        {{ specialty_input('attachment', 'fork_dimensions', 'Fork Dimensions') }}
+                        {{ specialty_input('attachment', 'load_description', 'Load Description / Dimensions', '', false, 'text', true) }}
+                        {{ specialty_input('attachment', 'quantity', 'Quantity', '', true, 'number') }}
+                        {{ specialty_input('attachment', 'requested_delivery', 'Customer Requested Delivery', '', false, 'date') }}
+                        {{ specialty_notes('attachment') }}
+                        {{ specialty_input('attachment', 'salesperson_name', 'Salesperson Name', '', true, 'text', true) }}
+                    </div>
+                    <div class="qr-actions"><button type="submit" class="primary-button">Generate Attachment Request Word Doc</button></div>
+                </form>
+            </div>
+
+            <!-- ========================= -->
+            <!-- CHARGER REQUEST           -->
+            <!-- ========================= -->
+            <div id="form_wrap_charger" class="request-form-wrap" style="display:none;">
+                <form id="chargerRequestForm" method="post" action="{{ url_for('quote_request') }}"
+                      class="quote-request-form" novalidate data-request-type="charger"
+                      data-doc-title="Forklift Charger Quote Request">
+                    <input type="hidden" name="request_type" value="charger" />
+                    <div class="quote-request-grid">
+                        {{ specialty_input('charger', 'customer_name', 'Customer Name', 'Company name', true, 'text', true) }}
+                        {{ specialty_input('charger', 'contact_name', 'Contact Name', '', true) }}
+                        {{ specialty_input('charger', 'phone', 'Phone') }}
+                        {{ specialty_input('charger', 'address', 'Address', '', false, 'text', true) }}
+                        {{ specialty_input('charger', 'city_state_zip', 'City / State / Zip', '', false, 'text', true) }}
+                        {{ specialty_select('charger', 'battery_type', 'Battery Type', ['Lead Acid', 'Lithium-Ion', 'Thin Plate Pure Lead', 'Other']) }}
+                        {{ specialty_input('charger', 'battery_voltage', 'Battery Voltage', '', true) }}
+                        {{ specialty_input('charger', 'battery_amp_hours', 'Battery Amp Hours') }}
+                        {{ specialty_input('charger', 'battery_model', 'Battery Model / Part Number') }}
+                        {{ specialty_select('charger', 'charger_type', 'Charger Type', ['Conventional', 'Opportunity', 'Fast Charge', 'High Frequency', 'Onboard', 'Other'], '', true) }}
+                        {{ specialty_input('charger', 'input_voltage', 'Facility Input Voltage', 'Example: 208V, 240V, or 480V', true) }}
+                        {{ specialty_select('charger', 'phase', 'Phase', ['Single Phase', 'Three Phase'], '', true) }}
+                        {{ specialty_input('charger', 'output_voltage', 'Required Output Voltage') }}
+                        {{ specialty_input('charger', 'connector_type', 'Connector Type') }}
+                        {{ specialty_input('charger', 'connector_color', 'Connector Color') }}
+                        {{ specialty_input('charger', 'cable_length', 'Cable Length') }}
+                        {{ specialty_select('charger', 'mounting_location', 'Mounting Location', ['Wall', 'Floor Stand', 'Shelf/Rack', 'Onboard', 'Not Sure']) }}
+                        {{ specialty_input('charger', 'quantity', 'Quantity', '', true, 'number') }}
+                        {{ specialty_input('charger', 'requested_delivery', 'Customer Requested Delivery', '', false, 'date') }}
+                        {{ specialty_notes('charger') }}
+                        {{ specialty_input('charger', 'salesperson_name', 'Salesperson Name', '', true, 'text', true) }}
+                    </div>
+                    <div class="qr-actions"><button type="submit" class="primary-button">Generate Charger Request Word Doc</button></div>
+                </form>
+            </div>
+
+            <!-- ========================= -->
+            <!-- CUSHMAN CART REQUEST      -->
+            <!-- ========================= -->
+            <div id="form_wrap_cushman" class="request-form-wrap" style="display:none;">
+                <form id="cushmanRequestForm" method="post" action="{{ url_for('quote_request') }}"
+                      class="quote-request-form" novalidate data-request-type="cushman"
+                      data-doc-title="Cushman Cart Quote Request">
+                    <input type="hidden" name="request_type" value="cushman" />
+                    <div class="quote-request-grid">
+                        {{ specialty_input('cushman', 'customer_name', 'Customer Name', 'Company name', true, 'text', true) }}
+                        {{ specialty_input('cushman', 'contact_name', 'Contact Name', '', true) }}
+                        {{ specialty_input('cushman', 'phone', 'Phone') }}
+                        {{ specialty_input('cushman', 'address', 'Address', '', false, 'text', true) }}
+                        {{ specialty_input('cushman', 'city_state_zip', 'City / State / Zip', '', false, 'text', true) }}
+                        {{ specialty_input('cushman', 'cushman_model', 'Cushman Model', '', true, 'text', true) }}
+                        {{ specialty_select('cushman', 'power_type', 'Power Type', ['Electric', 'Lithium-Ion', 'Gas', 'Diesel'], '', true) }}
+                        {{ specialty_input('cushman', 'passenger_capacity', 'Passenger Capacity') }}
+                        {{ specialty_input('cushman', 'payload_capacity', 'Required Payload Capacity') }}
+                        {{ specialty_input('cushman', 'towing_capacity', 'Required Towing Capacity') }}
+                        {{ specialty_input('cushman', 'bed_configuration', 'Bed Configuration') }}
+                        {{ specialty_select('cushman', 'cab_enclosure', 'Cab / Enclosure', ['None', 'Windshield/Roof', 'Soft Cab', 'Hard Cab', 'Other']) }}
+                        {{ specialty_input('cushman', 'tires', 'Tires') }}
+                        {{ specialty_input('cushman', 'color', 'Color') }}
+                        {{ specialty_input('cushman', 'accessories', 'Accessories / Options', '', false, 'text', true) }}
+                        {{ specialty_input('cushman', 'application', 'Application / Usage', '', false, 'text', true) }}
+                        {{ specialty_input('cushman', 'quantity', 'Quantity', '', true, 'number') }}
+                        {{ specialty_input('cushman', 'requested_delivery', 'Customer Requested Delivery', '', false, 'date') }}
+                        {{ specialty_notes('cushman') }}
+                        {{ specialty_input('cushman', 'salesperson_name', 'Salesperson Name', '', true, 'text', true) }}
+                    </div>
+                    <div class="qr-actions"><button type="submit" class="primary-button">Generate Cushman Request Word Doc</button></div>
+                </form>
+            </div>
+
+            <!-- ========================= -->
+            <!-- SNORKEL PRODUCT REQUEST   -->
+            <!-- ========================= -->
+            <div id="form_wrap_snorkel" class="request-form-wrap" style="display:none;">
+                <form id="snorkelRequestForm" method="post" action="{{ url_for('quote_request') }}"
+                      class="quote-request-form" novalidate data-request-type="snorkel"
+                      data-doc-title="Snorkel Product Quote Request">
+                    <input type="hidden" name="request_type" value="snorkel" />
+                    <div class="quote-request-grid">
+                        {{ specialty_input('snorkel', 'customer_name', 'Customer Name', 'Company name', true, 'text', true) }}
+                        {{ specialty_input('snorkel', 'contact_name', 'Contact Name', '', true) }}
+                        {{ specialty_input('snorkel', 'phone', 'Phone') }}
+                        {{ specialty_input('snorkel', 'address', 'Address', '', false, 'text', true) }}
+                        {{ specialty_input('snorkel', 'city_state_zip', 'City / State / Zip', '', false, 'text', true) }}
+                        {{ specialty_select('snorkel', 'product_type', 'Product Type', ['Scissor Lift', 'Boom Lift', 'Towable Boom', 'Mast Lift', 'Material Lift', 'Telehandler', 'Other'], '', true) }}
+                        {{ specialty_input('snorkel', 'model', 'Snorkel Model', '', true) }}
+                        {{ specialty_input('snorkel', 'platform_height', 'Required Platform Height') }}
+                        {{ specialty_input('snorkel', 'working_height', 'Required Working Height') }}
+                        {{ specialty_input('snorkel', 'platform_capacity', 'Required Platform Capacity') }}
+                        {{ specialty_select('snorkel', 'power_type', 'Power Type', ['Electric', 'Lithium-Ion', 'Diesel', 'Bi-Energy', 'Other'], '', true) }}
+                        {{ specialty_select('snorkel', 'indoor_outdoor', 'Operating Environment', ['Indoor', 'Outdoor', 'Indoor and Outdoor']) }}
+                        {{ specialty_select('snorkel', 'terrain', 'Terrain', ['Smooth Slab', 'Rough Terrain', 'Mixed', 'Not Sure']) }}
+                        {{ specialty_input('snorkel', 'overall_width_limit', 'Maximum Overall Width') }}
+                        {{ specialty_input('snorkel', 'overall_height_limit', 'Maximum Stowed Height') }}
+                        {{ specialty_input('snorkel', 'tires', 'Tires') }}
+                        {{ specialty_input('snorkel', 'options', 'Options / Accessories', '', false, 'text', true) }}
+                        {{ specialty_input('snorkel', 'application', 'Application / Usage', '', false, 'text', true) }}
+                        {{ specialty_input('snorkel', 'quantity', 'Quantity', '', true, 'number') }}
+                        {{ specialty_input('snorkel', 'requested_delivery', 'Customer Requested Delivery', '', false, 'date') }}
+                        {{ specialty_notes('snorkel') }}
+                        {{ specialty_input('snorkel', 'salesperson_name', 'Salesperson Name', '', true, 'text', true) }}
+                    </div>
+                    <div class="qr-actions"><button type="submit" class="primary-button">Generate Snorkel Request Word Doc</button></div>
+                </form>
+            </div>
+
             <script>
                 // ==========================================================
                 // A) Field highlighting + "don't wipe" behavior
@@ -1169,41 +1378,34 @@
                 // 1) Switch between forms
                 // -----------------------------
                 const requestTypeSelect = document.getElementById("request_type_select");
-                const wrapQuote  = document.getElementById("form_wrap_quote");
-                const wrapDemo   = document.getElementById("form_wrap_demo");
-                const wrapRental = document.getElementById("form_wrap_rental");
-                const wrapUsed   = document.getElementById("form_wrap_used");
+                const formRegistry = {
+                    quote:      { wrap: "form_wrap_quote",      form: "quoteRequestForm",      title: "HELI Quote Request" },
+                    demo:       { wrap: "form_wrap_demo",       form: "demoRequestForm",       title: "HELI Demo Request" },
+                    rental:     { wrap: "form_wrap_rental",     form: "rentalRequestForm",     title: "HELI Rental Request" },
+                    used:       { wrap: "form_wrap_used",       form: "usedRequestForm",       title: "Used Equipment Request" },
+                    battery:    { wrap: "form_wrap_battery",    form: "batteryRequestForm",    title: "Forklift Battery Quote Request" },
+                    attachment: { wrap: "form_wrap_attachment", form: "attachmentRequestForm", title: "Forklift Attachment Quote Request" },
+                    charger:    { wrap: "form_wrap_charger",    form: "chargerRequestForm",    title: "Forklift Charger Quote Request" },
+                    cushman:    { wrap: "form_wrap_cushman",    form: "cushmanRequestForm",    title: "Cushman Cart Quote Request" },
+                    snorkel:    { wrap: "form_wrap_snorkel",    form: "snorkelRequestForm",    title: "Snorkel Product Quote Request" }
+                };
 
                 const pageTitle = document.getElementById("pageTitle");
                 const pageSubtitle = document.getElementById("pageSubtitle");
 
                 function setActiveForm(type) {
-                    wrapQuote.style.display  = "none";
-                    wrapDemo.style.display   = "none";
-                    wrapRental.style.display = "none";
-                    wrapUsed.style.display   = "none";
+                    Object.values(formRegistry).forEach(item => {
+                        const wrapper = document.getElementById(item.wrap);
+                        if (wrapper) wrapper.style.display = "none";
+                    });
 
-                    if (type === "demo") {
-                        wrapDemo.style.display = "block";
-                        pageTitle.textContent = "HELI Demo Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
-                        restoreDraft(document.getElementById("demoRequestForm"));
-                    } else if (type === "rental") {
-                        wrapRental.style.display = "block";
-                        pageTitle.textContent = "HELI Rental Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
-                        restoreDraft(document.getElementById("rentalRequestForm"));
-                    } else if (type === "used") {
-                        wrapUsed.style.display = "block";
-                        pageTitle.textContent = "Used Equipment Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
-                        restoreDraft(document.getElementById("usedRequestForm"));
-                    } else {
-                        wrapQuote.style.display = "block";
-                        pageTitle.textContent = "HELI Quote Request";
-                        pageSubtitle.textContent = "Fill out every field below to generate a clean Word document for Lisa.";
-                        restoreDraft(document.getElementById("quoteRequestForm"));
-                    }
+                    const active = formRegistry[type] || formRegistry.quote;
+                    const activeWrap = document.getElementById(active.wrap);
+                    const activeForm = document.getElementById(active.form);
+                    if (activeWrap) activeWrap.style.display = "block";
+                    pageTitle.textContent = active.title;
+                    pageSubtitle.textContent = "Fill out the request details below to generate a clean Word document for Lisa.";
+                    restoreDraft(activeForm);
                 }
 
                 if (requestTypeSelect) {
