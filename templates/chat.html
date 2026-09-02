@@ -5,14 +5,21 @@
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=aimemory2">
+  <link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='styles.css') }}?v=generalai1"
+  >
 
   <link
     href="https://fonts.googleapis.com/css2?family=Exo+2:wght@800;900&display=swap"
     rel="stylesheet"
   >
 
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link
+    rel="manifest"
+    href="{{ url_for('static', filename='manifest.json') }}"
+  >
+
   <meta name="theme-color" content="#efe4d0">
 
   <script>
@@ -48,7 +55,9 @@
       <button class="menu-btn" aria-label="Menu"></button>
 
       <nav class="tabs">
-        <a href="#" class="tab active">Chat</a>
+        <a href="#" class="tab active">
+          Chat
+        </a>
 
         <a href="{{ url_for('map_page') }}" class="tab">
           Map
@@ -76,37 +85,7 @@
 
       <div class="nav-actions">
         <div class="mode-wrap">
-          <span class="mode-label">Mode</span>
-
-          <select
-            id="modeSelect"
-            class="mode-select"
-            aria-label="Chat Mode"
-          >
-            <option value="recommendation">
-              Forklift Recommendation
-            </option>
-
-            <option value="options_attachments">
-              Options &amp; Attachments
-            </option>
-
-            <option value="inquiry">
-              Customer Inquiry (Billing)
-            </option>
-
-            <option value="contact_finder">
-              Contact Finder
-            </option>
-
-            <option value="indiana_developments">
-              Indiana Developments
-            </option>
-
-            <option value="coach">
-              Sales Coach
-            </option>
-          </select>
+          <span class="mode-label">General AI</span>
         </div>
       </div>
     </div>
@@ -143,7 +122,7 @@
       <textarea
         id="userInput"
         rows="3"
-        placeholder="Enter a message..."
+        placeholder="Ask anything..."
         required
         autofocus
       ></textarea>
@@ -163,19 +142,27 @@
   </div>
 
   <script>
-    const form = document.getElementById('chat-form');
-    const input = document.getElementById('userInput');
-    const responseArea = document.getElementById('response-area');
-    const forkliftAnim = document.getElementById('forklift-animation');
-    const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
-    const modeSelect = document.getElementById('modeSelect');
+    const form =
+      document.getElementById('chat-form');
+
+    const input =
+      document.getElementById('userInput');
+
+    const responseArea =
+      document.getElementById('response-area');
+
+    const forkliftAnim =
+      document.getElementById('forklift-animation');
+
+    const forkliftUnit =
+      forkliftAnim.querySelector('.forklift-unit');
 
     /*
-     * Each chat mode gets its own short conversation history.
-     * This prevents Customer Inquiry messages from interfering
-     * with Forklift Recommendation messages.
+     * Store the eight most recent messages.
+     * This allows follow-up questions to remember
+     * the current conversation.
      */
-    const historyByMode = Object.create(null);
+    const conversationHistory = [];
 
     let animationInterval;
     let isForward = true;
@@ -198,13 +185,15 @@
     }
 
     /*
-     * Allows the limited HTML used by certain responses while
-     * removing unwanted HTML elements and attributes.
+     * Clean HTML returned by the server before
+     * displaying it inside the chat.
      */
     function sanitizeServerHtml(source) {
-      const template = document.createElement('template');
+      const template =
+        document.createElement('template');
 
-      template.innerHTML = String(source ?? '');
+      template.innerHTML =
+        String(source ?? '');
 
       const allowedTags = new Set([
         'A',
@@ -219,19 +208,24 @@
         'LI'
       ]);
 
-      for (const node of [
-        ...template.content.querySelectorAll('*')
-      ]) {
+      for (
+        const node of [
+          ...template.content.querySelectorAll('*')
+        ]
+      ) {
         if (!allowedTags.has(node.tagName)) {
           node.replaceWith(
-            document.createTextNode(node.textContent || '')
+            document.createTextNode(
+              node.textContent || ''
+            )
           );
 
           continue;
         }
 
         for (const attr of [...node.attributes]) {
-          const attributeName = attr.name.toLowerCase();
+          const attributeName =
+            attr.name.toLowerCase();
 
           const keepHref =
             node.tagName === 'A' &&
@@ -244,13 +238,18 @@
             node.tagName === 'SPAN' &&
             attributeName === 'style';
 
-          if (!keepHref && !keepClass && !keepStyle) {
+          if (
+            !keepHref &&
+            !keepClass &&
+            !keepStyle
+          ) {
             node.removeAttribute(attr.name);
           }
         }
 
         if (node.tagName === 'A') {
-          const href = node.getAttribute('href') || '';
+          const href =
+            node.getAttribute('href') || '';
 
           if (
             !/^https?:\/\//i.test(href) &&
@@ -259,37 +258,57 @@
             node.removeAttribute('href');
           }
 
-          node.setAttribute('rel', 'noopener noreferrer');
-          node.setAttribute('target', '_blank');
+          node.setAttribute(
+            'rel',
+            'noopener noreferrer'
+          );
+
+          node.setAttribute(
+            'target',
+            '_blank'
+          );
         }
       }
 
       return template.innerHTML;
     }
 
-    function renderBubble(textOrHtml, sender = 'ai') {
+    function renderBubble(
+      textOrHtml,
+      sender = 'ai'
+    ) {
       if (sender === 'ai') {
         stopAnimation();
       }
 
-      const bubble = document.createElement('div');
+      const bubble =
+        document.createElement('div');
 
-      bubble.className = `response-bubble ${sender}`;
+      bubble.className =
+        `response-bubble ${sender}`;
 
-      const value = String(textOrHtml ?? '');
+      const value =
+        String(textOrHtml ?? '');
 
       const looksLikeHtml =
         /<\s*\w+[^>]*>/.test(value);
 
-      if (sender === 'ai' && looksLikeHtml) {
-        bubble.innerHTML = sanitizeServerHtml(value);
+      if (
+        sender === 'ai' &&
+        looksLikeHtml
+      ) {
+        bubble.innerHTML =
+          sanitizeServerHtml(value);
       } else {
-        bubble.innerHTML = formatLabels(escapeHtml(value))
-          .split('\n')
-          .map(line => {
-            return `<div>${line || '&nbsp;'}</div>`;
-          })
-          .join('');
+        bubble.innerHTML =
+          formatLabels(escapeHtml(value))
+            .split('\n')
+            .map(line => {
+              return (
+                `<div>${line || '&nbsp;'}</div>`
+              );
+            })
+            .join('');
       }
 
       responseArea.appendChild(bubble);
@@ -308,10 +327,8 @@
 
       clearInterval(animationInterval);
 
-      animationInterval = setInterval(
-        animateForklift,
-        2000
-      );
+      animationInterval =
+        setInterval(animateForklift, 2000);
     }
 
     function animateForklift() {
@@ -329,30 +346,19 @@
       forkliftAnim.style.display = 'none';
     }
 
-    function historyFor(mode) {
-      if (!historyByMode[mode]) {
-        historyByMode[mode] = [];
-      }
-
-      return historyByMode[mode];
-    }
-
-    function remember(mode, role, content) {
-      const history = historyFor(mode);
-
-      history.push({
+    function remember(role, content) {
+      conversationHistory.push({
         role: role,
-        content: String(content ?? '').slice(0, 1600)
+        content: String(content ?? '').slice(
+          0,
+          1600
+        )
       });
 
-      /*
-       * Keep only the latest eight messages so requests do not
-       * become excessively large.
-       */
-      if (history.length > 8) {
-        history.splice(
+      if (conversationHistory.length > 8) {
+        conversationHistory.splice(
           0,
-          history.length - 8
+          conversationHistory.length - 8
         );
       }
     }
@@ -385,13 +391,12 @@
       );
     }
 
-    async function askOptionsAttachments(
+    async function askGeneralChat(
       userText,
       history
     ) {
-      const response = await fetch(
-        '/api/options_attachments_chat',
-        {
+      const response =
+        await fetch('/api/chat', {
           method: 'POST',
 
           headers: {
@@ -399,33 +404,11 @@
           },
 
           body: JSON.stringify({
-            q: userText,
+            question: userText,
+            mode: 'general',
             history: history
           })
-        }
-      );
-
-      return readApiResponse(response);
-    }
-
-    async function askGeneralChat(
-      userText,
-      mode,
-      history
-    ) {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-
-        headers: {
-          'Content-Type': 'application/json'
-        },
-
-        body: JSON.stringify({
-          question: userText,
-          mode: mode,
-          history: history
-        })
-      });
+        });
 
       return readApiResponse(response);
     }
@@ -439,21 +422,15 @@
           return;
         }
 
-        const question = input.value.trim();
+        const question =
+          input.value.trim();
 
         if (!question) {
           return;
         }
 
-        const mode =
-          modeSelect.value || 'recommendation';
-
-        /*
-         * Copy the history before adding the newest question.
-         * The question is sent separately in the API request.
-         */
         const priorHistory =
-          historyFor(mode).slice(-8);
+          conversationHistory.slice(-8);
 
         requestInProgress = true;
         input.disabled = true;
@@ -465,33 +442,22 @@
         startAnimationLoop();
 
         try {
-          let answer;
-
-          if (mode === 'options_attachments') {
-            answer = await askOptionsAttachments(
+          const answer =
+            await askGeneralChat(
               question,
               priorHistory
             );
-          } else {
-            answer = await askGeneralChat(
-              question,
-              mode,
-              priorHistory
-            );
-          }
 
           remember(
-            mode,
             'user',
             question
           );
 
           /*
-           * Remove HTML tags before storing the answer in
-           * conversation memory.
+           * Remove HTML tags before storing
+           * the response in conversation memory.
            */
           remember(
-            mode,
             'assistant',
             answer.replace(/<[^>]+>/g, ' ')
           );
@@ -514,7 +480,7 @@
 
     /*
      * Enter sends the message.
-     * Shift + Enter creates a new line.
+     * Shift + Enter starts a new line.
      */
     input.addEventListener(
       'keydown',
