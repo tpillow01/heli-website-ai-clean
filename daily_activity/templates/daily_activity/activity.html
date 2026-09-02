@@ -46,7 +46,7 @@
     <div class="panel-top">
         <div>
             <h3>Activity Log</h3>
-            <p>Review customer interactions, summaries, and next-step planning in one table.</p>
+            <p>Review customer interactions, summaries, contact emails, and next-step planning in one table.</p>
         </div>
 
         <a href="{{ url_for('add_activity') }}" class="btn btn-small btn-primary">+ Add Activity</a>
@@ -71,7 +71,17 @@
                             <td>{{ log.rep_name or "—" }}</td>
                             <td>
                                 {% if log.customer %}
-                                    {{ log.customer.company_name }}
+                                    <a href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
+                                        {{ log.customer.company_name }}
+                                    </a>
+
+                                    {% for contact in log.customer.contacts %}
+                                        {% if contact.email %}
+                                            <div class="list-meta">
+                                                <a href="mailto:{{ contact.email|e }}">{{ contact.email }}</a>
+                                            </div>
+                                        {% endif %}
+                                    {% endfor %}
                                 {% else %}
                                     —
                                 {% endif %}

@@ -47,7 +47,7 @@
     <div class="panel-top">
         <div>
             <h3>Activity Details</h3>
-            <p>Capture the interaction, the outcome, and the next follow-up date if one is needed.</p>
+            <p>Capture the interaction, its outcome, and what should happen to the current follow-up.</p>
         </div>
     </div>
 
@@ -90,6 +90,28 @@
             <div class="form-row">
                 <label for="activity_date">Activity Date</label>
                 <input type="date" id="activity_date" name="activity_date">
+            </div>
+
+            <div class="form-row">
+                <label for="customer_outcome">Customer Outcome</label>
+                <select id="customer_outcome" name="customer_outcome">
+                    <option value="">No Status Change</option>
+                    <option value="happy_current_provider">Happy With Current Provider</option>
+                </select>
+                <small class="form-help">
+                    Use Happy With Current Provider when the account is not ready to move forward but should remain available for a later follow-up.
+                </small>
+            </div>
+
+            <div class="form-row">
+                <label for="follow_up_action">Current Follow-Up</label>
+                <select id="follow_up_action" name="follow_up_action">
+                    <option value="complete" selected>Mark Current Follow-Up Complete</option>
+                    <option value="keep">Keep Existing Follow-Up</option>
+                </select>
+                <small class="form-help">
+                    If you enter a new date below, it will replace the current follow-up regardless of this selection.
+                </small>
             </div>
 
             <div class="form-row">

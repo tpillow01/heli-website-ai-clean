@@ -561,6 +561,7 @@
         </div>
 
         <div class="calendar-modal-footer">
+            <a href="#" class="calendar-btn calendar-btn-secondary detail-link-btn" id="detailActivityLink">Add Activity</a>
             <a href="#" class="calendar-btn calendar-btn-primary detail-link-btn" id="detailCustomerLink">Open Customer</a>
             <button type="button" class="calendar-btn calendar-btn-secondary" data-close-modal="eventDetailModal">Close</button>
         </div>
@@ -637,7 +638,9 @@
                 "city": {{ item["customer"].city|default("", true)|tojson }},
                 "state": {{ item["customer"].state|default("", true)|tojson }},
                 "zip_code": {{ item["customer"].zip_code|default("", true)|tojson }},
-                "notes": {{ item["customer"].notes|default("", true)|tojson }}
+                "notes": {{ item["customer"].notes|default("", true)|tojson }},
+                "customer_url": {{ url_for('customer_detail', customer_id=item["customer"].id)|tojson }},
+                "activity_url": {{ url_for('add_activity_for_customer', customer_id=item["customer"].id)|tojson }}
             }
         }
         {% set ns.first = false %}
@@ -742,6 +745,8 @@
             },
             events: normalizedEvents,
             eventClick: function (info) {
+                info.jsEvent.preventDefault();
+
                 const event = info.event;
                 const props = event.extendedProps || {};
 
@@ -767,16 +772,27 @@
                     props.days_since_last_touch === null || props.days_since_last_touch === undefined
                         ? "—"
                         : String(props.days_since_last_touch);
-                document.getElementById("detailAddress").textContent = addressParts.length ? addressParts.join(", ") : "—";
+                document.getElementById("detailAddress").textContent =
+                    addressParts.length ? addressParts.join(", ") : "—";
                 document.getElementById("detailNotes").textContent = props.notes || "—";
 
                 const detailCustomerLink = document.getElementById("detailCustomerLink");
-                if (props.customer_id) {
-                    detailCustomerLink.href = "/customer/" + props.customer_id;
+                const detailActivityLink = document.getElementById("detailActivityLink");
+
+                if (props.customer_url) {
+                    detailCustomerLink.href = props.customer_url;
                     detailCustomerLink.style.display = "inline-flex";
                 } else {
                     detailCustomerLink.href = "#";
                     detailCustomerLink.style.display = "none";
+                }
+
+                if (props.activity_url) {
+                    detailActivityLink.href = props.activity_url;
+                    detailActivityLink.style.display = "inline-flex";
+                } else {
+                    detailActivityLink.href = "#";
+                    detailActivityLink.style.display = "none";
                 }
 
                 openModal(eventDetailModal);
@@ -796,4 +812,5 @@
         });
     });
 </script>
+
 {% endblock %}

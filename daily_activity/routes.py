@@ -169,6 +169,14 @@ def days_since(date_value):
 def normalize_relationship_type(value):
     raw = (value or "").strip().lower()
 
+    if raw in {
+        "happy_current_provider",
+        "happy with current provider",
+        "happy-current-provider",
+        "limbo",
+    }:
+        return "happy_current_provider"
+
     if raw in {"current_customer", "current customer", "customer", "active"}:
         return "current_customer"
 
@@ -201,7 +209,13 @@ def derive_relationship_from_legacy_fields(status="", pin_color=""):
         return "current_customer"
     if status_value in {"quoted"}:
         return "quoted"
-    if status_value in {"prospect", "target", "cold call", "inactive", "follow-up needed"}:
+    if status_value in {
+        "prospect",
+        "target",
+        "cold call",
+        "inactive",
+        "follow-up needed",
+    }:
         return "no_relationship"
 
     return "no_relationship"
@@ -210,6 +224,8 @@ def derive_relationship_from_legacy_fields(status="", pin_color=""):
 def relationship_label(value):
     relationship = normalize_relationship_type(value)
 
+    if relationship == "happy_current_provider":
+        return "Happy With Current Provider"
     if relationship == "current_customer":
         return "Current Customer"
     if relationship == "quoted":
@@ -229,6 +245,9 @@ def suggested_action(customer):
 
     if due_in == 0:
         return "Call Today"
+
+    if relationship == "happy_current_provider":
+        return "Long-Term Follow-Up"
 
     if relationship == "competitor_owned":
         return "Competitor Attack Visit"
@@ -302,13 +321,16 @@ def sort_accounts_for_planning(customers, competitor_name=None):
         stale_days = days_since(customer.last_touch_date)
         opposing = (customer.opposing_company or "").strip().lower()
 
-        competitor_match = 1 if competitor_filter and opposing == competitor_filter else 0
+        competitor_match = (
+            1 if competitor_filter and opposing == competitor_filter else 0
+        )
 
         relationship_rank = {
             "competitor_owned": 4,
             "quoted": 3,
             "current_customer": 2,
             "no_relationship": 1,
+            "happy_current_provider": 0,
         }.get(relationship, 0)
 
         if due_in is None:
@@ -334,7 +356,12 @@ def sort_accounts_for_planning(customers, competitor_name=None):
     return sorted(customers, key=sort_key)
 
 
-def build_planner_data(rep_name=None, county=None, opposing_company=None, max_stops=10):
+def build_planner_data(
+    rep_name=None,
+    county=None,
+    opposing_company=None,
+    max_stops=10,
+):
     query = Customer.query
 
     if not user_is_manager():
@@ -347,41 +374,58 @@ def build_planner_data(rep_name=None, county=None, opposing_company=None, max_st
 
     if county:
         customers = [
-            customer for customer in customers
-            if (customer.county or "").strip().lower() == county.strip().lower()
+            customer
+            for customer in customers
+            if (customer.county or "").strip().lower()
+            == county.strip().lower()
         ]
 
     if opposing_company:
         customers = [
-            customer for customer in customers
-            if (customer.opposing_company or "").strip().lower() == opposing_company.strip().lower()
+            customer
+            for customer in customers
+            if (customer.opposing_company or "").strip().lower()
+            == opposing_company.strip().lower()
         ]
 
-    ordered_customers = sort_accounts_for_planning(customers, competitor_name=opposing_company)
-    all_items = [build_customer_item(customer, rank=index + 1) for index, customer in enumerate(ordered_customers)]
+    ordered_customers = sort_accounts_for_planning(
+        customers,
+        competitor_name=opposing_company,
+    )
+    all_items = [
+        build_customer_item(customer, rank=index + 1)
+        for index, customer in enumerate(ordered_customers)
+    ]
 
     overdue_accounts = [
-        item for item in all_items
-        if item["days_until_follow_up"] is not None and item["days_until_follow_up"] < 0
+        item
+        for item in all_items
+        if item["days_until_follow_up"] is not None
+        and item["days_until_follow_up"] < 0
     ]
 
     stale_accounts = [
-        item for item in all_items
-        if item["days_since_last_touch"] is not None and item["days_since_last_touch"] >= 14
+        item
+        for item in all_items
+        if item["days_since_last_touch"] is not None
+        and item["days_since_last_touch"] >= 14
     ]
 
     competitor_accounts = [
-        item for item in all_items
+        item
+        for item in all_items
         if item["relationship_type"] == "competitor_owned"
     ]
 
     quoted_accounts = [
-        item for item in all_items
+        item
+        for item in all_items
         if item["relationship_type"] == "quoted"
     ]
 
     current_customer_accounts = [
-        item for item in all_items
+        item
+        for item in all_items
         if item["relationship_type"] == "current_customer"
     ]
 
@@ -391,12 +435,14 @@ def build_planner_data(rep_name=None, county=None, opposing_company=None, max_st
 
     county_summary = []
     for county_name, items in county_groups.items():
-        county_summary.append({
-            "county": county_name,
-            "count": len(items),
-            "customers": items[:5],
-            "top_score": len(items),
-        })
+        county_summary.append(
+            {
+                "county": county_name,
+                "count": len(items),
+                "customers": items[:5],
+                "top_score": len(items),
+            }
+        )
 
     county_summary.sort(key=lambda x: x["count"], reverse=True)
 
@@ -433,7 +479,8 @@ def build_planner_summary(planner_data):
 
     if selected_opposing_company:
         summary_lines.append(
-            f"Planner is focused on accounts tied to {selected_opposing_company}."
+            f"Planner is focused on accounts tied to "
+            f"{selected_opposing_company}."
         )
 
     if selected_county:
@@ -450,7 +497,8 @@ def build_planner_summary(planner_data):
     if quoted_accounts:
         summary_lines.append(
             f"There are {len(quoted_accounts)} quoted account"
-            f"{'' if len(quoted_accounts) == 1 else 's'} that should be followed up."
+            f"{'' if len(quoted_accounts) == 1 else 's'} that should be "
+            f"followed up."
         )
 
     if overdue_accounts:
@@ -460,12 +508,17 @@ def build_planner_summary(planner_data):
         )
 
     if top_recommendations:
-        first_three = ", ".join([
-            item["customer"].company_name for item in top_recommendations[:3]
-        ])
+        first_three = ", ".join(
+            [
+                item["customer"].company_name
+                for item in top_recommendations[:3]
+            ]
+        )
         summary_lines.append(f"Best first stops: {first_three}.")
     else:
-        summary_lines.append("No accounts matched the current planner filters.")
+        summary_lines.append(
+            "No accounts matched the current planner filters."
+        )
 
     return {
         "headline": headline,
@@ -502,37 +555,53 @@ def build_day_plan_summary(day_plan, selected_opposing_company=None):
 
     return (
         f"{prefix}Planned workload: {len(stops)} stop"
-        f"{'' if len(stops) == 1 else 's'} in {day_plan['chosen_county']}."
+        f"{'' if len(stops) == 1 else 's'} in "
+        f"{day_plan['chosen_county']}."
     )
 
 
 def build_dashboard_reminders():
-    customers = scoped_customer_query().order_by(Customer.company_name.asc()).all()
+    customers = (
+        scoped_customer_query()
+        .order_by(Customer.company_name.asc())
+        .all()
+    )
     ordered_customers = sort_accounts_for_planning(customers)
-    items = [build_customer_item(customer, rank=index + 1) for index, customer in enumerate(ordered_customers)]
+    items = [
+        build_customer_item(customer, rank=index + 1)
+        for index, customer in enumerate(ordered_customers)
+    ]
 
     overdue_followups = [
-        item for item in items
-        if item["days_until_follow_up"] is not None and item["days_until_follow_up"] < 0
+        item
+        for item in items
+        if item["days_until_follow_up"] is not None
+        and item["days_until_follow_up"] < 0
     ][:5]
 
     due_today = [
-        item for item in items
+        item
+        for item in items
         if item["days_until_follow_up"] == 0
     ][:5]
 
     due_this_week = [
-        item for item in items
-        if item["days_until_follow_up"] is not None and 0 < item["days_until_follow_up"] <= 7
+        item
+        for item in items
+        if item["days_until_follow_up"] is not None
+        and 0 < item["days_until_follow_up"] <= 7
     ][:5]
 
     stale_accounts = [
-        item for item in items
-        if item["days_since_last_touch"] is not None and item["days_since_last_touch"] >= 14
+        item
+        for item in items
+        if item["days_since_last_touch"] is not None
+        and item["days_since_last_touch"] >= 14
     ][:5]
 
     high_priority_attention = [
-        item for item in items
+        item
+        for item in items
         if item["relationship_type"] in {"competitor_owned", "quoted"}
         or (
             item["days_until_follow_up"] is not None
@@ -541,17 +610,20 @@ def build_dashboard_reminders():
     ][:5]
 
     competitor_accounts = [
-        item for item in items
+        item
+        for item in items
         if item["relationship_type"] == "competitor_owned"
     ][:5]
 
     quoted_accounts = [
-        item for item in items
+        item
+        for item in items
         if item["relationship_type"] == "quoted"
     ][:5]
 
     current_customer_followups = [
-        item for item in items
+        item
+        for item in items
         if item["relationship_type"] == "current_customer"
         and item["days_until_follow_up"] is not None
         and item["days_until_follow_up"] <= 14
@@ -570,7 +642,11 @@ def build_dashboard_reminders():
 
 
 def build_calendar_followups(days_ahead=21):
-    customers = scoped_customer_query().order_by(Customer.company_name.asc()).all()
+    customers = (
+        scoped_customer_query()
+        .order_by(Customer.company_name.asc())
+        .all()
+    )
     start_day = date.today()
     end_day = start_day + timedelta(days=days_ahead)
 
@@ -587,12 +663,17 @@ def build_calendar_followups(days_ahead=21):
             )
 
     grouped_sorted = []
-    for follow_up_date, items in sorted(grouped.items(), key=lambda x: x[0]):
-        grouped_sorted.append({
-            "date": follow_up_date,
-            "items": items,
-            "count": len(items),
-        })
+    for follow_up_date, items in sorted(
+        grouped.items(),
+        key=lambda x: x[0],
+    ):
+        grouped_sorted.append(
+            {
+                "date": follow_up_date,
+                "items": items,
+                "count": len(items),
+            }
+        )
 
     return grouped_sorted
 
@@ -636,7 +717,14 @@ def should_update_last_contact(activity_type):
     return value in customer_contact_types
 
 
-def apply_activity_updates_to_customer(customer, activity_type, activity_date, follow_up_date=""):
+def apply_activity_updates_to_customer(
+    customer,
+    activity_type,
+    activity_date,
+    follow_up_date="",
+    follow_up_action="complete",
+    customer_outcome="",
+):
     if activity_date:
         customer.last_touch_date = activity_date
 
@@ -645,9 +733,20 @@ def apply_activity_updates_to_customer(customer, activity_type, activity_date, f
 
     if follow_up_date:
         customer.follow_up_date = follow_up_date
+    elif follow_up_action != "keep":
+        customer.follow_up_date = None
+
+    if customer_outcome == "happy_current_provider":
+        customer.relationship_type = "happy_current_provider"
 
 
-def build_activity_update_message(activity_type, activity_date, follow_up_date):
+def build_activity_update_message(
+    activity_type,
+    activity_date,
+    follow_up_date,
+    follow_up_action="complete",
+    customer_outcome="",
+):
     parts = ["Activity saved successfully."]
 
     if activity_date:
@@ -658,6 +757,15 @@ def build_activity_update_message(activity_type, activity_date, follow_up_date):
 
     if follow_up_date:
         parts.append(f"Next follow-up set for {follow_up_date}.")
+    elif follow_up_action == "keep":
+        parts.append("The existing follow-up date was kept.")
+    else:
+        parts.append("The current follow-up was marked complete.")
+
+    if customer_outcome == "happy_current_provider":
+        parts.append(
+            "Customer status changed to Happy With Current Provider."
+        )
 
     parts.append("Planner and reminders are now refreshed.")
 
@@ -665,7 +773,9 @@ def build_activity_update_message(activity_type, activity_date, follow_up_date):
 
 
 def redirect_back(default_endpoint="planner", **kwargs):
-    return redirect(request.referrer or da_url(default_endpoint, **kwargs))
+    return redirect(
+        request.referrer or da_url(default_endpoint, **kwargs)
+    )
 
 
 def shift_follow_up_date(customer, days=3):
@@ -674,7 +784,9 @@ def shift_follow_up_date(customer, days=3):
     if current is None:
         current = date.today()
 
-    customer.follow_up_date = (current + timedelta(days=days)).strftime("%Y-%m-%d")
+    customer.follow_up_date = (
+        current + timedelta(days=days)
+    ).strftime("%Y-%m-%d")
 
 
 # ----------------------------
@@ -688,8 +800,18 @@ def dashboard():
     activity_count = scoped_activity_query().count()
     fleet_count = scoped_fleet_query().count()
 
-    recent_activity = scoped_activity_query().order_by(ActivityLog.created_at.desc()).limit(5).all()
-    recent_customers = scoped_customer_query().order_by(Customer.created_at.desc()).limit(5).all()
+    recent_activity = (
+        scoped_activity_query()
+        .order_by(ActivityLog.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    recent_customers = (
+        scoped_customer_query()
+        .order_by(Customer.created_at.desc())
+        .limit(5)
+        .all()
+    )
     dashboard_reminders = build_dashboard_reminders()
 
     return render_template(
@@ -707,7 +829,11 @@ def dashboard():
 
 @daily_activity_bp.route("/customers")
 def customers():
-    all_customers = scoped_customer_query().order_by(Customer.company_name.asc()).all()
+    all_customers = (
+        scoped_customer_query()
+        .order_by(Customer.company_name.asc())
+        .all()
+    )
     return render_template(
         "daily_activity/customers.html",
         customers=all_customers,
@@ -727,22 +853,40 @@ def add_customer():
         county = request.form.get("county", "").strip()
 
         status = request.form.get("status", "").strip()
-        priority_level = request.form.get("priority_level", "").strip()
+        priority_level = request.form.get(
+            "priority_level",
+            "",
+        ).strip()
 
         relationship_type = normalize_relationship_type(
             request.form.get("relationship_type", "").strip()
         )
-        opposing_company = request.form.get("opposing_company", "").strip()
+        opposing_company = request.form.get(
+            "opposing_company",
+            "",
+        ).strip()
 
-        if not relationship_type or relationship_type == "no_relationship":
+        if (
+            not relationship_type
+            or relationship_type == "no_relationship"
+        ):
             relationship_type = derive_relationship_from_legacy_fields(
                 status=status,
                 pin_color=request.form.get("pin_color", "").strip(),
             )
 
-        last_contact_date = request.form.get("last_contact_date", "").strip()
-        follow_up_date = request.form.get("follow_up_date", "").strip()
-        last_touch_date = request.form.get("last_touch_date", "").strip()
+        last_contact_date = request.form.get(
+            "last_contact_date",
+            "",
+        ).strip()
+        follow_up_date = request.form.get(
+            "follow_up_date",
+            "",
+        ).strip()
+        last_touch_date = request.form.get(
+            "last_touch_date",
+            "",
+        ).strip()
 
         notes = request.form.get("notes", "").strip()
         quote_notes = request.form.get("quote_notes", "").strip()
@@ -754,7 +898,12 @@ def add_customer():
             flash("Company name is required.", "error")
             return redirect(da_url("add_customer"))
 
-        latitude, longitude = geocode_customer_address(address, city, state, zip_code)
+        latitude, longitude = geocode_customer_address(
+            address,
+            city,
+            state,
+            zip_code,
+        )
 
         customer = Customer(
             user_id=current_user_id(),
@@ -768,7 +917,11 @@ def add_customer():
             status=status,
             priority_level=priority_level,
             relationship_type=relationship_type,
-            opposing_company=opposing_company if relationship_type == "competitor_owned" else "",
+            opposing_company=(
+                opposing_company
+                if relationship_type == "competitor_owned"
+                else ""
+            ),
             last_contact_date=last_contact_date,
             follow_up_date=follow_up_date,
             last_touch_date=last_touch_date,
@@ -784,9 +937,18 @@ def add_customer():
         db.session.add(customer)
         db.session.commit()
 
-        contact_name = request.form.get("contact_name", "").strip()
-        contact_phone = request.form.get("contact_phone", "").strip()
-        contact_email = request.form.get("contact_email", "").strip()
+        contact_name = request.form.get(
+            "contact_name",
+            "",
+        ).strip()
+        contact_phone = request.form.get(
+            "contact_phone",
+            "",
+        ).strip()
+        contact_email = request.form.get(
+            "contact_email",
+            "",
+        ).strip()
 
         if contact_name or contact_phone or contact_email:
             contact = Contact(
@@ -801,14 +963,34 @@ def add_customer():
 
         fleet_make = request.form.get("fleet_make", "").strip()
         fleet_model = request.form.get("fleet_model", "").strip()
-        fleet_capacity = request.form.get("fleet_capacity", "").strip()
-        fleet_fuel_type = request.form.get("fleet_fuel_type", "").strip()
-        fleet_quantity_raw = request.form.get("fleet_quantity", "").strip()
+        fleet_capacity = request.form.get(
+            "fleet_capacity",
+            "",
+        ).strip()
+        fleet_fuel_type = request.form.get(
+            "fleet_fuel_type",
+            "",
+        ).strip()
+        fleet_quantity_raw = request.form.get(
+            "fleet_quantity",
+            "",
+        ).strip()
         fleet_notes = request.form.get("fleet_notes", "").strip()
 
-        if fleet_make or fleet_model or fleet_capacity or fleet_fuel_type or fleet_quantity_raw or fleet_notes:
+        if (
+            fleet_make
+            or fleet_model
+            or fleet_capacity
+            or fleet_fuel_type
+            or fleet_quantity_raw
+            or fleet_notes
+        ):
             try:
-                fleet_quantity = int(fleet_quantity_raw) if fleet_quantity_raw else None
+                fleet_quantity = (
+                    int(fleet_quantity_raw)
+                    if fleet_quantity_raw
+                    else None
+                )
             except ValueError:
                 fleet_quantity = None
 
@@ -829,7 +1011,10 @@ def add_customer():
         flash("Customer added successfully.", "success")
         return redirect(da_url("customers"))
 
-    return render_template("daily_activity/add_customer.html", is_manager=user_is_manager())
+    return render_template(
+        "daily_activity/add_customer.html",
+        is_manager=user_is_manager(),
+    )
 
 
 @daily_activity_bp.route("/customer/<int:customer_id>")
@@ -842,7 +1027,10 @@ def customer_detail(customer_id):
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/edit", methods=["GET", "POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/edit",
+    methods=["GET", "POST"],
+)
 def edit_customer(customer_id):
     customer = get_customer_or_403(customer_id)
 
@@ -855,20 +1043,41 @@ def edit_customer(customer_id):
 
         if not company_name:
             flash("Company name is required.", "error")
-            return redirect(da_url("edit_customer", customer_id=customer.id))
+            return redirect(
+                da_url(
+                    "edit_customer",
+                    customer_id=customer.id,
+                )
+            )
 
-        latitude, longitude = geocode_customer_address(address, city, state, zip_code)
+        latitude, longitude = geocode_customer_address(
+            address,
+            city,
+            state,
+            zip_code,
+        )
 
         status = request.form.get("status", "").strip()
-        priority_level = request.form.get("priority_level", "").strip()
+        priority_level = request.form.get(
+            "priority_level",
+            "",
+        ).strip()
 
         relationship_type = normalize_relationship_type(
             request.form.get("relationship_type", "").strip()
         )
-        opposing_company = request.form.get("opposing_company", "").strip()
+        opposing_company = request.form.get(
+            "opposing_company",
+            "",
+        ).strip()
 
-        if not relationship_type or relationship_type == "no_relationship":
-            relationship_type = derive_relationship_from_legacy_fields(status=status)
+        if (
+            not relationship_type
+            or relationship_type == "no_relationship"
+        ):
+            relationship_type = derive_relationship_from_legacy_fields(
+                status=status
+            )
 
         customer.company_name = company_name
         customer.address = address
@@ -876,18 +1085,43 @@ def edit_customer(customer_id):
         customer.state = state
         customer.zip_code = zip_code
         customer.county = request.form.get("county", "").strip()
-        customer.assigned_rep = request.form.get("assigned_rep", "").strip()
+        customer.assigned_rep = request.form.get(
+            "assigned_rep",
+            "",
+        ).strip()
         customer.status = status
         customer.priority_level = priority_level
         customer.relationship_type = relationship_type
-        customer.opposing_company = opposing_company if relationship_type == "competitor_owned" else ""
-        customer.last_contact_date = request.form.get("last_contact_date", "").strip()
-        customer.follow_up_date = request.form.get("follow_up_date", "").strip()
-        customer.last_touch_date = request.form.get("last_touch_date", "").strip()
+        customer.opposing_company = (
+            opposing_company
+            if relationship_type == "competitor_owned"
+            else ""
+        )
+        customer.last_contact_date = request.form.get(
+            "last_contact_date",
+            "",
+        ).strip()
+        customer.follow_up_date = request.form.get(
+            "follow_up_date",
+            "",
+        ).strip()
+        customer.last_touch_date = request.form.get(
+            "last_touch_date",
+            "",
+        ).strip()
         customer.notes = request.form.get("notes", "").strip()
-        customer.quote_notes = request.form.get("quote_notes", "").strip()
-        customer.service_notes = request.form.get("service_notes", "").strip()
-        customer.rental_notes = request.form.get("rental_notes", "").strip()
+        customer.quote_notes = request.form.get(
+            "quote_notes",
+            "",
+        ).strip()
+        customer.service_notes = request.form.get(
+            "service_notes",
+            "",
+        ).strip()
+        customer.rental_notes = request.form.get(
+            "rental_notes",
+            "",
+        ).strip()
         customer.pm_notes = request.form.get("pm_notes", "").strip()
 
         if latitude is not None and longitude is not None:
@@ -897,7 +1131,12 @@ def edit_customer(customer_id):
         db.session.commit()
 
         flash("Customer updated successfully.", "success")
-        return redirect(da_url("customer_detail", customer_id=customer.id))
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
 
     return render_template(
         "daily_activity/edit_customer.html",
@@ -906,7 +1145,11 @@ def edit_customer(customer_id):
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/contact/<int:contact_id>/edit", methods=["GET", "POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/contact/"
+    "<int:contact_id>/edit",
+    methods=["GET", "POST"],
+)
 def edit_contact(customer_id, contact_id):
     customer = get_customer_or_403(customer_id)
 
@@ -930,7 +1173,13 @@ def edit_contact(customer_id, contact_id):
 
         if not contact_name:
             flash("Contact name is required.", "error")
-            return redirect(da_url("edit_contact", customer_id=customer.id, contact_id=contact.id))
+            return redirect(
+                da_url(
+                    "edit_contact",
+                    customer_id=customer.id,
+                    contact_id=contact.id,
+                )
+            )
 
         contact.name = contact_name
         contact.title = contact_title
@@ -939,7 +1188,12 @@ def edit_contact(customer_id, contact_id):
 
         db.session.commit()
         flash("Contact updated successfully.", "success")
-        return redirect(da_url("customer_detail", customer_id=customer.id))
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
 
     return render_template(
         "daily_activity/edit_contact.html",
@@ -949,7 +1203,10 @@ def edit_contact(customer_id, contact_id):
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/delete", methods=["POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/delete",
+    methods=["POST"],
+)
 def delete_customer(customer_id):
     customer = get_customer_or_403(customer_id)
 
@@ -969,7 +1226,11 @@ def delete_customer(customer_id):
 
 @daily_activity_bp.route("/activity")
 def activity():
-    logs = scoped_activity_query().order_by(ActivityLog.created_at.desc()).all()
+    logs = (
+        scoped_activity_query()
+        .order_by(ActivityLog.created_at.desc())
+        .all()
+    )
     return render_template(
         "daily_activity/activity.html",
         logs=logs,
@@ -977,21 +1238,57 @@ def activity():
     )
 
 
-@daily_activity_bp.route("/activity/add", methods=["GET", "POST"])
+@daily_activity_bp.route(
+    "/activity/add",
+    methods=["GET", "POST"],
+)
 def add_activity():
-    customers = scoped_customer_query().order_by(Customer.company_name.asc()).all()
+    customers = (
+        scoped_customer_query()
+        .order_by(Customer.company_name.asc())
+        .all()
+    )
 
     if request.method == "POST":
         customer_id = request.form.get("customer_id", "").strip()
-        activity_type = request.form.get("activity_type", "").strip()
+        activity_type = request.form.get(
+            "activity_type",
+            "",
+        ).strip()
         summary = request.form.get("summary", "").strip()
-        activity_date = request.form.get("activity_date", "").strip()
+        activity_date = request.form.get(
+            "activity_date",
+            "",
+        ).strip()
         next_step = request.form.get("next_step", "").strip()
-        follow_up_date = request.form.get("follow_up_date", "").strip()
+        follow_up_date = request.form.get(
+            "follow_up_date",
+            "",
+        ).strip()
+        follow_up_action = request.form.get(
+            "follow_up_action",
+            "complete",
+        ).strip().lower()
+        customer_outcome = request.form.get(
+            "customer_outcome",
+            "",
+        ).strip().lower()
         rep_name = request.form.get("rep_name", "").strip()
 
+        if follow_up_action not in {"complete", "keep"}:
+            follow_up_action = "complete"
+
+        if customer_outcome not in {
+            "",
+            "happy_current_provider",
+        }:
+            customer_outcome = ""
+
         if not customer_id or not activity_type or not summary:
-            flash("Customer, activity type, and summary are required.", "error")
+            flash(
+                "Customer, activity type, and summary are required.",
+                "error",
+            )
             return redirect(da_url("add_activity"))
 
         customer = get_customer_or_403(int(customer_id))
@@ -1013,12 +1310,20 @@ def add_activity():
             activity_type=activity_type,
             activity_date=activity_date,
             follow_up_date=follow_up_date,
+            follow_up_action=follow_up_action,
+            customer_outcome=customer_outcome,
         )
 
         db.session.commit()
 
         flash(
-            build_activity_update_message(activity_type, activity_date, follow_up_date),
+            build_activity_update_message(
+                activity_type,
+                activity_date,
+                follow_up_date,
+                follow_up_action,
+                customer_outcome,
+            ),
             "success",
         )
 
@@ -1032,22 +1337,63 @@ def add_activity():
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/add-activity", methods=["GET", "POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/add-activity",
+    methods=["GET", "POST"],
+)
 def add_activity_for_customer(customer_id):
     customer = get_customer_or_403(customer_id)
-    customers = scoped_customer_query().order_by(Customer.company_name.asc()).all()
+    customers = (
+        scoped_customer_query()
+        .order_by(Customer.company_name.asc())
+        .all()
+    )
 
     if request.method == "POST":
-        activity_type = request.form.get("activity_type", "").strip()
+        activity_type = request.form.get(
+            "activity_type",
+            "",
+        ).strip()
         summary = request.form.get("summary", "").strip()
-        activity_date = request.form.get("activity_date", "").strip()
+        activity_date = request.form.get(
+            "activity_date",
+            "",
+        ).strip()
         next_step = request.form.get("next_step", "").strip()
-        follow_up_date = request.form.get("follow_up_date", "").strip()
+        follow_up_date = request.form.get(
+            "follow_up_date",
+            "",
+        ).strip()
+        follow_up_action = request.form.get(
+            "follow_up_action",
+            "complete",
+        ).strip().lower()
+        customer_outcome = request.form.get(
+            "customer_outcome",
+            "",
+        ).strip().lower()
         rep_name = request.form.get("rep_name", "").strip()
 
+        if follow_up_action not in {"complete", "keep"}:
+            follow_up_action = "complete"
+
+        if customer_outcome not in {
+            "",
+            "happy_current_provider",
+        }:
+            customer_outcome = ""
+
         if not activity_type or not summary:
-            flash("Activity type and summary are required.", "error")
-            return redirect(da_url("add_activity_for_customer", customer_id=customer.id))
+            flash(
+                "Activity type and summary are required.",
+                "error",
+            )
+            return redirect(
+                da_url(
+                    "add_activity_for_customer",
+                    customer_id=customer.id,
+                )
+            )
 
         log = ActivityLog(
             user_id=current_user_id(),
@@ -1066,16 +1412,29 @@ def add_activity_for_customer(customer_id):
             activity_type=activity_type,
             activity_date=activity_date,
             follow_up_date=follow_up_date,
+            follow_up_action=follow_up_action,
+            customer_outcome=customer_outcome,
         )
 
         db.session.commit()
 
         flash(
-            build_activity_update_message(activity_type, activity_date, follow_up_date),
+            build_activity_update_message(
+                activity_type,
+                activity_date,
+                follow_up_date,
+                follow_up_action,
+                customer_outcome,
+            ),
             "success",
         )
 
-        return redirect(da_url("customer_detail", customer_id=customer.id))
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
 
     return render_template(
         "daily_activity/add_activity.html",
@@ -1085,7 +1444,10 @@ def add_activity_for_customer(customer_id):
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/add-contact", methods=["GET", "POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/add-contact",
+    methods=["GET", "POST"],
+)
 def add_contact(customer_id):
     customer = get_customer_or_403(customer_id)
 
@@ -1094,14 +1456,21 @@ def add_contact(customer_id):
 
         if not name:
             flash("Contact name is required.", "error")
-            return redirect(da_url("add_contact", customer_id=customer.id))
+            return redirect(
+                da_url(
+                    "add_contact",
+                    customer_id=customer.id,
+                )
+            )
 
         contact = Contact(
             user_id=current_user_id(),
             customer_id=customer.id,
             name=name,
             title=request.form.get("title", "").strip(),
-            phone=format_phone_number(request.form.get("phone", "").strip()),
+            phone=format_phone_number(
+                request.form.get("phone", "").strip()
+            ),
             email=request.form.get("email", "").strip(),
         )
 
@@ -1109,7 +1478,12 @@ def add_contact(customer_id):
         db.session.commit()
 
         flash("Contact added successfully.", "success")
-        return redirect(da_url("customer_detail", customer_id=customer.id))
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
 
     return render_template(
         "daily_activity/add_contact.html",
@@ -1118,12 +1492,20 @@ def add_contact(customer_id):
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/add-fleet", methods=["GET", "POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/add-fleet",
+    methods=["GET", "POST"],
+)
 def add_fleet(customer_id):
     customer = get_customer_or_403(customer_id)
 
     if request.method == "POST":
         qty_raw = request.form.get("quantity", "").strip()
+
+        try:
+            quantity = int(qty_raw) if qty_raw else None
+        except ValueError:
+            quantity = None
 
         fleet = FleetInfo(
             user_id=current_user_id(),
@@ -1131,8 +1513,11 @@ def add_fleet(customer_id):
             make=request.form.get("make", "").strip(),
             model=request.form.get("model", "").strip(),
             capacity=request.form.get("capacity", "").strip(),
-            fuel_type=request.form.get("fuel_type", "").strip(),
-            quantity=int(qty_raw) if qty_raw else None,
+            fuel_type=request.form.get(
+                "fuel_type",
+                "",
+            ).strip(),
+            quantity=quantity,
             notes=request.form.get("notes", "").strip(),
         )
 
@@ -1140,7 +1525,12 @@ def add_fleet(customer_id):
         db.session.commit()
 
         flash("Fleet info added successfully.", "success")
-        return redirect(da_url("customer_detail", customer_id=customer.id))
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
 
     return render_template(
         "daily_activity/add_fleet.html",
@@ -1149,18 +1539,27 @@ def add_fleet(customer_id):
     )
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/complete-followup", methods=["POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/complete-followup",
+    methods=["POST"],
+)
 def complete_followup(customer_id):
     customer = get_customer_or_403(customer_id)
 
     customer.follow_up_date = None
     db.session.commit()
 
-    flash(f"Follow-up marked complete for {customer.company_name}.", "success")
+    flash(
+        f"Follow-up marked complete for {customer.company_name}.",
+        "success",
+    )
     return redirect_back("planner")
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/snooze-followup", methods=["POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/snooze-followup",
+    methods=["POST"],
+)
 def snooze_followup(customer_id):
     customer = get_customer_or_403(customer_id)
     days_raw = request.form.get("days", "3").strip()
@@ -1174,16 +1573,23 @@ def snooze_followup(customer_id):
     db.session.commit()
 
     flash(
-        f"Follow-up snoozed for {customer.company_name} by {days} day{'s' if days != 1 else ''}.",
+        f"Follow-up snoozed for {customer.company_name} "
+        f"by {days} day{'s' if days != 1 else ''}.",
         "success",
     )
     return redirect_back("planner")
 
 
-@daily_activity_bp.route("/customer/<int:customer_id>/reschedule-followup", methods=["POST"])
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/reschedule-followup",
+    methods=["POST"],
+)
 def reschedule_followup(customer_id):
     customer = get_customer_or_403(customer_id)
-    new_follow_up_date = request.form.get("follow_up_date", "").strip()
+    new_follow_up_date = request.form.get(
+        "follow_up_date",
+        "",
+    ).strip()
 
     if not new_follow_up_date:
         flash("Please choose a new follow-up date.", "error")
@@ -1192,39 +1598,55 @@ def reschedule_followup(customer_id):
     customer.follow_up_date = new_follow_up_date
     db.session.commit()
 
-    flash(f"Follow-up rescheduled for {customer.company_name}.", "success")
+    flash(
+        f"Follow-up rescheduled for {customer.company_name}.",
+        "success",
+    )
     return redirect_back("planner")
 
 
 @daily_activity_bp.route("/map")
 def map_page():
-    customers = scoped_customer_query().order_by(Customer.company_name.asc()).all()
+    customers = (
+        scoped_customer_query()
+        .order_by(Customer.company_name.asc())
+        .all()
+    )
     map_customers = []
 
     for customer in customers:
-        if customer.latitude is None or customer.longitude is None:
+        if (
+            customer.latitude is None
+            or customer.longitude is None
+        ):
             continue
 
-        relationship = normalize_relationship_type(customer.relationship_type)
+        relationship = normalize_relationship_type(
+            customer.relationship_type
+        )
 
-        map_customers.append({
-            "id": customer.id,
-            "company_name": customer.company_name,
-            "address": customer.address or "",
-            "city": customer.city or "",
-            "state": customer.state or "",
-            "county": customer.county or "",
-            "assigned_rep": customer.assigned_rep or "",
-            "status": customer.status or "",
-            "priority_level": customer.priority_level or "",
-            "relationship_type": relationship,
-            "relationship_label": relationship_label(relationship),
-            "opposing_company": customer.opposing_company or "",
-            "follow_up_date": customer.follow_up_date or "",
-            "last_touch_date": customer.last_touch_date or "",
-            "latitude": customer.latitude,
-            "longitude": customer.longitude,
-        })
+        map_customers.append(
+            {
+                "id": customer.id,
+                "company_name": customer.company_name,
+                "address": customer.address or "",
+                "city": customer.city or "",
+                "state": customer.state or "",
+                "county": customer.county or "",
+                "assigned_rep": customer.assigned_rep or "",
+                "status": customer.status or "",
+                "priority_level": customer.priority_level or "",
+                "relationship_type": relationship,
+                "relationship_label": relationship_label(
+                    relationship
+                ),
+                "opposing_company": customer.opposing_company or "",
+                "follow_up_date": customer.follow_up_date or "",
+                "last_touch_date": customer.last_touch_date or "",
+                "latitude": customer.latitude,
+                "longitude": customer.longitude,
+            }
+        )
 
     return render_template(
         "daily_activity/map.html",
@@ -1238,9 +1660,15 @@ def map_page():
 def planner():
     rep_name = request.args.get("rep", "").strip() or None
     county = request.args.get("county", "").strip() or None
-    opposing_company = request.args.get("opposing_company", "").strip() or None
+    opposing_company = (
+        request.args.get("opposing_company", "").strip() or None
+    )
 
-    max_stops_raw = request.args.get("max_stops", "10").strip()
+    max_stops_raw = request.args.get(
+        "max_stops",
+        "10",
+    ).strip()
+
     try:
         max_stops = int(max_stops_raw)
     except ValueError:
@@ -1270,23 +1698,29 @@ def planner():
 
     visible_customers = scoped_customer_query().all()
 
-    all_reps = sorted({
-        customer.assigned_rep
-        for customer in visible_customers
-        if customer.assigned_rep
-    })
+    all_reps = sorted(
+        {
+            customer.assigned_rep
+            for customer in visible_customers
+            if customer.assigned_rep
+        }
+    )
 
-    all_counties = sorted({
-        customer.county
-        for customer in visible_customers
-        if customer.county
-    })
+    all_counties = sorted(
+        {
+            customer.county
+            for customer in visible_customers
+            if customer.county
+        }
+    )
 
-    all_opposing_companies = sorted({
-        customer.opposing_company
-        for customer in visible_customers
-        if customer.opposing_company
-    })
+    all_opposing_companies = sorted(
+        {
+            customer.opposing_company
+            for customer in visible_customers
+            if customer.opposing_company
+        }
+    )
 
     return render_template(
         "daily_activity/planner.html",
@@ -1308,6 +1742,7 @@ def planner():
 @daily_activity_bp.route("/calendar")
 def calendar_page():
     followup_groups = build_calendar_followups(days_ahead=21)
+
     return render_template(
         "daily_activity/calendar.html",
         followup_groups=followup_groups,

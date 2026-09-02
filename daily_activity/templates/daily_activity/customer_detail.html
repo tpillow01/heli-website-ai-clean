@@ -189,7 +189,13 @@
                             </div>
 
                             <div class="list-meta">{{ contact.phone or "No Phone" }}</div>
-                            <div class="list-meta">{{ contact.email or "No Email" }}</div>
+                            <div class="list-meta">
+                                {% if contact.email %}
+                                    <a href="mailto:{{ contact.email|e }}">{{ contact.email }}</a>
+                                {% else %}
+                                    No Email
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 {% endfor %}
