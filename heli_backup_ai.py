@@ -368,7 +368,7 @@ try:
 except Exception as e:
     logging.warning("ai_logic import failed (%s) — stubbing functions", e)
     generate_forklift_context = lambda *a, **k: ""  # noqa: E731
-    select_models_for_question = lambda *a, **k: []  # noqa: E731
+    select_models_for_question = lambda *a, **k: ([], [])  # noqa: E731
     allowed_models_block = lambda *a, **k: ""  # noqa: E731
 
 # Promotions (optional)
@@ -722,7 +722,7 @@ def _tidy_formatting(text: str) -> str:
     text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
     return text
 
-def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
+def _enforce_allowed_models(text: str, allowed) -> str:
     """
     Enforce a single, grounded 'Model:' section placed right AFTER 'Customer Profile:'.
     Also normalizes spacing and bullets later via _tidy_formatting().
@@ -731,7 +731,18 @@ def _enforce_allowed_models(text: str, allowed: set[str]) -> str:
         return text
 
     # Build grounded Model block
-    al = [m for m in allowed if isinstance(m, str) and m.strip()]
+    # Preserve the selector's ranked order. Passing through a set here used to
+    # make the displayed Top Pick change unpredictably between processes.
+    al = []
+    seen = set()
+    for model in allowed or []:
+        if not isinstance(model, str):
+            continue
+        model = model.strip()
+        if not model or model.lower() in seen:
+            continue
+        seen.add(model.lower())
+        al.append(model)
     if not al:
         forced_block = "Model:\n- No exact match from our lineup.\n"
     else:
@@ -972,18 +983,47 @@ def _heuristic_tire_and_accessories(text: str):
 # ─────────────────────────────────────────────────────────────────────────
 # Recommendation flow helper
 # ─────────────────────────────────────────────────────────────────────────
-def run_recommendation_flow(user_q: str) -> str:
+def _normalize_chat_history(raw_history) -> list[dict]:
+    """Keep a small, safe conversation window from the browser."""
+    if not isinstance(raw_history, list):
+        return []
+    cleaned = []
+    for item in raw_history[-8:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        cleaned.append({"role": role, "content": content[:1600]})
+    return cleaned
+
+
+def _recommendation_selection_query(user_q: str, history: list[dict]) -> str:
+    """Combine recent user requirements, with the newest message last."""
+    prior_user_messages = [
+        item["content"] for item in history if item.get("role") == "user"
+    ][-3:]
+    return "\n".join([*prior_user_messages, user_q]).strip()
+
+
+def run_recommendation_flow(user_q: str, history=None) -> str:
     if not client:
         return ("AI is not configured on this server. "
                 "Set OPENAI_API_KEY to enable recommendations.")
 
+    history = _normalize_chat_history(history)
+    selection_q = _recommendation_selection_query(user_q, history)
+
     # Try to resolve a customer from the question (for context weighting)
-    acct = find_account_by_name(user_q)
+    acct = find_account_by_name(selection_q)
     prompt_ctx = generate_forklift_context(user_q, acct)
 
     # Model selection from JSON (ground truth list)
-    hits, allowed = select_models_for_question(user_q, k=5)
-    allowed_block = allowed_models_block(allowed)
+    hits, allowed = select_models_for_question(selection_q, k=5)
+    # Give the language model the selected rows, including known capacity and
+    # power details, while keeping the ordered code list for enforcement.
+    allowed_block = allowed_models_block(hits)
     print(f"[recommendation] allowed models: {allowed}")
 
     top_pick_code = allowed[0] if allowed else None
@@ -1013,7 +1053,7 @@ def run_recommendation_flow(user_q: str) -> str:
             "If none allowed, output exactly '- No exact match from our lineup.'\n"
             "- Capacity/Tires/Attachments/Options: summarize needs; if missing, say 'Not specified'.\n"
             "- Sales Pitch Techniques: concise but specific as instructed in earlier rules.\n"
-            "- Common Objections: 6–8 items, one line each in the pattern: "
+            "- Common Objections: 4–6 items, one line each in the pattern: "
             "'- <Objection> — Ask: <diagnostic>; Reframe: <benefit>; Proof: <fact>; Next: <action>'.\n"
             "- Never invent pricing, availability, or specs not present in the context.\n"
         )
@@ -1022,6 +1062,7 @@ def run_recommendation_flow(user_q: str) -> str:
     messages = [
         system_prompt,
         {"role": "system", "content": allowed_block},
+        *history,
         {"role": "user",   "content": prompt_ctx}
     ]
 
@@ -1032,9 +1073,9 @@ def run_recommendation_flow(user_q: str) -> str:
         mt_raw = (os.getenv("OAI_MAX_TOKENS") or "").strip()
         tp_raw = (os.getenv("OAI_TEMPERATURE") or "").strip()
         try:
-            max_tokens_val = int(mt_raw) if mt_raw else 650
+            max_tokens_val = int(mt_raw) if mt_raw else 1100
         except Exception:
-            max_tokens_val = 650
+            max_tokens_val = 1100
         try:
             temperature_val = float(tp_raw) if tp_raw else 0.4
         except Exception:
@@ -1053,10 +1094,11 @@ def run_recommendation_flow(user_q: str) -> str:
         )
         ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
-        ai_reply = f"❌ Internal error: {e}"
+        app.logger.exception("Recommendation model call failed: %s", e)
+        return "I couldn't complete that recommendation just now. Please try again."
 
     # ---------------------- Post-processing: models / formatting ----------------------
-    ai_reply = _enforce_allowed_models(ai_reply, set(allowed))
+    ai_reply = _enforce_allowed_models(ai_reply, allowed)
     ai_reply = _unify_model_mentions(ai_reply, allowed) if '_unify_model_mentions' in globals() else ai_reply
     ai_reply = _fix_labels_and_breaks(ai_reply) if '_fix_labels_and_breaks' in globals() else ai_reply
     ai_reply = _fix_common_objections(ai_reply) if '_fix_common_objections' in globals() else ai_reply
@@ -1064,12 +1106,12 @@ def run_recommendation_flow(user_q: str) -> str:
 
     # ---------------------- Excel-driven options + heuristics ----------------------
     try:
-        opt_rec = recommend_options_from_sheet(user_q) or {}
+        opt_rec = recommend_options_from_sheet(selection_q) or {}
     except Exception:
         opt_rec = {}
 
     # Build a combined environment text to sniff for cues
-    env_text = f"{user_q}\n{prompt_ctx}".lower()
+    env_text = f"{selection_q}\n{prompt_ctx}".lower()
 
     is_indoor = "indoor" in env_text or "inside" in env_text or "warehouse" in env_text
     has_food  = "food" in env_text or "usda" in env_text or "gmp" in env_text or "clean-room" in env_text
@@ -1192,6 +1234,94 @@ def run_recommendation_flow(user_q: str) -> str:
         ai_reply = _inject_section(ai_reply, "Comparison", peer_lines)
 
     return ai_reply
+
+
+def _general_chat_needs_model_context(user_q: str) -> bool:
+    """Use the HELI catalog only for a clear equipment-selection request."""
+    text = (user_q or "").lower()
+    equipment = re.search(
+        r"\b(forklift|lift\s*truck|reach\s*truck|order\s*picker|pallet\s*jack|heli)\b",
+        text,
+    )
+    selection = re.search(
+        r"\b(recommend|suggest|which|what\s+model|right\s+model|best\s+model|"
+        r"need|application|capacity|replace|compare)\b",
+        text,
+    )
+    return bool(equipment and selection)
+
+
+def run_general_ai(user_q: str, history=None) -> str:
+    """Natural, general-purpose chat with optional HELI catalog grounding."""
+    if not client:
+        return (
+            "AI is not configured on this server. "
+            "Set OPENAI_API_KEY to enable the chat assistant."
+        )
+
+    history = _normalize_chat_history(history)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are Tynan Equipment AI, a capable general-purpose assistant. "
+                "Help with ordinary questions, writing, explanations, planning, sales, "
+                "business, and material-handling topics. Answer naturally and directly. "
+                "Do not force every answer into forklift sections or assume every question "
+                "is about HELI. Use conversation history when it is relevant. Ask one concise "
+                "clarifying question when important information is missing. Do not invent "
+                "customer records, equipment specifications, prices, availability, or current "
+                "events. If verified private catalog context is supplied, use it accurately; "
+                "otherwise give general guidance and clearly identify uncertainty."
+            ),
+        }
+    ]
+
+    if _general_chat_needs_model_context(user_q):
+        selection_q = _recommendation_selection_query(user_q, history)
+        hits, _allowed = select_models_for_question(selection_q, k=5)
+        if hits:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Verified HELI catalog candidates for this request:\n"
+                        + allowed_models_block(hits)
+                        + "\nUse only these model codes when making a specific HELI recommendation. "
+                        "If the operating details are incomplete, explain what still needs confirmation."
+                    ),
+                }
+            )
+
+    messages.extend(history)
+    messages.append({"role": "user", "content": user_q})
+
+    try:
+        t0 = time.perf_counter()
+        max_tokens = int(
+            os.getenv("OAI_GENERAL_MAX_TOKENS")
+            or os.getenv("OAI_MAX_TOKENS")
+            or "1200"
+        )
+        temperature = float(os.getenv("OAI_GENERAL_TEMPERATURE", "0.5"))
+        response = client.chat.completions.create(
+            model=os.getenv("OAI_MODEL", "gpt-4o-mini"),
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        log_model_usage(
+            response,
+            endpoint="/api/chat",
+            action="general_chat",
+            duration_ms=duration_ms,
+            extra={"who": session.get("username")},
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        app.logger.exception("General AI chat failed: %s", e)
+        return "I couldn't complete that response just now. Please try again."
 
 # ========= Structured "top-N by spend" helper (inline) =========
 import pandas as pd
@@ -1720,18 +1850,84 @@ def chat():
             or ""
         ).strip()
 
-        mode = (data.get("mode") or "").strip() or "recommendation"
+        mode = (data.get("mode") or "").strip() or "general"
+        history = _normalize_chat_history(data.get("history"))
 
         if not user_q:
             # Return 200 so strict front-ends don't drop the body on 400s
             return _ok_payload("Please enter a description of the customer’s needs.")
 
-        # --- Intent shim: auto-route simple list requests to "catalog"
+        # Normalize the browser's Options & Attachments mode id.
+        if mode == "options_attachments":
+            mode = "catalog"
+
+        # The simplified chat has no visible modes. Specialized data tools are
+        # selected only when the wording clearly asks for one of them.
+        if mode == "general":
+            general_text = user_q.lower()
+
+            asks_catalog_list = bool(
+                re.search(
+                    r"\b(?:list|show|display|give\s+me)\s+(?:me\s+)?"
+                    r"(?:all|every|the\s+full\s+list)\b",
+                    general_text,
+                )
+                and re.search(
+                    r"\b(?:options?|attachments?|tires?)\b",
+                    general_text,
+                )
+            )
+            asks_contact_finder = bool(
+                "contact finder" in general_text
+                or re.search(
+                    r"\b(?:find|get|locate)\b.{0,30}"
+                    r"\b(?:contact|email|phone|decision[ -]?maker)\b",
+                    general_text,
+                )
+            )
+            asks_indiana_projects = bool(
+                "indiana" in general_text
+                and re.search(
+                    r"\b(?:development|developments|project|projects|"
+                    r"construction|warehouse|manufacturing)\b",
+                    general_text,
+                )
+                and re.search(
+                    r"\b(?:new|recent|planned|upcoming|find|search|show)\b",
+                    general_text,
+                )
+            )
+            asks_private_customer_data = bool(
+                re.search(
+                    r"\b(?:customer\s+report|billing\s+history|invoice\s+history|"
+                    r"customer\s+spend|account\s+spend|customer\s+revenue|"
+                    r"account\s+revenue|segment\s+for)\b",
+                    general_text,
+                )
+                or re.search(
+                    r"\b(?:what|how\s+much)\b.{0,45}\b(?:spent|spend|revenue)\b",
+                    general_text,
+                )
+            )
+
+            if asks_catalog_list:
+                mode = "catalog"
+            elif asks_contact_finder:
+                mode = "contact_finder"
+            elif asks_indiana_projects:
+                mode = "indiana_developments"
+            elif asks_private_customer_data:
+                mode = "inquiry"
+
+        # Auto-route only unmistakable "show all" catalog requests. The old
+        # broad check could reroute normal recommendation questions.
         t = user_q.lower()
         if mode not in {"catalog", "contact_finder"}:
-            if (("list" in t) or ("show" in t) or ("give me" in t)) and (
-                ("option" in t) or ("attachment" in t) or ("tire" in t)
-            ):
+            if re.search(
+                r"\b(?:list|show|display|give\s+me)\s+(?:me\s+)?"
+                r"(?:all|every|the\s+full\s+list)\b",
+                t,
+            ) and re.search(r"\b(?:options?|attachments?|tires?)\b", t):
                 mode = "catalog"
 
         app.logger.info(f"/api/chat mode={mode} q='{user_q[:80]}'")
@@ -2012,19 +2208,27 @@ def chat():
             return _ok_payload(intel_text)
 
         # ─────────────────────────────────────────────────────────────
-        # Recommendation (default forklift model recommendation flow)
+        # General AI (default)
         # ─────────────────────────────────────────────────────────────
-        ai_reply = run_recommendation_flow(user_q)
+        if mode == "general":
+            ai_reply = run_general_ai(user_q, history)
+            return _ok_payload(ai_reply or "_No response produced._")
+
+        # ─────────────────────────────────────────────────────────────
+        # Recommendation (legacy explicit mode)
+        # ─────────────────────────────────────────────────────────────
+        ai_reply = run_recommendation_flow(user_q, history)
 
         # Inject Current Promotions
-        meta = top_pick_meta(user_q)
+        recommendation_q = _recommendation_selection_query(user_q, history)
+        meta = top_pick_meta(recommendation_q)
         if meta:
             top_code, top_class, top_power = meta
-            if re.search(r"\b(lpg|propane|lp gas)\b", user_q, re.I):
+            if re.search(r"\b(lpg|propane|lp gas)\b", recommendation_q, re.I):
                 top_power = "lpg"
-            elif re.search(r"\bdiesel\b", user_q, re.I):
+            elif re.search(r"\bdiesel\b", recommendation_q, re.I):
                 top_power = "diesel"
-            elif re.search(r"\b(lithium|li[-\s]?ion|electric|battery)\b", user_q, re.I):
+            elif re.search(r"\b(lithium|li[-\s]?ion|electric|battery)\b", recommendation_q, re.I):
                 top_power = "lithium"
 
             promo_list = promos_for_context(top_code, top_class, top_power or "")
