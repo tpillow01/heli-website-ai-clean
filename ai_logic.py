@@ -820,34 +820,59 @@ def allowed_models_block(allowed: Iterable) -> str:
 
 
 # --- Query parsing for recommendation ---------------------------------------
-_CAP_RE = re.compile(r"\b(\d[\d,\.]*)\s*(k|lb|lbs|pound|pounds)?\b", re.I)
+# A capacity must have a capacity unit, a ``k`` suffix, or nearby capacity
+# wording.  The old expression made the unit optional, so "36V", "12-foot
+# aisle", and even a quantity could accidentally become the requested load.
+_CAP_WITH_UNIT_RE = re.compile(
+    r"\b(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|lbs?|pounds?)\b",
+    re.I,
+)
+_CAP_WITH_LABEL_RE = re.compile(
+    r"\b(?:capacity|rated\s+capacity|load|handle|handling)\b"
+    r"[^\d]{0,24}(\d{4,5}(?:\.\d+)?)\b",
+    re.I,
+)
 
 
 def _parse_capacity_lbs(user_q: str) -> Optional[float]:
-    q = (user_q or "")
-    m = _CAP_RE.search(q)
-    if not m:
-        m2 = re.search(r"\b(\d+(?:\.\d+)?)k\b", q, re.I)
-        if m2:
-            try:
-                return float(m2.group(1)) * 1000.0
-            except Exception:
-                return None
-        return None
-    num, unit = m.group(1), (m.group(2) or "")
-    try:
-        val = float(num.replace(",", ""))
-    except Exception:
-        return None
-    if unit.lower() == "k":
-        val *= 1000.0
-    return val
+    q = user_q or ""
+    matches: List[Tuple[int, float]] = []
+
+    for match in _CAP_WITH_UNIT_RE.finditer(q):
+        try:
+            value = float(match.group(1).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        if match.group(2).lower() == "k":
+            value *= 1000.0
+        matches.append((match.start(), value))
+
+    for match in _CAP_WITH_LABEL_RE.finditer(q):
+        try:
+            matches.append((match.start(), float(match.group(1))))
+        except (TypeError, ValueError):
+            continue
+
+    # The latest explicit requirement wins. This lets a follow-up such as
+    # "actually make that 6,000 lb" override an earlier message.
+    return max(matches, key=lambda item: item[0])[1] if matches else None
+
+
+def _requested_power(user_q: str) -> Optional[str]:
+    """Return the most recently stated power preference."""
+    patterns = {
+        "electric": re.compile(r"\b(electric|lithium|li[- ]?ion|battery[- ]powered|ev)\b", re.I),
+        "diesel": re.compile(r"\bdiesel\b", re.I),
+        "lpg": re.compile(r"\b(lpg|lp\s*gas|propane)\b", re.I),
+    }
+    found: List[Tuple[int, str]] = []
+    for power, pattern in patterns.items():
+        found.extend((m.start(), power) for m in pattern.finditer(user_q or ""))
+    return max(found, key=lambda item: item[0])[1] if found else None
 
 
 def _wants_electric(user_q: str) -> bool:
-    return bool(
-        re.search(r"\b(ev|electric|lithium|li-ion|battery)\b", user_q or "", re.I)
-    )
+    return _requested_power(user_q) == "electric"
 
 
 def _wants_all_terrain(user_q: str) -> bool:
@@ -883,11 +908,22 @@ def _model_score(user_q: str, row: Dict[str, Any]) -> float:
         else:
             score -= 2.0 * (1.0 + (want_cap - cap) / max(1.0, want_cap))
 
-    if _wants_electric(user_q):
-        if "electric" in pwr or "lithium" in pwr:
-            score += 2.0
+    wanted_power = _requested_power(user_q)
+    if wanted_power == "electric":
+        if any(word in pwr for word in ("electric", "lithium", "li-ion")):
+            score += 3.0
         else:
-            score -= 1.5
+            score -= 2.5
+    elif wanted_power == "diesel":
+        if "diesel" in pwr:
+            score += 3.0
+        else:
+            score -= 2.5
+    elif wanted_power == "lpg":
+        if any(word in pwr for word in ("lpg", "lp gas", "propane")):
+            score += 3.0
+        else:
+            score -= 2.5
 
     if _wants_indoor_epoxy(user_q):
         if "cushion" in tire:
@@ -924,7 +960,16 @@ def _rank_models(user_q: str, k: int = 5) -> List[Dict[str, Any]]:
             continue
         s = _model_score(user_q, m)
         scored.append((s, m))
-    scored.sort(key=lambda t: t[0], reverse=True)
+    want_cap = _parse_capacity_lbs(user_q)
+
+    def stable_key(item: Tuple[float, Dict[str, Any]]) -> Tuple[float, float, str]:
+        score, row = item
+        capacity = _capacity_of(row)
+        distance = abs(capacity - want_cap) if capacity and want_cap else 0.0
+        code = str(model_meta_for(row).get("code") or "").lower()
+        return (-score, distance, code)
+
+    scored.sort(key=stable_key)
     return [m for s, m in scored[: max(1, k)]]
 
 
@@ -942,28 +987,45 @@ def select_models_for_question(
     - allowed_codes: list of model codes (strings) that heli_backup_ai.py
       will pass into _enforce_allowed_models (it does set(allowed_codes)).
     """
-    # 1) Start with ranked models
-    hits = _rank_models(user_q, k=k)
-
-    # 2) If the user asked for a specific capacity, enforce a band around it
+    # Apply capacity safety filtering to the entire catalog before taking the
+    # top five. The previous implementation ranked five first and could miss
+    # the correct-capacity model completely.
+    models = [m for m in _load_models_cache() if isinstance(m, dict)]
     want_cap = _parse_capacity_lbs(user_q)
     if want_cap:
-        # Keep only models within ±10% of requested capacity
-        lo = want_cap * 0.9
-        hi = want_cap * 1.1
-        filtered_by_cap: List[Dict[str, Any]] = []
-        for m in hits:
-            cap = _capacity_of(m) or 0.0
-            if cap <= 0:
-                continue
-            if lo <= cap <= hi:
-                filtered_by_cap.append(m)
+        capable = [m for m in models if (_capacity_of(m) or 0.0) >= want_cap]
+        near = [m for m in capable if (_capacity_of(m) or 0.0) <= want_cap * 1.35]
+        candidate_pool = near or capable or models
+    else:
+        candidate_pool = models
 
-        # Only overwrite if we actually found matches in the band
-        if filtered_by_cap:
-            hits = filtered_by_cap
+    wanted_power = _requested_power(user_q)
+    if wanted_power:
+        def power_matches(row: Dict[str, Any]) -> bool:
+            power = _power_of(row)
+            if wanted_power == "electric":
+                return any(word in power for word in ("electric", "lithium", "li-ion"))
+            if wanted_power == "diesel":
+                return "diesel" in power
+            return any(word in power for word in ("lpg", "lp gas", "propane"))
 
-    # 3) Apply any other hard filters (currently passthrough)
+        power_pool = [m for m in candidate_pool if power_matches(m)]
+        if power_pool:
+            candidate_pool = power_pool
+
+    scored = [(_model_score(user_q, m), m) for m in candidate_pool]
+
+    def selection_key(item: Tuple[float, Dict[str, Any]]) -> Tuple[float, float, str]:
+        score, row = item
+        capacity = _capacity_of(row)
+        distance = abs(capacity - want_cap) if capacity and want_cap else 0.0
+        code = str(model_meta_for(row).get("code") or "").lower()
+        return (-score, distance, code)
+
+    scored.sort(key=selection_key)
+    hits = [m for _, m in scored[:max(1, k)]]
+
+    # Apply any other hard filters (currently passthrough)
     filtered = filter_models(hits)
 
     # 4) Build list of hashable model codes for enforcement

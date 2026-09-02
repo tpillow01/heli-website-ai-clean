@@ -4,206 +4,530 @@
   <meta charset="UTF-8" />
   <title>Tynan Equipment AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=ymfix1">
 
-  <!-- Font for HELI text look -->
-  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=aimemory2">
 
-  <!-- PWA -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Exo+2:wght@800;900&display=swap"
+    rel="stylesheet"
+  >
+
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#efe4d0">
+
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
-          .then(r => console.log('✅ SW:', r.scope))
-          .catch(e => console.error('❌ SW failed:', e));
+          .then(r => console.log('SW:', r.scope))
+          .catch(e => console.error('SW failed:', e));
       });
     }
   </script>
 </head>
+
 <body>
   <div class="chat-container">
-    <!-- Top bar: brand text + HELI text (no image) -->
+
     <div class="topbar">
-      <div class="brand"><span class="accent">Tynan</span> Equipment AI</div>
+      <div class="brand">
+        <span class="accent">Tynan</span> Equipment AI
+      </div>
+
       <div class="topbar-right">
-        <span class="heli-text" style="font-family:'Exo 2', sans-serif; letter-spacing:1px;">HELI</span>
+        <span
+          class="heli-text"
+          style="font-family:'Exo 2', sans-serif; letter-spacing:1px;"
+        >
+          HELI
+        </span>
       </div>
     </div>
 
-    <!-- Tabs: Chat + Map ; Mode on right -->
     <div class="navbar">
       <button class="menu-btn" aria-label="Menu"></button>
 
-<nav class="tabs">
-  <a href="#" class="tab active">Chat</a>
-  <a href="{{ url_for('map_page') }}" class="tab">Map</a>
-  <a href="{{ url_for('daily_activity.dashboard') }}" class="tab">Daily Activity</a>
-  <a href="/battlecards"
-     class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}">
-    Battle Cards
-  </a>
-  <a href="{{ url_for('quote_request') }}" class="tab">Quote Request</a>
-  <a href="{{ url_for('logout') }}" class="tab">Logout</a>
-</nav>
+      <nav class="tabs">
+        <a href="#" class="tab active">Chat</a>
+
+        <a href="{{ url_for('map_page') }}" class="tab">
+          Map
+        </a>
+
+        <a href="{{ url_for('daily_activity.dashboard') }}" class="tab">
+          Daily Activity
+        </a>
+
+        <a
+          href="/battlecards"
+          class="tab {{ 'active' if request.path.startswith('/battlecards') else '' }}"
+        >
+          Battle Cards
+        </a>
+
+        <a href="{{ url_for('quote_request') }}" class="tab">
+          Quote Request
+        </a>
+
+        <a href="{{ url_for('logout') }}" class="tab">
+          Logout
+        </a>
+      </nav>
+
       <div class="nav-actions">
-        <!-- Simple hard-coded mode dropdown -->
         <div class="mode-wrap">
           <span class="mode-label">Mode</span>
-          <select id="modeSelect" class="mode-select" aria-label="Chat Mode">
-            <option value="recommendation">Forklift Recommendation</option>
-            <option value="options_attachments">Options &amp; Attachments</option>
-            <option value="inquiry">Customer Inquiry (Billing)</option>
-            <option value="contact_finder">Contact Finder</option>
-            <option value="indiana_developments">Indiana Developments</option>
-            <option value="coach">Sales Coach</option>
+
+          <select
+            id="modeSelect"
+            class="mode-select"
+            aria-label="Chat Mode"
+          >
+            <option value="recommendation">
+              Forklift Recommendation
+            </option>
+
+            <option value="options_attachments">
+              Options &amp; Attachments
+            </option>
+
+            <option value="inquiry">
+              Customer Inquiry (Billing)
+            </option>
+
+            <option value="contact_finder">
+              Contact Finder
+            </option>
+
+            <option value="indiana_developments">
+              Indiana Developments
+            </option>
+
+            <option value="coach">
+              Sales Coach
+            </option>
           </select>
         </div>
       </div>
     </div>
 
-    <!-- Stage + animation -->
     <div class="stage">
-      <div class="forklift-animation" id="forklift-animation" aria-hidden="true">
+
+      <div
+        class="forklift-animation"
+        id="forklift-animation"
+        aria-hidden="true"
+      >
         <div class="forklift-unit">
-          <img src="{{ url_for('static', filename='forklift_heli.png') }}" alt="Forklift" class="forklift-img" />
+          <img
+            src="{{ url_for('static', filename='forklift_heli.png') }}"
+            alt="Forklift"
+            class="forklift-img"
+          >
         </div>
       </div>
 
-      <div id="response-area" class="response-area" role="log" aria-live="polite"></div>
+      <div
+        id="response-area"
+        class="response-area"
+        role="log"
+        aria-live="polite"
+      ></div>
     </div>
 
-    <!-- Input: arrow Send inside textarea -->
     <form id="chat-form" class="input-form">
-      <label for="userInput" class="sr-only">Your message</label>
-      <textarea id="userInput" rows="3" placeholder="Enter a message..." required autofocus></textarea>
-      <button type="submit" class="send-btn" aria-label="Send message">➤</button>
+      <label for="userInput" class="sr-only">
+        Your message
+      </label>
+
+      <textarea
+        id="userInput"
+        rows="3"
+        placeholder="Enter a message..."
+        required
+        autofocus
+      ></textarea>
+
+      <button
+        type="submit"
+        class="send-btn"
+        aria-label="Send message"
+      >
+        ➤
+      </button>
     </form>
 
-    <div class="footer">Powered by Tynan Equipment AI</div>
+    <div class="footer">
+      Powered by Tynan Equipment AI
+    </div>
   </div>
 
   <script>
-    // ------- Elements -------
     const form = document.getElementById('chat-form');
     const input = document.getElementById('userInput');
     const responseArea = document.getElementById('response-area');
     const forkliftAnim = document.getElementById('forklift-animation');
     const forkliftUnit = forkliftAnim.querySelector('.forklift-unit');
     const modeSelect = document.getElementById('modeSelect');
-    let animationInterval, isForward = true;
 
-    // ------- Formatting Helpers -------
+    /*
+     * Each chat mode gets its own short conversation history.
+     * This prevents Customer Inquiry messages from interfering
+     * with Forklift Recommendation messages.
+     */
+    const historyByMode = Object.create(null);
+
+    let animationInterval;
+    let isForward = true;
+    let requestInProgress = false;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
     function formatLabels(text) {
-      // Highlight common section labels you use
       return text.replace(
-        /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Tires \(recommended\):|Attachments \(relevant\):|Options \(relevant\):|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
+        /(Customer Profile:|Model:|Power:|Capacity:|Tire Type:|Tires \(recommended\):|Attachments \(relevant\):|Options \(relevant\):|Attachments:|Options:|Comparison:|Sales Pitch Techniques:|Common Objections:|Current Promotions:|Segmentation:|Top Months:|Top Offerings:|Billing:|By Offering \(R12-ish\):|Visit Focus Suggestions:|Next-Level Actions:)/g,
         '<span class="section-label">$1</span>'
       );
     }
 
-    function renderBubble(textOrHtml, sender='ai') {
-      if (sender === 'ai') stopAnimation();
-      const el = document.createElement('div');
-      el.className = `response-bubble ${sender}`;
-      const looksLikeHtml = /<\s*\w+[^>]*>/.test(textOrHtml);
-      if (looksLikeHtml) {
-        el.innerHTML = textOrHtml;
-      } else {
-        el.innerHTML = formatLabels(textOrHtml)
-          .split('\n')
-          .map(line => `<div>${line}</div>`)
-          .join('');
+    /*
+     * Allows the limited HTML used by certain responses while
+     * removing unwanted HTML elements and attributes.
+     */
+    function sanitizeServerHtml(source) {
+      const template = document.createElement('template');
+
+      template.innerHTML = String(source ?? '');
+
+      const allowedTags = new Set([
+        'A',
+        'BR',
+        'DIV',
+        'EM',
+        'P',
+        'SPAN',
+        'STRONG',
+        'UL',
+        'OL',
+        'LI'
+      ]);
+
+      for (const node of [
+        ...template.content.querySelectorAll('*')
+      ]) {
+        if (!allowedTags.has(node.tagName)) {
+          node.replaceWith(
+            document.createTextNode(node.textContent || '')
+          );
+
+          continue;
+        }
+
+        for (const attr of [...node.attributes]) {
+          const attributeName = attr.name.toLowerCase();
+
+          const keepHref =
+            node.tagName === 'A' &&
+            attributeName === 'href';
+
+          const keepClass =
+            attributeName === 'class';
+
+          const keepStyle =
+            node.tagName === 'SPAN' &&
+            attributeName === 'style';
+
+          if (!keepHref && !keepClass && !keepStyle) {
+            node.removeAttribute(attr.name);
+          }
+        }
+
+        if (node.tagName === 'A') {
+          const href = node.getAttribute('href') || '';
+
+          if (
+            !/^https?:\/\//i.test(href) &&
+            !/^mailto:/i.test(href)
+          ) {
+            node.removeAttribute('href');
+          }
+
+          node.setAttribute('rel', 'noopener noreferrer');
+          node.setAttribute('target', '_blank');
+        }
       }
-      responseArea.appendChild(el);
-      el.scrollIntoView({ behavior:'smooth' });
+
+      return template.innerHTML;
     }
 
-    // ------- Forklift Animation -------
+    function renderBubble(textOrHtml, sender = 'ai') {
+      if (sender === 'ai') {
+        stopAnimation();
+      }
+
+      const bubble = document.createElement('div');
+
+      bubble.className = `response-bubble ${sender}`;
+
+      const value = String(textOrHtml ?? '');
+
+      const looksLikeHtml =
+        /<\s*\w+[^>]*>/.test(value);
+
+      if (sender === 'ai' && looksLikeHtml) {
+        bubble.innerHTML = sanitizeServerHtml(value);
+      } else {
+        bubble.innerHTML = formatLabels(escapeHtml(value))
+          .split('\n')
+          .map(line => {
+            return `<div>${line || '&nbsp;'}</div>`;
+          })
+          .join('');
+      }
+
+      responseArea.appendChild(bubble);
+
+      bubble.scrollIntoView({
+        behavior: 'smooth',
+        block: 'end'
+      });
+    }
+
     function startAnimationLoop() {
       forkliftAnim.style.display = 'block';
       forkliftUnit.style.left = '0';
+
       isForward = true;
+
       clearInterval(animationInterval);
-      animationInterval = setInterval(animateForklift, 2000);
+
+      animationInterval = setInterval(
+        animateForklift,
+        2000
+      );
     }
+
     function animateForklift() {
-      const dist = `calc(100% - ${forkliftUnit.offsetWidth}px)`;
-      forkliftUnit.style.left = isForward ? dist : '0';
+      const distance =
+        `calc(100% - ${forkliftUnit.offsetWidth}px)`;
+
+      forkliftUnit.style.left =
+        isForward ? distance : '0';
+
       isForward = !isForward;
     }
+
     function stopAnimation() {
       clearInterval(animationInterval);
       forkliftAnim.style.display = 'none';
     }
 
-    // ------- Mode Routing Helpers -------
-    function isOptionsAttachmentsMode() {
-      // Detect Options/Attachments mode by id OR label
-      const opt = modeSelect.options[modeSelect.selectedIndex];
-      const id = (opt?.value || '').toLowerCase();
-      const label = (opt?.textContent || '').toLowerCase();
-      return id === 'options_attachments'
-          || id === 'attachments_options'
-          || label.includes('option')
-          || label.includes('attachment');
+    function historyFor(mode) {
+      if (!historyByMode[mode]) {
+        historyByMode[mode] = [];
+      }
+
+      return historyByMode[mode];
     }
 
-    // ------- API Calls -------
-    async function askOptionsAttachments(userText) {
-      const res = await fetch('/api/options_attachments_chat', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ q: userText }) // server expects "q"
+    function remember(mode, role, content) {
+      const history = historyFor(mode);
+
+      history.push({
+        role: role,
+        content: String(content ?? '').slice(0, 1600)
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data.html || data.response || data.text || data.message || '(no response)';
+
+      /*
+       * Keep only the latest eight messages so requests do not
+       * become excessively large.
+       */
+      if (history.length > 8) {
+        history.splice(
+          0,
+          history.length - 8
+        );
+      }
     }
 
-    async function askGeneralChat(userText, mode) {
-      const res = await fetch('/api/chat', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ question:userText, mode })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data.html || data.response || data.text || data.message || '✓';
-    }
-
-    // ------- Form Submit -------
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const q = input.value.trim();
-      if (!q) return;
-      const mode = modeSelect?.value || 'recommendation';
-
-      renderBubble(q, 'user');
-      input.value = '';
-      startAnimationLoop();
+    async function readApiResponse(response) {
+      let data;
 
       try {
-        let answer;
-        if (isOptionsAttachmentsMode()) {
-          answer = await askOptionsAttachments(q);
-        } else {
-          answer = await askGeneralChat(q, mode);
-        }
-        renderBubble(answer, 'ai');
-      } catch (err) {
-        renderBubble(`❌ Error: ${err.message}`, 'ai');
+        data = await response.json();
+      } catch (_) {
+        throw new Error(
+          `The server returned an unreadable response (HTTP ${response.status}).`
+        );
       }
-    });
 
-    // ------- Enter-to-send -------
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        form.dispatchEvent(new Event('submit'));
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          data.message ||
+          `HTTP ${response.status}`
+        );
       }
-    });
+
+      return (
+        data.html ||
+        data.response ||
+        data.text ||
+        data.message ||
+        '(no response)'
+      );
+    }
+
+    async function askOptionsAttachments(
+      userText,
+      history
+    ) {
+      const response = await fetch(
+        '/api/options_attachments_chat',
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type': 'application/json'
+          },
+
+          body: JSON.stringify({
+            q: userText,
+            history: history
+          })
+        }
+      );
+
+      return readApiResponse(response);
+    }
+
+    async function askGeneralChat(
+      userText,
+      mode,
+      history
+    ) {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+          question: userText,
+          mode: mode,
+          history: history
+        })
+      });
+
+      return readApiResponse(response);
+    }
+
+    form.addEventListener(
+      'submit',
+      async event => {
+        event.preventDefault();
+
+        if (requestInProgress) {
+          return;
+        }
+
+        const question = input.value.trim();
+
+        if (!question) {
+          return;
+        }
+
+        const mode =
+          modeSelect.value || 'recommendation';
+
+        /*
+         * Copy the history before adding the newest question.
+         * The question is sent separately in the API request.
+         */
+        const priorHistory =
+          historyFor(mode).slice(-8);
+
+        requestInProgress = true;
+        input.disabled = true;
+
+        renderBubble(question, 'user');
+
+        input.value = '';
+
+        startAnimationLoop();
+
+        try {
+          let answer;
+
+          if (mode === 'options_attachments') {
+            answer = await askOptionsAttachments(
+              question,
+              priorHistory
+            );
+          } else {
+            answer = await askGeneralChat(
+              question,
+              mode,
+              priorHistory
+            );
+          }
+
+          remember(
+            mode,
+            'user',
+            question
+          );
+
+          /*
+           * Remove HTML tags before storing the answer in
+           * conversation memory.
+           */
+          remember(
+            mode,
+            'assistant',
+            answer.replace(/<[^>]+>/g, ' ')
+          );
+
+          renderBubble(answer, 'ai');
+        } catch (error) {
+          stopAnimation();
+
+          renderBubble(
+            `Error: ${error.message}`,
+            'ai'
+          );
+        } finally {
+          requestInProgress = false;
+          input.disabled = false;
+          input.focus();
+        }
+      }
+    );
+
+    /*
+     * Enter sends the message.
+     * Shift + Enter creates a new line.
+     */
+    input.addEventListener(
+      'keydown',
+      event => {
+        if (
+          event.key === 'Enter' &&
+          !event.shiftKey
+        ) {
+          event.preventDefault();
+          form.requestSubmit();
+        }
+      }
+    );
   </script>
 </body>
 </html>
