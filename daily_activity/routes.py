@@ -1,5 +1,7 @@
 import os
 import re
+import uuid
+
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 
@@ -11,7 +13,10 @@ from flask import (
     flash,
     session,
     abort,
+    send_from_directory,
 )
+
+from werkzeug.utils import secure_filename
 
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
@@ -22,11 +27,42 @@ from .models import (
     Customer,
     Contact,
     ContactPhone,
+    CustomerDocument,
     ActivityLog,
     FleetInfo,
 )
 
+
 geolocator = Nominatim(user_agent="daily_activity_app")
+
+
+DOCUMENT_UPLOAD_FOLDER = os.getenv(
+    "DOCUMENT_UPLOAD_FOLDER",
+    "/var/data/customer_documents",
+)
+
+ALLOWED_DOCUMENT_EXTENSIONS = {
+    "pdf",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "csv",
+    "jpg",
+    "jpeg",
+    "png",
+}
+
+MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
+
+
+def allowed_document_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower()
+        in ALLOWED_DOCUMENT_EXTENSIONS
+    )
+
 
 DA_ENDPOINTS = {
     "dashboard",
@@ -47,6 +83,9 @@ DA_ENDPOINTS = {
     "complete_followup",
     "snooze_followup",
     "reschedule_followup",
+    "upload_customer_document",
+    "download_customer_document",
+    "delete_customer_document",
     "map_page",
     "planner",
     "calendar_page",
@@ -59,6 +98,7 @@ def inject_daily_activity_url_for():
     def scoped_url_for(endpoint, **kwargs):
         if "." not in endpoint and endpoint in DA_ENDPOINTS:
             endpoint = f"daily_activity.{endpoint}"
+
         return url_for(endpoint, **kwargs)
 
     return {"url_for": scoped_url_for}
@@ -67,6 +107,7 @@ def inject_daily_activity_url_for():
 def da_url(endpoint, **kwargs):
     if "." not in endpoint:
         endpoint = f"daily_activity.{endpoint}"
+
     return url_for(endpoint, **kwargs)
 
 
@@ -96,36 +137,55 @@ def user_is_manager():
 
 def scoped_customer_query():
     query = Customer.query
+
     if not user_is_manager():
-        query = query.filter(Customer.user_id == current_user_id())
+        query = query.filter(
+            Customer.user_id == current_user_id()
+        )
+
     return query
 
 
 def scoped_activity_query():
     query = ActivityLog.query
+
     if not user_is_manager():
-        query = query.filter(ActivityLog.user_id == current_user_id())
+        query = query.filter(
+            ActivityLog.user_id == current_user_id()
+        )
+
     return query
 
 
 def scoped_contact_query():
     query = Contact.query
+
     if not user_is_manager():
-        query = query.filter(Contact.user_id == current_user_id())
+        query = query.filter(
+            Contact.user_id == current_user_id()
+        )
+
     return query
 
 
 def scoped_fleet_query():
     query = FleetInfo.query
+
     if not user_is_manager():
-        query = query.filter(FleetInfo.user_id == current_user_id())
+        query = query.filter(
+            FleetInfo.user_id == current_user_id()
+        )
+
     return query
 
 
 def get_customer_or_403(customer_id):
     customer = Customer.query.get_or_404(customer_id)
 
-    if not user_is_manager() and customer.user_id != current_user_id():
+    if (
+        not user_is_manager()
+        and customer.user_id != current_user_id()
+    ):
         abort(403)
 
     return customer
@@ -1789,6 +1849,198 @@ def add_fleet(customer_id):
         is_manager=user_is_manager(),
     )
 
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/documents/upload",
+    methods=["POST"],
+)
+def upload_customer_document(customer_id):
+    customer = get_customer_or_403(customer_id)
+
+    uploaded_file = request.files.get("document")
+    document_type = request.form.get(
+        "document_type",
+        "Other",
+    ).strip() or "Other"
+
+    if not uploaded_file or not uploaded_file.filename:
+        flash("Please choose a document to upload.", "error")
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
+
+    if not allowed_document_file(uploaded_file.filename):
+        flash(
+            "That file type is not allowed.",
+            "error",
+        )
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
+
+    uploaded_file.seek(0, os.SEEK_END)
+    file_size = uploaded_file.tell()
+    uploaded_file.seek(0)
+
+    if file_size > MAX_DOCUMENT_SIZE:
+        flash(
+            "Document is too large. Maximum file size is 10 MB.",
+            "error",
+        )
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
+
+    os.makedirs(
+        DOCUMENT_UPLOAD_FOLDER,
+        exist_ok=True,
+    )
+
+    original_filename = secure_filename(
+        uploaded_file.filename
+    )
+
+    extension = original_filename.rsplit(
+        ".",
+        1,
+    )[1].lower()
+
+    stored_filename = (
+        f"{uuid.uuid4().hex}.{extension}"
+    )
+
+    destination = os.path.join(
+        DOCUMENT_UPLOAD_FOLDER,
+        stored_filename,
+    )
+
+    uploaded_file.save(destination)
+
+    uploader_name = current_rep_name()
+
+    if not uploader_name:
+        uploader_name = (
+            "Manager"
+            if user_is_manager()
+            else "User"
+        )
+
+    document = CustomerDocument(
+        customer_id=customer.id,
+        user_id=current_user_id(),
+        original_filename=original_filename,
+        stored_filename=stored_filename,
+        document_type=document_type,
+        mime_type=uploaded_file.mimetype,
+        file_size=file_size,
+        uploaded_by=uploader_name,
+    )
+
+    db.session.add(document)
+    db.session.commit()
+
+    flash(
+        f"{original_filename} uploaded successfully.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "customer_detail",
+            customer_id=customer.id,
+        )
+    )
+
+
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/documents/"
+    "<int:document_id>/download",
+)
+def download_customer_document(customer_id, document_id):
+    customer = get_customer_or_403(customer_id)
+
+    document = CustomerDocument.query.filter_by(
+        id=document_id,
+        customer_id=customer.id,
+    ).first_or_404()
+
+    file_path = os.path.join(
+        DOCUMENT_UPLOAD_FOLDER,
+        document.stored_filename,
+    )
+
+    if not os.path.isfile(file_path):
+        flash(
+            "The document file could not be found.",
+            "error",
+        )
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
+
+    return send_from_directory(
+        DOCUMENT_UPLOAD_FOLDER,
+        document.stored_filename,
+        as_attachment=True,
+        download_name=document.original_filename,
+    )
+
+
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/documents/"
+    "<int:document_id>/delete",
+    methods=["POST"],
+)
+def delete_customer_document(customer_id, document_id):
+    customer = get_customer_or_403(customer_id)
+
+    if not user_is_manager():
+        abort(403)
+
+    document = CustomerDocument.query.filter_by(
+        id=document_id,
+        customer_id=customer.id,
+    ).first_or_404()
+
+    original_filename = document.original_filename
+
+    file_path = os.path.join(
+        DOCUMENT_UPLOAD_FOLDER,
+        document.stored_filename,
+    )
+
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+
+    db.session.delete(document)
+    db.session.commit()
+
+    flash(
+        f"{original_filename} deleted successfully.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "customer_detail",
+            customer_id=customer.id,
+        )
+    )
 
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/complete-followup",

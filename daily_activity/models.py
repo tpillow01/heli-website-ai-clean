@@ -21,8 +21,17 @@ class Customer(db.Model):
     assigned_rep = db.Column(db.String(100), nullable=True)
 
     # Legacy fields kept for compatibility with existing data/forms.
-    status = db.Column(db.String(50), nullable=True, default="Prospect")
-    priority_level = db.Column(db.String(50), nullable=True, default="Medium")
+    status = db.Column(
+        db.String(50),
+        nullable=True,
+        default="Prospect"
+    )
+
+    priority_level = db.Column(
+        db.String(50),
+        nullable=True,
+        default="Medium"
+    )
 
     # Relationship-driven workflow fields
     relationship_type = db.Column(
@@ -129,6 +138,13 @@ class Customer(db.Model):
         cascade="all, delete-orphan"
     )
 
+    documents = db.relationship(
+        "CustomerDocument",
+        backref="customer",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
 
 class Contact(db.Model):
     __tablename__ = "contacts"
@@ -220,6 +236,66 @@ class ContactPhone(db.Model):
     )
 
     created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
+
+class CustomerDocument(db.Model):
+    __tablename__ = "customer_documents"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    customer_id = db.Column(
+        db.Integer,
+        db.ForeignKey("customers.id"),
+        nullable=False
+    )
+
+    # User who uploaded the document
+    user_id = db.Column(
+        db.Integer,
+        nullable=False
+    )
+
+    # Friendly name shown to the user
+    original_filename = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
+    # Unique filename used on the Render persistent disk
+    stored_filename = db.Column(
+        db.String(255),
+        nullable=False,
+        unique=True
+    )
+
+    document_type = db.Column(
+        db.String(100),
+        nullable=True,
+        default="Other"
+    )
+
+    mime_type = db.Column(
+        db.String(150),
+        nullable=True
+    )
+
+    file_size = db.Column(
+        db.Integer,
+        nullable=True
+    )
+
+    uploaded_by = db.Column(
+        db.String(120),
+        nullable=True
+    )
+
+    uploaded_at = db.Column(
         db.DateTime,
         default=datetime.utcnow
     )

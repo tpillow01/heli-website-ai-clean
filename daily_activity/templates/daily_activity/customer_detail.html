@@ -2,7 +2,7 @@
 
 {% block title %}Customer Detail | Daily Activity App{% endblock %}
 {% block page_title %}Customer Detail{% endblock %}
-{% block page_subtitle %}Review account notes, contacts, fleet, and activity in one clean customer workspace{% endblock %}
+{% block page_subtitle %}Review account notes, contacts, documents, fleet, and activity in one clean customer workspace{% endblock %}
 
 {% block content %}
 
@@ -13,8 +13,8 @@
         <h3>{{ customer.company_name }}</h3>
 
         <p>
-            Manage this account from one place, including follow-up timing, notes,
-            contacts, fleet information, and customer activity.
+            Manage this account from one place, including follow-up timing,
+            notes, contacts, documents, fleet information, and customer activity.
         </p>
 
         <div class="hero-actions">
@@ -47,6 +47,12 @@
                 Add Fleet
             </a>
 
+            <a
+                href="#customer-documents"
+                class="btn btn-secondary"
+            >
+                Documents
+            </a>
 
             {% if not customer.needs_contacts %}
 
@@ -141,13 +147,9 @@
 
         <div class="list-item">
             <div class="list-item-main">
-
-                <div class="list-title">
-                    Address
-                </div>
+                <div class="list-title">Address</div>
 
                 <div class="list-text">
-
                     {% if customer.address or customer.city or customer.state or customer.zip_code %}
 
                         {{ customer.address or "" }}
@@ -162,58 +164,39 @@
                         {{ customer.zip_code or "" }}
 
                     {% else %}
-
                         N/A
-
                     {% endif %}
-
                 </div>
-
             </div>
         </div>
 
 
         <div class="list-item">
             <div class="list-item-main">
-
-                <div class="list-title">
-                    County
-                </div>
-
+                <div class="list-title">County</div>
                 <div class="list-text">
                     {{ customer.county or "N/A" }}
                 </div>
-
             </div>
         </div>
 
 
         <div class="list-item">
             <div class="list-item-main">
-
-                <div class="list-title">
-                    Last Contact
-                </div>
-
+                <div class="list-title">Last Contact</div>
                 <div class="list-text">
                     {{ customer.last_contact_date or "N/A" }}
                 </div>
-
             </div>
         </div>
 
 
         <div class="list-item">
             <div class="list-item-main">
-
-                <div class="list-title">
-                    Last Touch
-                </div>
-
+                <div class="list-title">Last Touch</div>
                 <div class="list-text">
                     {{ customer.last_touch_date or "N/A" }}
                 </div>
-
             </div>
         </div>
 
@@ -222,7 +205,6 @@
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         Relationship Type
                     </div>
@@ -230,7 +212,6 @@
                     <div class="list-text">
                         {{ customer.relationship_type.replace('_', ' ').title() }}
                     </div>
-
                 </div>
             </div>
 
@@ -241,7 +222,6 @@
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         Opposing Company
                     </div>
@@ -249,7 +229,6 @@
                     <div class="list-text">
                         {{ customer.opposing_company }}
                     </div>
-
                 </div>
             </div>
 
@@ -279,7 +258,6 @@
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         General Notes
                     </div>
@@ -287,14 +265,12 @@
                     <div class="list-text">
                         {{ customer.notes or "No notes yet." }}
                     </div>
-
                 </div>
             </div>
 
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         Quote Notes
                     </div>
@@ -302,14 +278,12 @@
                     <div class="list-text">
                         {{ customer.quote_notes or "No quote notes yet." }}
                     </div>
-
                 </div>
             </div>
 
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         Service Notes
                     </div>
@@ -317,14 +291,12 @@
                     <div class="list-text">
                         {{ customer.service_notes or "No service notes yet." }}
                     </div>
-
                 </div>
             </div>
 
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         Rental Notes
                     </div>
@@ -332,14 +304,12 @@
                     <div class="list-text">
                         {{ customer.rental_notes or "No rental notes yet." }}
                     </div>
-
                 </div>
             </div>
 
 
             <div class="list-item">
                 <div class="list-item-main">
-
                     <div class="list-title">
                         PM Notes
                     </div>
@@ -347,7 +317,6 @@
                     <div class="list-text">
                         {{ customer.pm_notes or "No PM notes yet." }}
                     </div>
-
                 </div>
             </div>
 
@@ -372,14 +341,12 @@
 
 
             <div>
-
                 <a
                     href="{{ url_for('add_contact', customer_id=customer.id) }}"
                     class="btn btn-secondary btn-sm"
                 >
                     + Add Contact
                 </a>
-
             </div>
 
         </div>
@@ -395,9 +362,6 @@
 
                         <div class="list-item-main">
 
-
-                            <!-- CONTACT NAME / ACTIONS -->
-
                             <div
                                 class="list-title-row"
                                 style="
@@ -410,7 +374,6 @@
                             >
 
                                 <div>
-
                                     <div class="list-title">
                                         {{ contact.name }}
                                     </div>
@@ -418,7 +381,6 @@
                                     <div class="list-text">
                                         {{ contact.title or "No Position Listed" }}
                                     </div>
-
                                 </div>
 
 
@@ -612,14 +574,12 @@
                 <p>No contacts saved for this customer.</p>
 
                 <div style="margin-top:12px;">
-
                     <a
                         href="{{ url_for('add_contact', customer_id=customer.id) }}"
                         class="btn btn-primary"
                     >
                         Add First Contact
                     </a>
-
                 </div>
 
             </div>
@@ -627,6 +587,311 @@
         {% endif %}
 
     </div>
+
+</div>
+
+
+<!-- DOCUMENTS -->
+
+<div
+    class="panel-card"
+    id="customer-documents"
+>
+
+    <div class="panel-top">
+
+        <div>
+            <h3>Documents</h3>
+
+            <p>
+                Store quotes, PM agreements, credit applications,
+                spec sheets, and other important customer files.
+            </p>
+        </div>
+
+        <div>
+            <span
+                style="
+                    display:inline-block;
+                    padding:6px 10px;
+                    border-radius:999px;
+                    border:1px solid rgba(255,255,255,.15);
+                    font-size:.82rem;
+                    font-weight:700;
+                "
+            >
+                {{ customer.documents|length }} File{% if customer.documents|length != 1 %}s{% endif %}
+            </span>
+        </div>
+
+    </div>
+
+
+    <!-- UPLOAD FORM -->
+
+    <form
+        method="POST"
+        action="{{ url_for('upload_customer_document', customer_id=customer.id) }}"
+        enctype="multipart/form-data"
+        id="document-upload-form"
+    >
+
+        <div
+            class="form-grid"
+            style="margin-bottom:16px;"
+        >
+
+            <div class="form-row">
+                <label for="document_type">
+                    Document Type
+                </label>
+
+                <select
+                    id="document_type"
+                    name="document_type"
+                >
+                    <option value="Quote">Quote</option>
+                    <option value="PM Agreement">PM Agreement</option>
+                    <option value="Credit Application">Credit Application</option>
+                    <option value="Rental Agreement">Rental Agreement</option>
+                    <option value="Invoice">Invoice</option>
+                    <option value="Spec Sheet">Spec Sheet</option>
+                    <option value="Other" selected>Other</option>
+                </select>
+            </div>
+
+        </div>
+
+
+        <div
+            id="document-drop-zone"
+            style="
+                border:2px dashed rgba(255,255,255,.22);
+                border-radius:14px;
+                padding:32px 20px;
+                text-align:center;
+                cursor:pointer;
+                transition:.2s ease;
+                margin-bottom:16px;
+            "
+        >
+
+            <div
+                style="
+                    font-size:1.05rem;
+                    font-weight:800;
+                    margin-bottom:8px;
+                "
+            >
+                Drag & Drop Document Here
+            </div>
+
+            <div
+                class="list-meta"
+                style="margin-bottom:14px;"
+            >
+                or click this area to choose a file
+            </div>
+
+            <input
+                type="file"
+                id="document"
+                name="document"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png"
+                required
+                style="display:none;"
+            >
+
+            <button
+                type="button"
+                class="btn btn-secondary"
+                id="choose-document-button"
+            >
+                Choose Document
+            </button>
+
+            <div
+                id="selected-document-name"
+                class="list-meta"
+                style="margin-top:14px;"
+            >
+                No file selected
+            </div>
+
+        </div>
+
+
+        <div class="list-meta" style="margin-bottom:16px;">
+            Allowed: PDF, Word, Excel, CSV, JPG and PNG.
+            Maximum file size: 10 MB.
+        </div>
+
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            Upload Document
+        </button>
+
+    </form>
+
+
+    <!-- SAVED DOCUMENTS -->
+
+    {% if customer.documents %}
+
+        <div style="margin-top:28px;">
+
+            <div class="table-wrap">
+
+                <table>
+
+                    <thead>
+                        <tr>
+                            <th>Document</th>
+                            <th>Type</th>
+                            <th>Size</th>
+                            <th>Uploaded By</th>
+                            <th>Uploaded</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+
+                    <tbody>
+
+                        {% for document in customer.documents|sort(attribute='uploaded_at', reverse=true) %}
+
+                            <tr>
+
+                                <td>
+                                    <strong>
+                                        {{ document.original_filename }}
+                                    </strong>
+                                </td>
+
+
+                                <td>
+                                    {{ document.document_type or "Other" }}
+                                </td>
+
+
+                                <td>
+
+                                    {% if document.file_size %}
+
+                                        {% if document.file_size >= 1048576 %}
+
+                                            {{ "%.1f"|format(document.file_size / 1048576) }} MB
+
+                                        {% else %}
+
+                                            {{ "%.0f"|format(document.file_size / 1024) }} KB
+
+                                        {% endif %}
+
+                                    {% else %}
+
+                                        —
+
+                                    {% endif %}
+
+                                </td>
+
+
+                                <td>
+                                    {{ document.uploaded_by or "User" }}
+                                </td>
+
+
+                                <td>
+
+                                    {% if document.uploaded_at %}
+
+                                        {{ document.uploaded_at.strftime("%m/%d/%Y") }}
+
+                                    {% else %}
+
+                                        —
+
+                                    {% endif %}
+
+                                </td>
+
+
+                                <td>
+
+                                    <div
+                                        style="
+                                            display:flex;
+                                            gap:8px;
+                                            flex-wrap:wrap;
+                                        "
+                                    >
+
+                                        <a
+                                            href="{{ url_for(
+                                                'download_customer_document',
+                                                customer_id=customer.id,
+                                                document_id=document.id
+                                            ) }}"
+                                            class="btn btn-secondary btn-sm"
+                                        >
+                                            Download
+                                        </a>
+
+
+                                        {% if is_manager %}
+
+                                            <form
+                                                method="POST"
+                                                action="{{ url_for(
+                                                    'delete_customer_document',
+                                                    customer_id=customer.id,
+                                                    document_id=document.id
+                                                ) }}"
+                                                style="display:inline;"
+                                                onsubmit="return confirm('Are you sure you want to permanently delete this document?');"
+                                            >
+
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-danger btn-sm"
+                                                >
+                                                    Delete
+                                                </button>
+
+                                            </form>
+
+                                        {% endif %}
+
+                                    </div>
+
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    {% else %}
+
+        <div
+            class="empty-state"
+            style="margin-top:24px;"
+        >
+            No documents have been uploaded for this customer yet.
+        </div>
+
+    {% endif %}
 
 </div>
 
@@ -641,13 +906,11 @@
 
         <div class="panel-top">
             <div>
-
                 <h3>Activity History</h3>
 
                 <p>
                     Recent touchpoints and next steps for this customer.
                 </p>
-
             </div>
         </div>
 
@@ -709,13 +972,11 @@
 
         <div class="panel-top">
             <div>
-
                 <h3>Fleet Information</h3>
 
                 <p>
                     Customer equipment and fleet records.
                 </p>
-
             </div>
         </div>
 
@@ -727,18 +988,14 @@
                 <table>
 
                     <thead>
-
                         <tr>
-
                             <th>Make</th>
                             <th>Model</th>
                             <th>Capacity</th>
                             <th>Fuel</th>
                             <th>Qty</th>
                             <th>Notes</th>
-
                         </tr>
-
                     </thead>
 
 
@@ -747,14 +1004,12 @@
                         {% for unit in customer.fleet_info %}
 
                             <tr>
-
                                 <td>{{ unit.make or "—" }}</td>
                                 <td>{{ unit.model or "—" }}</td>
                                 <td>{{ unit.capacity or "—" }}</td>
                                 <td>{{ unit.fuel_type or "—" }}</td>
                                 <td>{{ unit.quantity or "—" }}</td>
                                 <td>{{ unit.notes or "—" }}</td>
-
                             </tr>
 
                         {% endfor %}
@@ -787,13 +1042,11 @@
     <div class="panel-top">
 
         <div>
-
             <h3>Danger Zone</h3>
 
             <p>
                 Delete this customer record permanently.
             </p>
-
         </div>
 
     </div>
@@ -817,5 +1070,76 @@
 </div>
 
 {% endif %}
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const dropZone = document.getElementById("document-drop-zone");
+    const fileInput = document.getElementById("document");
+    const chooseButton = document.getElementById("choose-document-button");
+    const fileNameDisplay = document.getElementById("selected-document-name");
+
+    if (!dropZone || !fileInput || !chooseButton || !fileNameDisplay) {
+        return;
+    }
+
+    function showSelectedFile() {
+        if (fileInput.files && fileInput.files.length > 0) {
+            fileNameDisplay.textContent = fileInput.files[0].name;
+        } else {
+            fileNameDisplay.textContent = "No file selected";
+        }
+    }
+
+    chooseButton.addEventListener("click", function (event) {
+        event.stopPropagation();
+        fileInput.click();
+    });
+
+    dropZone.addEventListener("click", function () {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener("change", function () {
+        showSelectedFile();
+    });
+
+    ["dragenter", "dragover"].forEach(function (eventName) {
+        dropZone.addEventListener(eventName, function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            dropZone.style.borderColor = "#c51721";
+            dropZone.style.background = "rgba(197,23,33,.08)";
+        });
+    });
+
+    ["dragleave", "drop"].forEach(function (eventName) {
+        dropZone.addEventListener(eventName, function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            dropZone.style.borderColor = "rgba(255,255,255,.22)";
+            dropZone.style.background = "";
+        });
+    });
+
+    dropZone.addEventListener("drop", function (event) {
+        const files = event.dataTransfer.files;
+
+        if (!files || files.length === 0) {
+            return;
+        }
+
+        const transfer = new DataTransfer();
+
+        transfer.items.add(files[0]);
+
+        fileInput.files = transfer.files;
+
+        showSelectedFile();
+    });
+});
+</script>
 
 {% endblock %}
