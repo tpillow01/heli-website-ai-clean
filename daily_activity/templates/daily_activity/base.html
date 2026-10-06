@@ -31,12 +31,17 @@
                     </a>
 
                     <a href="{{ url_for('daily_activity.activity') }}"
-                       class="nav-pill {% if request.endpoint in ['daily_activity.activity', 'daily_activity.add_activity', 'daily_activity.add_activity_for_customer'] %}active{% endif %}">
+                        class="nav-pill {% if request.endpoint in ['daily_activity.activity', 'daily_activity.add_activity', 'daily_activity.add_activity_for_customer'] %}active{% endif %}">
                         Activity
                     </a>
 
+                    <a href="{{ url_for('daily_activity.metrics') }}"
+                    class="nav-pill {% if request.endpoint == 'daily_activity.metrics' %}active{% endif %}">
+                        Metrics
+                    </a>
+
                     <a href="{{ url_for('daily_activity.calendar_page') }}"
-                       class="nav-pill {% if request.endpoint == 'daily_activity.calendar_page' %}active{% endif %}">
+                    class="nav-pill {% if request.endpoint == 'daily_activity.calendar_page' %}active{% endif %}">
                         Calendar
                     </a>
 

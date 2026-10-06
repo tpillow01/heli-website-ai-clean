@@ -1,0 +1,232 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Sales Metrics | Daily Activity App{% endblock %}
+{% block page_title %}Sales Metrics{% endblock %}
+{% block page_subtitle %}Track weekly and monthly sales activity by representative{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+    <div class="hero-panel-left">
+        <div class="hero-eyebrow">Activity Metrics</div>
+
+        {% if is_manager %}
+            <h3>Team Sales Activity</h3>
+            <p>
+                Review individual rep activity for the current week and month.
+                Metrics are calculated automatically from logged Daily Activity entries.
+            </p>
+        {% else %}
+            <h3>My Sales Activity</h3>
+            <p>
+                Track your calls, emails, visits, meetings, demos, and overall sales activity.
+            </p>
+        {% endif %}
+    </div>
+
+    <div class="hero-panel-right">
+        <div class="mini-stat-card">
+            <span>Week</span>
+            <strong>
+                {{ week_start.strftime("%m/%d") }}
+                -
+                {{ week_end.strftime("%m/%d") }}
+            </strong>
+        </div>
+
+        <div class="mini-stat-card">
+            <span>Month</span>
+            <strong>{{ month_start.strftime("%B %Y") }}</strong>
+        </div>
+
+        <div class="mini-stat-card">
+            <span>Tracked Reps</span>
+            <strong>{{ visible_reps|length }}</strong>
+        </div>
+
+        <div class="mini-stat-card">
+            <span>Tracking</span>
+            <strong>Automatic</strong>
+        </div>
+    </div>
+</div>
+
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Weekly Activity</h3>
+            <p>
+                {{ week_start.strftime("%B %d, %Y") }}
+                through
+                {{ week_end.strftime("%B %d, %Y") }}
+            </p>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <a
+                href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset - 1,
+                    month_offset=month_offset
+                ) }}"
+                class="btn btn-secondary btn-small"
+            >
+                ← Previous Week
+            </a>
+
+            {% if week_offset != 0 %}
+                <a
+                    href="{{ url_for(
+                        'metrics',
+                        week_offset=0,
+                        month_offset=month_offset
+                    ) }}"
+                    class="btn btn-secondary btn-small"
+                >
+                    Current Week
+                </a>
+            {% endif %}
+
+            <a
+                href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset + 1,
+                    month_offset=month_offset
+                ) }}"
+                class="btn btn-secondary btn-small"
+            >
+                Next Week →
+            </a>
+        </div>
+    </div>
+
+    {% if visible_reps %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rep</th>
+                        <th>Cold Calls</th>
+                        <th>Phone Calls</th>
+                        <th>Emails</th>
+                        <th>Site Visits</th>
+                        <th>Meetings</th>
+                        <th>Demos</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for rep in visible_reps %}
+                        {% set metrics = rep_metrics[rep]["weekly"] %}
+
+                        <tr>
+                            <td><strong>{{ rep }}</strong></td>
+                            <td>{{ metrics["Cold Call"] }}</td>
+                            <td>{{ metrics["Phone Call"] }}</td>
+                            <td>{{ metrics["Email"] }}</td>
+                            <td>{{ metrics["Site Visit"] }}</td>
+                            <td>{{ metrics["Meeting"] }}</td>
+                            <td>{{ metrics["Demo"] }}</td>
+                            <td><strong>{{ metrics["Total"] }}</strong></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            This account is not currently included in sales activity tracking.
+        </div>
+    {% endif %}
+</div>
+
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Monthly Activity</h3>
+            <p>{{ month_start.strftime("%B %Y") }}</p>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <a
+                href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset,
+                    month_offset=month_offset - 1
+                ) }}"
+                class="btn btn-secondary btn-small"
+            >
+                ← Previous Month
+            </a>
+
+            {% if month_offset != 0 %}
+                <a
+                    href="{{ url_for(
+                        'metrics',
+                        week_offset=week_offset,
+                        month_offset=0
+                    ) }}"
+                    class="btn btn-secondary btn-small"
+                >
+                    Current Month
+                </a>
+            {% endif %}
+
+            <a
+                href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset,
+                    month_offset=month_offset + 1
+                ) }}"
+                class="btn btn-secondary btn-small"
+            >
+                Next Month →
+            </a>
+        </div>
+    </div>
+
+    {% if visible_reps %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rep</th>
+                        <th>Cold Calls</th>
+                        <th>Phone Calls</th>
+                        <th>Emails</th>
+                        <th>Site Visits</th>
+                        <th>Meetings</th>
+                        <th>Demos</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for rep in visible_reps %}
+                        {% set metrics = rep_metrics[rep]["monthly"] %}
+
+                        <tr>
+                            <td><strong>{{ rep }}</strong></td>
+                            <td>{{ metrics["Cold Call"] }}</td>
+                            <td>{{ metrics["Phone Call"] }}</td>
+                            <td>{{ metrics["Email"] }}</td>
+                            <td>{{ metrics["Site Visit"] }}</td>
+                            <td>{{ metrics["Meeting"] }}</td>
+                            <td>{{ metrics["Demo"] }}</td>
+                            <td><strong>{{ metrics["Total"] }}</strong></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            No tracked sales representative is associated with this account.
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}

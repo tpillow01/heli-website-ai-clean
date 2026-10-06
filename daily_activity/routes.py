@@ -50,6 +50,7 @@ DA_ENDPOINTS = {
     "map_page",
     "planner",
     "calendar_page",
+    "metrics",
 }
 
 
@@ -71,6 +72,18 @@ def da_url(endpoint, **kwargs):
 
 def current_user_id():
     return session.get("user_id")
+
+
+TRACKED_REPS = {
+    2: "Robin",
+    10: "Tylere",
+    14: "Cory",
+    19: "Reese",
+}
+
+
+def current_rep_name():
+    return TRACKED_REPS.get(current_user_id(), "")
 
 
 def current_user_role():
@@ -111,8 +124,10 @@ def scoped_fleet_query():
 
 def get_customer_or_403(customer_id):
     customer = Customer.query.get_or_404(customer_id)
+
     if not user_is_manager() and customer.user_id != current_user_id():
         abort(403)
+
     return customer
 
 
@@ -1433,31 +1448,54 @@ def add_activity():
 
     if request.method == "POST":
         customer_id = request.form.get("customer_id", "").strip()
+
         activity_type = request.form.get(
             "activity_type",
             "",
         ).strip()
-        summary = request.form.get("summary", "").strip()
+
+        summary = request.form.get(
+            "summary",
+            "",
+        ).strip()
+
         activity_date = request.form.get(
             "activity_date",
             "",
         ).strip()
-        next_step = request.form.get("next_step", "").strip()
+
+        next_step = request.form.get(
+            "next_step",
+            "",
+        ).strip()
+
         follow_up_date = request.form.get(
             "follow_up_date",
             "",
         ).strip()
+
         follow_up_action = request.form.get(
             "follow_up_action",
             "complete",
         ).strip().lower()
+
         customer_outcome = request.form.get(
             "customer_outcome",
             "",
         ).strip().lower()
-        rep_name = request.form.get("rep_name", "").strip()
 
-        if follow_up_action not in {"complete", "keep"}:
+        rep_name = current_rep_name()
+
+        if not rep_name:
+            rep_name = request.form.get(
+                "rep_name",
+                "",
+            ).strip()
+
+        if follow_up_action not in {
+            "complete",
+            "keep",
+        }:
             follow_up_action = "complete"
 
         if customer_outcome not in {
@@ -1471,9 +1509,14 @@ def add_activity():
                 "Customer, activity type, and summary are required.",
                 "error",
             )
-            return redirect(da_url("add_activity"))
 
-        customer = get_customer_or_403(int(customer_id))
+            return redirect(
+                da_url("add_activity")
+            )
+
+        customer = get_customer_or_403(
+            int(customer_id)
+        )
 
         log = ActivityLog(
             user_id=current_user_id(),
@@ -1509,15 +1552,17 @@ def add_activity():
             "success",
         )
 
-        return redirect(da_url("planner"))
+        return redirect(
+            da_url("planner")
+        )
 
     return render_template(
         "daily_activity/add_activity.html",
         customers=customers,
         selected_customer_id=None,
+        current_rep_name=current_rep_name(),
         is_manager=user_is_manager(),
     )
-
 
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/add-activity",
@@ -1525,6 +1570,7 @@ def add_activity():
 )
 def add_activity_for_customer(customer_id):
     customer = get_customer_or_403(customer_id)
+
     customers = (
         scoped_customer_query()
         .order_by(Customer.company_name.asc())
@@ -1536,27 +1582,49 @@ def add_activity_for_customer(customer_id):
             "activity_type",
             "",
         ).strip()
-        summary = request.form.get("summary", "").strip()
+
+        summary = request.form.get(
+            "summary",
+            "",
+        ).strip()
+
         activity_date = request.form.get(
             "activity_date",
             "",
         ).strip()
-        next_step = request.form.get("next_step", "").strip()
+
+        next_step = request.form.get(
+            "next_step",
+            "",
+        ).strip()
+
         follow_up_date = request.form.get(
             "follow_up_date",
             "",
         ).strip()
+
         follow_up_action = request.form.get(
             "follow_up_action",
             "complete",
         ).strip().lower()
+
         customer_outcome = request.form.get(
             "customer_outcome",
             "",
         ).strip().lower()
-        rep_name = request.form.get("rep_name", "").strip()
 
-        if follow_up_action not in {"complete", "keep"}:
+        rep_name = current_rep_name()
+
+        if not rep_name:
+            rep_name = request.form.get(
+                "rep_name",
+                "",
+            ).strip()
+
+        if follow_up_action not in {
+            "complete",
+            "keep",
+        }:
             follow_up_action = "complete"
 
         if customer_outcome not in {
@@ -1570,6 +1638,7 @@ def add_activity_for_customer(customer_id):
                 "Activity type and summary are required.",
                 "error",
             )
+
             return redirect(
                 da_url(
                     "add_activity_for_customer",
@@ -1622,9 +1691,9 @@ def add_activity_for_customer(customer_id):
         "daily_activity/add_activity.html",
         customers=customers,
         selected_customer_id=customer.id,
+        current_rep_name=current_rep_name(),
         is_manager=user_is_manager(),
     )
-
 
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/add-contact",
@@ -1928,5 +1997,146 @@ def calendar_page():
     return render_template(
         "daily_activity/calendar.html",
         followup_groups=followup_groups,
+        is_manager=user_is_manager(),
+    )
+
+@daily_activity_bp.route("/metrics")
+def metrics():
+    today = date.today()
+
+    week_offset_raw = request.args.get("week_offset", "0")
+
+    try:
+        week_offset = int(week_offset_raw)
+    except ValueError:
+        week_offset = 0
+
+    current_monday = today - timedelta(days=today.weekday())
+
+    week_start = current_monday + timedelta(weeks=week_offset)
+    week_end = week_start + timedelta(days=6)
+
+    month_offset_raw = request.args.get("month_offset", "0")
+
+    try:
+        month_offset = int(month_offset_raw)
+    except ValueError:
+        month_offset = 0
+
+    month_index = today.year * 12 + today.month - 1 + month_offset
+
+    month_year = month_index // 12
+    month_number = month_index % 12 + 1
+
+    month_start = date(
+        month_year,
+        month_number,
+        1,
+    )
+
+    if month_number == 12:
+        next_month = date(
+            month_year + 1,
+            1,
+            1,
+        )
+    else:
+        next_month = date(
+            month_year,
+            month_number + 1,
+            1,
+        )
+
+    month_end = next_month - timedelta(days=1)
+
+    categories = [
+        "Cold Call",
+        "Phone Call",
+        "Email",
+        "Site Visit",
+        "Meeting",
+        "Demo",
+    ]
+
+    def blank_metrics():
+        metrics = {
+            category: 0
+            for category in categories
+        }
+
+        metrics["Total"] = 0
+
+        return metrics
+
+    rep_metrics = {}
+
+    for user_id, rep_name in TRACKED_REPS.items():
+        weekly = blank_metrics()
+        monthly = blank_metrics()
+
+        logs = (
+            ActivityLog.query
+            .filter(ActivityLog.user_id == user_id)
+            .all()
+        )
+
+        for log in logs:
+            activity_day = parse_date_safe(
+                log.activity_date
+            )
+
+            if not activity_day:
+                continue
+
+            activity_type = (
+                log.activity_type or ""
+            ).strip()
+
+            if activity_type == "Call":
+                activity_type = "Phone Call"
+
+            if week_start <= activity_day <= week_end:
+                weekly["Total"] += 1
+
+                if activity_type in categories:
+                    weekly[activity_type] += 1
+
+            if month_start <= activity_day <= month_end:
+                monthly["Total"] += 1
+
+                if activity_type in categories:
+                    monthly[activity_type] += 1
+
+        rep_metrics[rep_name] = {
+            "weekly": weekly,
+            "monthly": monthly,
+        }
+
+    logged_in_rep = current_rep_name()
+
+    if user_is_manager():
+        visible_reps = list(
+            TRACKED_REPS.values()
+        )
+
+    elif logged_in_rep:
+        visible_reps = [
+            logged_in_rep
+        ]
+
+    else:
+        visible_reps = []
+
+    return render_template(
+        "daily_activity/metrics.html",
+        categories=categories,
+        rep_metrics=rep_metrics,
+        visible_reps=visible_reps,
+        week_start=week_start,
+        week_end=week_end,
+        week_offset=week_offset,
+        month_start=month_start,
+        month_end=month_end,
+        month_offset=month_offset,
         is_manager=user_is_manager(),
     )
