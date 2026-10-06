@@ -2053,9 +2053,9 @@ def metrics():
         "Cold Call",
         "Phone Call",
         "Email",
-        "Site Visit",
         "Meeting",
-        "Demo",
+        "Quote",
+        "Sale",
     ]
 
     def blank_metrics():

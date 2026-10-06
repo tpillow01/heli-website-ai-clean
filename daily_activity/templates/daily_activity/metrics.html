@@ -19,7 +19,8 @@
         {% else %}
             <h3>My Sales Activity</h3>
             <p>
-                Track your calls, emails, visits, meetings, demos, and overall sales activity.
+                Track your cold calls, phone calls, emails, meetings,
+                quotes, sales, and overall activity.
             </p>
         {% endif %}
     </div>
@@ -36,12 +37,16 @@
 
         <div class="mini-stat-card">
             <span>Month</span>
-            <strong>{{ month_start.strftime("%B %Y") }}</strong>
+            <strong>
+                {{ month_start.strftime("%B %Y") }}
+            </strong>
         </div>
 
         <div class="mini-stat-card">
             <span>Tracked Reps</span>
-            <strong>{{ visible_reps|length }}</strong>
+            <strong>
+                {{ visible_reps|length }}
+            </strong>
         </div>
 
         <div class="mini-stat-card">
@@ -56,6 +61,7 @@
     <div class="panel-top">
         <div>
             <h3>Weekly Activity</h3>
+
             <p>
                 {{ week_start.strftime("%B %d, %Y") }}
                 through
@@ -110,9 +116,9 @@
                         <th>Cold Calls</th>
                         <th>Phone Calls</th>
                         <th>Emails</th>
-                        <th>Site Visits</th>
                         <th>Meetings</th>
-                        <th>Demos</th>
+                        <th>Quotes</th>
+                        <th>Sales</th>
                         <th>Total</th>
                     </tr>
                 </thead>
@@ -122,14 +128,39 @@
                         {% set metrics = rep_metrics[rep]["weekly"] %}
 
                         <tr>
-                            <td><strong>{{ rep }}</strong></td>
-                            <td>{{ metrics["Cold Call"] }}</td>
-                            <td>{{ metrics["Phone Call"] }}</td>
-                            <td>{{ metrics["Email"] }}</td>
-                            <td>{{ metrics["Site Visit"] }}</td>
-                            <td>{{ metrics["Meeting"] }}</td>
-                            <td>{{ metrics["Demo"] }}</td>
-                            <td><strong>{{ metrics["Total"] }}</strong></td>
+                            <td>
+                                <strong>{{ rep }}</strong>
+                            </td>
+
+                            <td>
+                                {{ metrics["Cold Call"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Phone Call"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Email"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Meeting"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Quote"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Sale"] }}
+                            </td>
+
+                            <td>
+                                <strong>
+                                    {{ metrics["Total"] }}
+                                </strong>
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -147,7 +178,10 @@
     <div class="panel-top">
         <div>
             <h3>Monthly Activity</h3>
-            <p>{{ month_start.strftime("%B %Y") }}</p>
+
+            <p>
+                {{ month_start.strftime("%B %Y") }}
+            </p>
         </div>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -197,9 +231,9 @@
                         <th>Cold Calls</th>
                         <th>Phone Calls</th>
                         <th>Emails</th>
-                        <th>Site Visits</th>
                         <th>Meetings</th>
-                        <th>Demos</th>
+                        <th>Quotes</th>
+                        <th>Sales</th>
                         <th>Total</th>
                     </tr>
                 </thead>
@@ -209,14 +243,39 @@
                         {% set metrics = rep_metrics[rep]["monthly"] %}
 
                         <tr>
-                            <td><strong>{{ rep }}</strong></td>
-                            <td>{{ metrics["Cold Call"] }}</td>
-                            <td>{{ metrics["Phone Call"] }}</td>
-                            <td>{{ metrics["Email"] }}</td>
-                            <td>{{ metrics["Site Visit"] }}</td>
-                            <td>{{ metrics["Meeting"] }}</td>
-                            <td>{{ metrics["Demo"] }}</td>
-                            <td><strong>{{ metrics["Total"] }}</strong></td>
+                            <td>
+                                <strong>{{ rep }}</strong>
+                            </td>
+
+                            <td>
+                                {{ metrics["Cold Call"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Phone Call"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Email"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Meeting"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Quote"] }}
+                            </td>
+
+                            <td>
+                                {{ metrics["Sale"] }}
+                            </td>
+
+                            <td>
+                                <strong>
+                                    {{ metrics["Total"] }}
+                                </strong>
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
