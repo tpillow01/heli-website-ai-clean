@@ -2,81 +2,390 @@
 
 {% block title %}Add Contact | Daily Activity App{% endblock %}
 {% block page_title %}Add Contact{% endblock %}
-{% block page_subtitle %}Add a customer contact so reps have the right person, title, phone, and email on hand{% endblock %}
+{% block page_subtitle %}Add contact information, position, status, phone numbers, and email for this customer{% endblock %}
 
 {% block content %}
 
 <div class="hero-panel">
     <div class="hero-panel-left">
         <div class="hero-eyebrow">Customer Contact</div>
+
         <h3>Add a contact for {{ customer.company_name }}</h3>
+
         <p>
-            Save the main person connected to this account so reps can quickly reach the right
-            decision maker, operator, office contact, or service contact.
+            Save the people connected to this account so reps can quickly identify
+            decision makers, operations contacts, maintenance contacts, purchasing
+            contacts, and other important people.
         </p>
 
         <div class="hero-actions">
-            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Back to Customer</a>
-            <a href="{{ url_for('customers') }}" class="btn btn-secondary">Back to Customers</a>
+            <a
+                href="{{ url_for('customer_detail', customer_id=customer.id) }}"
+                class="btn btn-secondary"
+            >
+                Back to Customer
+            </a>
+
+            <a
+                href="{{ url_for('customers') }}"
+                class="btn btn-secondary"
+            >
+                Back to Customers
+            </a>
         </div>
     </div>
 
     <div class="hero-panel-right">
+
         <div class="mini-stat-card">
             <span>Account</span>
             <strong>{{ customer.company_name }}</strong>
         </div>
+
         <div class="mini-stat-card">
-            <span>Contact Type</span>
-            <strong>Primary</strong>
+            <span>Purpose</span>
+            <strong>Relationship</strong>
         </div>
+
         <div class="mini-stat-card">
             <span>Used For</span>
             <strong>Follow-Up</strong>
         </div>
+
         <div class="mini-stat-card">
             <span>Used For</span>
             <strong>Planning</strong>
         </div>
+
     </div>
 </div>
 
+
 <div class="panel-card form-shell">
+
     <div class="panel-top">
         <div>
             <h3>Contact Information</h3>
-            <p>Enter the basic contact details for this customer.</p>
+            <p>
+                Enter the contact's information below. You can add multiple phone
+                numbers if necessary.
+            </p>
         </div>
     </div>
 
+
     <form method="POST" class="main-form" autocomplete="on">
+
         <div class="form-grid">
+
+            <!-- NAME -->
             <div class="form-row">
                 <label for="name">Name</label>
-                <input type="text" id="name" name="name" required autocomplete="name" autofocus>
+
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    required
+                    autocomplete="name"
+                    autofocus
+                >
             </div>
 
+
+            <!-- TITLE -->
             <div class="form-row">
-                <label for="title">Title</label>
-                <input type="text" id="title" name="title" autocomplete="organization-title">
+                <label for="title">Position / Title</label>
+
+                <input
+                    type="text"
+                    id="title"
+                    name="title"
+                    list="contact-title-options"
+                    autocomplete="organization-title"
+                    placeholder="Select or type a position"
+                >
+
+                <datalist id="contact-title-options">
+                    <option value="Owner">
+                    <option value="President">
+                    <option value="Vice President">
+                    <option value="General Manager">
+                    <option value="Plant Manager">
+                    <option value="Operations Manager">
+                    <option value="Maintenance Manager">
+                    <option value="Facilities Manager">
+                    <option value="Warehouse Manager">
+                    <option value="Supply Chain Manager">
+                    <option value="Purchasing Manager">
+                    <option value="Procurement Manager">
+                    <option value="Fleet Manager">
+                    <option value="Production Manager">
+                    <option value="Engineering Manager">
+                    <option value="Safety Manager">
+                    <option value="Office Manager">
+                    <option value="Maintenance Supervisor">
+                    <option value="Warehouse Supervisor">
+                    <option value="Production Supervisor">
+                    <option value="Purchasing">
+                    <option value="Maintenance">
+                    <option value="Operations">
+                    <option value="Service Manager">
+                    <option value="Branch Manager">
+                    <option value="Other">
+                </datalist>
             </div>
 
+
+            <!-- STATUS -->
             <div class="form-row">
-                <label for="phone">Phone</label>
-                <input type="tel" id="phone" name="phone" inputmode="tel" autocomplete="tel">
+                <label for="contact_status">Contact Status</label>
+
+                <select
+                    id="contact_status"
+                    name="contact_status"
+                >
+                    <option value="Active - Still in Position" selected>
+                        Active - Still in Position
+                    </option>
+
+                    <option value="Changed Position">
+                        Changed Position
+                    </option>
+
+                    <option value="Left Company">
+                        Left Company
+                    </option>
+
+                    <option value="Unknown">
+                        Unknown
+                    </option>
+
+                    <option value="Do Not Contact">
+                        Do Not Contact
+                    </option>
+                </select>
             </div>
 
+
+            <!-- EMAIL -->
             <div class="form-row">
                 <label for="email">Email</label>
-                <input type="email" id="email" name="email" autocomplete="email">
+
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    autocomplete="email"
+                >
             </div>
+
         </div>
 
-        <div class="hero-actions" style="margin-top: 8px;">
-            <button type="submit" class="btn btn-primary">Save Contact</button>
-            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Cancel</a>
+
+        <!-- PHONE NUMBERS -->
+        <div
+            style="
+                margin-top: 26px;
+                padding-top: 22px;
+                border-top: 1px solid rgba(255,255,255,0.08);
+            "
+        >
+
+            <div class="panel-top">
+                <div>
+                    <h3>Phone Numbers</h3>
+                    <p>
+                        Add the primary number and any additional numbers for this contact.
+                    </p>
+                </div>
+            </div>
+
+
+            <!-- PRIMARY PHONE -->
+            <div class="form-grid">
+
+                <div class="form-row">
+
+                    <label for="phone_type">
+                        Primary Phone Type
+                    </label>
+
+                    <select
+                        id="phone_type"
+                        name="phone_type"
+                    >
+                        <option value="Mobile">Mobile</option>
+                        <option value="Direct">Direct</option>
+                        <option value="Office">Office</option>
+                        <option value="Work">Work</option>
+                        <option value="Personal">Personal</option>
+                        <option value="Other">Other</option>
+                    </select>
+
+                </div>
+
+
+                <div class="form-row">
+
+                    <label for="phone">
+                        Primary Phone
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="phone"
+                        name="phone"
+                        inputmode="tel"
+                        autocomplete="tel"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <!-- ADDITIONAL PHONE NUMBERS -->
+            <div id="additionalPhones"></div>
+
+
+            <div style="margin-top: 14px;">
+
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    onclick="addPhoneNumber()"
+                >
+                    + Add Another Phone Number
+                </button>
+
+            </div>
+
         </div>
+
+
+        <!-- ACTIONS -->
+        <div
+            class="hero-actions"
+            style="margin-top: 28px;"
+        >
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                Save Contact
+            </button>
+
+            <a
+                href="{{ url_for('customer_detail', customer_id=customer.id) }}"
+                class="btn btn-secondary"
+            >
+                Cancel
+            </a>
+
+        </div>
+
     </form>
+
 </div>
+
+
+<script>
+
+let phoneIndex = 0;
+
+function addPhoneNumber() {
+
+    phoneIndex++;
+
+    const container =
+        document.getElementById("additionalPhones");
+
+    const row =
+        document.createElement("div");
+
+    row.className = "form-grid";
+
+    row.style.marginTop = "14px";
+
+    row.innerHTML = `
+
+        <div class="form-row">
+
+            <label>
+                Phone Type
+            </label>
+
+            <select name="additional_phone_type[]">
+
+                <option value="Mobile">
+                    Mobile
+                </option>
+
+                <option value="Direct">
+                    Direct
+                </option>
+
+                <option value="Office">
+                    Office
+                </option>
+
+                <option value="Work">
+                    Work
+                </option>
+
+                <option value="Personal">
+                    Personal
+                </option>
+
+                <option value="Other">
+                    Other
+                </option>
+
+            </select>
+
+        </div>
+
+
+        <div class="form-row">
+
+            <label>
+                Phone Number
+            </label>
+
+            <div
+                style="
+                    display:flex;
+                    gap:10px;
+                    align-items:center;
+                "
+            >
+
+                <input
+                    type="tel"
+                    name="additional_phone[]"
+                    inputmode="tel"
+                    style="flex:1;"
+                >
+
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    onclick="this.closest('.form-grid').remove()"
+                >
+                    Remove
+                </button>
+
+            </div>
+
+        </div>
+
+    `;
+
+    container.appendChild(row);
+}
+
+</script>
 
 {% endblock %}

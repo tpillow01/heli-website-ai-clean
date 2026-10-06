@@ -17,7 +17,14 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 from . import daily_activity_bp
-from .models import db, Customer, Contact, ActivityLog, FleetInfo
+from .models import (
+    db,
+    Customer,
+    Contact,
+    ContactPhone,
+    ActivityLog,
+    FleetInfo,
+)
 
 geolocator = Nominatim(user_agent="daily_activity_app")
 
@@ -33,6 +40,9 @@ DA_ENDPOINTS = {
     "add_activity_for_customer",
     "add_contact",
     "edit_contact",
+    "delete_contact",
+    "flag_needs_contacts",
+    "clear_needs_contacts",
     "add_fleet",
     "complete_followup",
     "snooze_followup",
@@ -806,13 +816,27 @@ def dashboard():
         .limit(5)
         .all()
     )
+
     recent_customers = (
         scoped_customer_query()
         .order_by(Customer.created_at.desc())
         .limit(5)
         .all()
     )
+
     dashboard_reminders = build_dashboard_reminders()
+
+    # Manager-only list of customers that reps have flagged
+    # because they need additional / updated contacts.
+    needs_contacts_customers = []
+
+    if user_is_manager():
+        needs_contacts_customers = (
+            Customer.query
+            .filter(Customer.needs_contacts.is_(True))
+            .order_by(Customer.needs_contacts_flagged_at.desc())
+            .all()
+        )
 
     return render_template(
         "daily_activity/dashboard.html",
@@ -823,9 +847,9 @@ def dashboard():
         recent_activity=recent_activity,
         recent_customers=recent_customers,
         dashboard_reminders=dashboard_reminders,
+        needs_contacts_customers=needs_contacts_customers,
         is_manager=user_is_manager(),
     )
-
 
 @daily_activity_bp.route("/customers")
 def customers():
@@ -1171,8 +1195,19 @@ def edit_contact(customer_id, contact_id):
         contact_phone = request.form.get("phone", "").strip()
         contact_email = request.form.get("email", "").strip()
 
+        phone_type = request.form.get(
+            "phone_type",
+            "Mobile",
+        ).strip()
+
+        contact_status = request.form.get(
+            "contact_status",
+            "Active - Still in Position",
+        ).strip()
+
         if not contact_name:
             flash("Contact name is required.", "error")
+
             return redirect(
                 da_url(
                     "edit_contact",
@@ -1184,10 +1219,49 @@ def edit_contact(customer_id, contact_id):
         contact.name = contact_name
         contact.title = contact_title
         contact.phone = format_phone_number(contact_phone)
+        contact.phone_type = phone_type
         contact.email = contact_email
+        contact.contact_status = contact_status
+
+        # Rebuild the additional phone list from the form.
+        ContactPhone.query.filter_by(
+            contact_id=contact.id
+        ).delete()
+
+        additional_numbers = request.form.getlist(
+            "additional_phone[]"
+        )
+
+        additional_types = request.form.getlist(
+            "additional_phone_type[]"
+        )
+
+        for index, number in enumerate(additional_numbers):
+            number = number.strip()
+
+            if not number:
+                continue
+
+            phone_type_value = "Other"
+
+            if index < len(additional_types):
+                phone_type_value = (
+                    additional_types[index].strip()
+                    or "Other"
+                )
+
+            phone_record = ContactPhone(
+                contact_id=contact.id,
+                phone_type=phone_type_value,
+                phone_number=format_phone_number(number),
+            )
+
+            db.session.add(phone_record)
 
         db.session.commit()
+
         flash("Contact updated successfully.", "success")
+
         return redirect(
             da_url(
                 "customer_detail",
@@ -1196,12 +1270,100 @@ def edit_contact(customer_id, contact_id):
         )
 
     return render_template(
-        "daily_activity/edit_contact.html",
+        "daily_activity/edit_contacts.html",
         customer=customer,
         contact=contact,
         is_manager=user_is_manager(),
     )
 
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/contact/"
+    "<int:contact_id>/delete",
+    methods=["POST"],
+)
+def delete_contact(customer_id, contact_id):
+    customer = get_customer_or_403(customer_id)
+
+    if not user_is_manager():
+        abort(403)
+
+    contact = Contact.query.filter_by(
+        id=contact_id,
+        customer_id=customer.id,
+    ).first_or_404()
+
+    ContactPhone.query.filter_by(
+        contact_id=contact.id
+    ).delete()
+
+    db.session.delete(contact)
+    db.session.commit()
+
+    flash(
+        f"{contact.name} was deleted successfully.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "customer_detail",
+            customer_id=customer.id,
+        )
+    )
+
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/flag-needs-contacts",
+    methods=["POST"],
+)
+def flag_needs_contacts(customer_id):
+    customer = get_customer_or_403(customer_id)
+
+    customer.needs_contacts = True
+    customer.needs_contacts_flagged_by = current_user_id()
+    customer.needs_contacts_flagged_at = datetime.utcnow()
+
+    db.session.commit()
+
+    flash(
+        "This customer has been flagged as needing contacts.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "customer_detail",
+            customer_id=customer.id,
+        )
+    )
+
+
+@daily_activity_bp.route(
+    "/customer/<int:customer_id>/clear-needs-contacts",
+    methods=["POST"],
+)
+def clear_needs_contacts(customer_id):
+    customer = get_customer_or_403(customer_id)
+
+    if not user_is_manager():
+        abort(403)
+
+    customer.needs_contacts = False
+    customer.needs_contacts_flagged_by = None
+    customer.needs_contacts_flagged_at = None
+
+    db.session.commit()
+
+    flash(
+        "Needs Contacts flag cleared.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "customer_detail",
+            customer_id=customer.id,
+        )
+    )
 
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/delete",
@@ -1213,9 +1375,29 @@ def delete_customer(customer_id):
     if not user_is_manager():
         abort(403)
 
-    Contact.query.filter_by(customer_id=customer.id).delete()
-    ActivityLog.query.filter_by(customer_id=customer.id).delete()
-    FleetInfo.query.filter_by(customer_id=customer.id).delete()
+    contact_ids = [
+        contact.id
+        for contact in Contact.query.filter_by(
+            customer_id=customer.id
+        ).all()
+    ]
+
+    if contact_ids:
+        ContactPhone.query.filter(
+            ContactPhone.contact_id.in_(contact_ids)
+        ).delete(synchronize_session=False)
+
+    Contact.query.filter_by(
+        customer_id=customer.id
+    ).delete()
+
+    ActivityLog.query.filter_by(
+        customer_id=customer.id
+    ).delete()
+
+    FleetInfo.query.filter_by(
+        customer_id=customer.id
+    ).delete()
 
     db.session.delete(customer)
     db.session.commit()

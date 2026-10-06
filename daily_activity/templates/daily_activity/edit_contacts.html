@@ -2,95 +2,562 @@
 
 {% block title %}Edit Contact | Daily Activity App{% endblock %}
 {% block page_title %}Edit Contact{% endblock %}
-{% block page_subtitle %}Update contact details for this customer{% endblock %}
+{% block page_subtitle %}Update contact information, position, status, phone numbers, and email{% endblock %}
 
 {% block content %}
 
 <div class="hero-panel">
     <div class="hero-panel-left">
         <div class="hero-eyebrow">Contact Management</div>
-        <h3>Edit Contact for {{ customer.company_name }}</h3>
+
+        <h3>Edit {{ contact.name }} for {{ customer.company_name }}</h3>
+
         <p>
-            Update the contact's name, title, phone number, and email address.
+            Keep this contact's information current so your team knows who they are,
+            what role they hold, whether they are still with the company, and the
+            best ways to reach them.
         </p>
 
         <div class="hero-actions">
-            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Back to Customer</a>
+            <a
+                href="{{ url_for('customer_detail', customer_id=customer.id) }}"
+                class="btn btn-secondary"
+            >
+                Back to Customer
+            </a>
         </div>
     </div>
 
+
     <div class="hero-panel-right">
+
         <div class="mini-stat-card">
             <span>Customer</span>
             <strong>{{ customer.company_name }}</strong>
         </div>
+
         <div class="mini-stat-card">
             <span>Contact</span>
             <strong>{{ contact.name or "N/A" }}</strong>
         </div>
+
+        <div class="mini-stat-card">
+            <span>Position</span>
+            <strong>{{ contact.title or "N/A" }}</strong>
+        </div>
+
+        <div class="mini-stat-card">
+            <span>Status</span>
+            <strong>{{ contact.contact_status or "Active - Still in Position" }}</strong>
+        </div>
+
     </div>
 </div>
 
-<div class="panel-card">
+
+<div class="panel-card form-shell">
+
     <div class="panel-top">
         <div>
             <h3>Edit Contact Information</h3>
-            <p>Make changes below and save when finished.</p>
+            <p>
+                Make changes below and save when finished.
+            </p>
         </div>
     </div>
 
-    <form method="POST" class="modern-form-grid">
-        <div class="form-group">
-            <label for="name">Contact Name</label>
-            <input
-                type="text"
-                id="name"
-                name="name"
-                class="form-control"
-                value="{{ contact.name or '' }}"
-                required
-            >
+
+    <form method="POST" class="main-form" autocomplete="on">
+
+        <div class="form-grid">
+
+            <!-- NAME -->
+            <div class="form-row">
+
+                <label for="name">
+                    Contact Name
+                </label>
+
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    value="{{ contact.name or '' }}"
+                    required
+                    autocomplete="name"
+                >
+
+            </div>
+
+
+            <!-- POSITION -->
+            <div class="form-row">
+
+                <label for="title">
+                    Position / Title
+                </label>
+
+                <input
+                    type="text"
+                    id="title"
+                    name="title"
+                    list="contact-title-options"
+                    value="{{ contact.title or '' }}"
+                    autocomplete="organization-title"
+                    placeholder="Select or type a position"
+                >
+
+                <datalist id="contact-title-options">
+
+                    <option value="Owner">
+                    <option value="President">
+                    <option value="Vice President">
+                    <option value="General Manager">
+
+                    <option value="Plant Manager">
+                    <option value="Operations Manager">
+                    <option value="Maintenance Manager">
+                    <option value="Facilities Manager">
+
+                    <option value="Warehouse Manager">
+                    <option value="Supply Chain Manager">
+                    <option value="Purchasing Manager">
+                    <option value="Procurement Manager">
+
+                    <option value="Fleet Manager">
+                    <option value="Production Manager">
+                    <option value="Engineering Manager">
+                    <option value="Safety Manager">
+
+                    <option value="Office Manager">
+                    <option value="Service Manager">
+                    <option value="Branch Manager">
+
+                    <option value="Maintenance Supervisor">
+                    <option value="Warehouse Supervisor">
+                    <option value="Production Supervisor">
+
+                    <option value="Purchasing">
+                    <option value="Maintenance">
+                    <option value="Operations">
+
+                    <option value="Other">
+
+                </datalist>
+
+            </div>
+
+
+            <!-- CONTACT STATUS -->
+            <div class="form-row">
+
+                <label for="contact_status">
+                    Contact Status
+                </label>
+
+                <select
+                    id="contact_status"
+                    name="contact_status"
+                >
+
+                    <option
+                        value="Active - Still in Position"
+                        {% if not contact.contact_status or contact.contact_status == "Active - Still in Position" %}selected{% endif %}
+                    >
+                        Active - Still in Position
+                    </option>
+
+                    <option
+                        value="Changed Position"
+                        {% if contact.contact_status == "Changed Position" %}selected{% endif %}
+                    >
+                        Changed Position
+                    </option>
+
+                    <option
+                        value="Left Company"
+                        {% if contact.contact_status == "Left Company" %}selected{% endif %}
+                    >
+                        Left Company
+                    </option>
+
+                    <option
+                        value="Unknown"
+                        {% if contact.contact_status == "Unknown" %}selected{% endif %}
+                    >
+                        Unknown
+                    </option>
+
+                    <option
+                        value="Do Not Contact"
+                        {% if contact.contact_status == "Do Not Contact" %}selected{% endif %}
+                    >
+                        Do Not Contact
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <!-- EMAIL -->
+            <div class="form-row">
+
+                <label for="email">
+                    Email
+                </label>
+
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    value="{{ contact.email or '' }}"
+                    autocomplete="email"
+                >
+
+            </div>
+
         </div>
 
-        <div class="form-group">
-            <label for="title">Title</label>
-            <input
-                type="text"
-                id="title"
-                name="title"
-                class="form-control"
-                value="{{ contact.title or '' }}"
-            >
+
+        <!-- PHONE SECTION -->
+
+        <div
+            style="
+                margin-top:26px;
+                padding-top:22px;
+                border-top:1px solid rgba(255,255,255,0.08);
+            "
+        >
+
+            <div class="panel-top">
+
+                <div>
+
+                    <h3>Phone Numbers</h3>
+
+                    <p>
+                        Update the primary number or add additional phone numbers
+                        for this contact.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <!-- PRIMARY PHONE -->
+
+            <div class="form-grid">
+
+                <div class="form-row">
+
+                    <label for="phone_type">
+                        Primary Phone Type
+                    </label>
+
+                    <select
+                        id="phone_type"
+                        name="phone_type"
+                    >
+
+                        <option value="Mobile">
+                            Mobile
+                        </option>
+
+                        <option value="Direct">
+                            Direct
+                        </option>
+
+                        <option value="Office">
+                            Office
+                        </option>
+
+                        <option value="Work">
+                            Work
+                        </option>
+
+                        <option value="Personal">
+                            Personal
+                        </option>
+
+                        <option value="Other">
+                            Other
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-row">
+
+                    <label for="phone">
+                        Primary Phone
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="phone"
+                        name="phone"
+                        value="{{ contact.phone or '' }}"
+                        inputmode="tel"
+                        autocomplete="tel"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <!-- EXISTING ADDITIONAL NUMBERS -->
+
+            <div id="additionalPhones">
+
+                {% if contact.phone_numbers %}
+
+                    {% for phone in contact.phone_numbers %}
+
+                        <div
+                            class="form-grid additional-phone-row"
+                            style="margin-top:14px;"
+                        >
+
+                            <div class="form-row">
+
+                                <label>
+                                    Phone Type
+                                </label>
+
+                                <select name="additional_phone_type[]">
+
+                                    <option
+                                        value="Mobile"
+                                        {% if phone.phone_type == "Mobile" %}selected{% endif %}
+                                    >
+                                        Mobile
+                                    </option>
+
+                                    <option
+                                        value="Direct"
+                                        {% if phone.phone_type == "Direct" %}selected{% endif %}
+                                    >
+                                        Direct
+                                    </option>
+
+                                    <option
+                                        value="Office"
+                                        {% if phone.phone_type == "Office" %}selected{% endif %}
+                                    >
+                                        Office
+                                    </option>
+
+                                    <option
+                                        value="Work"
+                                        {% if phone.phone_type == "Work" %}selected{% endif %}
+                                    >
+                                        Work
+                                    </option>
+
+                                    <option
+                                        value="Personal"
+                                        {% if phone.phone_type == "Personal" %}selected{% endif %}
+                                    >
+                                        Personal
+                                    </option>
+
+                                    <option
+                                        value="Other"
+                                        {% if phone.phone_type == "Other" %}selected{% endif %}
+                                    >
+                                        Other
+                                    </option>
+
+                                </select>
+
+                            </div>
+
+
+                            <div class="form-row">
+
+                                <label>
+                                    Phone Number
+                                </label>
+
+                                <div
+                                    style="
+                                        display:flex;
+                                        gap:10px;
+                                        align-items:center;
+                                    "
+                                >
+
+                                    <input
+                                        type="tel"
+                                        name="additional_phone[]"
+                                        value="{{ phone.phone_number or '' }}"
+                                        inputmode="tel"
+                                        style="flex:1;"
+                                    >
+
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary btn-sm"
+                                        onclick="this.closest('.additional-phone-row').remove()"
+                                    >
+                                        Remove
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    {% endfor %}
+
+                {% endif %}
+
+            </div>
+
+
+            <div style="margin-top:14px;">
+
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    onclick="addPhoneNumber()"
+                >
+                    + Add Another Phone Number
+                </button>
+
+            </div>
+
         </div>
 
-        <div class="form-group">
-            <label for="phone">Phone</label>
-            <input
-                type="text"
-                id="phone"
-                name="phone"
-                class="form-control"
-                value="{{ contact.phone or '' }}"
-                placeholder="(317) 671-0697"
+
+        <!-- SAVE / CANCEL -->
+
+        <div
+            class="hero-actions"
+            style="margin-top:28px;"
+        >
+
+            <button
+                type="submit"
+                class="btn btn-primary"
             >
+                Save Contact Changes
+            </button>
+
+
+            <a
+                href="{{ url_for('customer_detail', customer_id=customer.id) }}"
+                class="btn btn-secondary"
+            >
+                Cancel
+            </a>
+
         </div>
 
-        <div class="form-group">
-            <label for="email">Email</label>
-            <input
-                type="email"
-                id="email"
-                name="email"
-                class="form-control"
-                value="{{ contact.email or '' }}"
-            >
-        </div>
-
-        <div class="form-actions-full">
-            <button type="submit" class="btn btn-primary">Save Contact Changes</button>
-            <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Cancel</a>
-        </div>
     </form>
+
 </div>
+
+
+<script>
+
+function addPhoneNumber() {
+
+    const container =
+        document.getElementById("additionalPhones");
+
+    const row =
+        document.createElement("div");
+
+    row.className =
+        "form-grid additional-phone-row";
+
+    row.style.marginTop =
+        "14px";
+
+    row.innerHTML = `
+
+        <div class="form-row">
+
+            <label>
+                Phone Type
+            </label>
+
+            <select name="additional_phone_type[]">
+
+                <option value="Mobile">
+                    Mobile
+                </option>
+
+                <option value="Direct">
+                    Direct
+                </option>
+
+                <option value="Office">
+                    Office
+                </option>
+
+                <option value="Work">
+                    Work
+                </option>
+
+                <option value="Personal">
+                    Personal
+                </option>
+
+                <option value="Other">
+                    Other
+                </option>
+
+            </select>
+
+        </div>
+
+
+        <div class="form-row">
+
+            <label>
+                Phone Number
+            </label>
+
+            <div
+                style="
+                    display:flex;
+                    gap:10px;
+                    align-items:center;
+                "
+            >
+
+                <input
+                    type="tel"
+                    name="additional_phone[]"
+                    inputmode="tel"
+                    style="flex:1;"
+                >
+
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    onclick="this.closest('.additional-phone-row').remove()"
+                >
+                    Remove
+                </button>
+
+            </div>
+
+        </div>
+
+    `;
+
+    container.appendChild(row);
+}
+
+</script>
 
 {% endblock %}
