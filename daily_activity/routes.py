@@ -4,6 +4,7 @@ import uuid
 
 from datetime import datetime, date, timedelta
 from collections import defaultdict
+from openai import OpenAI
 
 from flask import (
     render_template,
@@ -30,6 +31,8 @@ from .models import (
     CustomerDocument,
     ActivityLog,
     FleetInfo,
+    SalesLead,
+    LeadSalesProcess,
 )
 
 
@@ -64,6 +67,9 @@ def allowed_document_file(filename):
     )
 
 
+openai_client = OpenAI()
+
+
 DA_ENDPOINTS = {
     "dashboard",
     "customers",
@@ -90,6 +96,13 @@ DA_ENDPOINTS = {
     "planner",
     "calendar_page",
     "metrics",
+    "leads",
+    "add_lead",
+    "lead_detail",
+    "edit_lead",
+    "update_lead_process",
+    "convert_lead_to_customer",
+    "lead_ai_coach",
 }
 
 
@@ -190,6 +203,27 @@ def get_customer_or_403(customer_id):
 
     return customer
 
+def scoped_lead_query():
+    query = SalesLead.query
+
+    if not user_is_manager():
+        query = query.filter(
+            SalesLead.assigned_user_id == current_user_id()
+        )
+
+    return query
+
+
+def get_lead_or_403(lead_id):
+    lead = SalesLead.query.get_or_404(lead_id)
+
+    if (
+        not user_is_manager()
+        and lead.assigned_user_id != current_user_id()
+    ):
+        abort(403)
+
+    return lead
 
 # ----------------------------
 # Address / geocoding helpers
@@ -1115,6 +1149,830 @@ def add_customer():
         is_manager=user_is_manager(),
     )
 
+@daily_activity_bp.route("/leads")
+def leads():
+    rep_filter = request.args.get("rep", "").strip()
+    stage_filter = request.args.get("stage", "").strip()
+    status_filter = request.args.get("status", "").strip()
+    source_filter = request.args.get("source", "").strip()
+    county_filter = request.args.get("county", "").strip()
+
+    query = scoped_lead_query()
+
+    if user_is_manager() and rep_filter:
+        try:
+            rep_user_id = int(rep_filter)
+            query = query.filter(
+                SalesLead.assigned_user_id == rep_user_id
+            )
+        except ValueError:
+            pass
+
+    if stage_filter:
+        query = query.filter(
+            SalesLead.current_stage == stage_filter
+        )
+
+    if status_filter:
+        query = query.filter(
+            SalesLead.status == status_filter
+        )
+
+    if source_filter:
+        query = query.filter(
+            SalesLead.lead_source == source_filter
+        )
+
+    if county_filter:
+        query = query.filter(
+            SalesLead.county == county_filter
+        )
+
+    all_leads = (
+        query
+        .order_by(
+            SalesLead.updated_at.desc(),
+            SalesLead.company_name.asc(),
+        )
+        .all()
+    )
+
+    lead_sources = [
+        row[0]
+        for row in (
+            db.session.query(SalesLead.lead_source)
+            .filter(SalesLead.lead_source.isnot(None))
+            .filter(SalesLead.lead_source != "")
+            .distinct()
+            .order_by(SalesLead.lead_source.asc())
+            .all()
+        )
+    ]
+
+    counties = [
+        row[0]
+        for row in (
+            db.session.query(SalesLead.county)
+            .filter(SalesLead.county.isnot(None))
+            .filter(SalesLead.county != "")
+            .distinct()
+            .order_by(SalesLead.county.asc())
+            .all()
+        )
+    ]
+
+    stages = [
+        "Homework",
+        "Rapport",
+        "Pain Point",
+        "Buying Process",
+        "Solve Pain Points",
+        "Proposal",
+        "Close",
+        "Lost",
+    ]
+
+    statuses = [
+        "Active",
+        "On Hold",
+        "Won",
+        "Lost",
+    ]
+
+    return render_template(
+        "daily_activity/leads.html",
+        leads=all_leads,
+        tracked_reps=TRACKED_REPS,
+        stages=stages,
+        statuses=statuses,
+        lead_sources=lead_sources,
+        counties=counties,
+        selected_rep=rep_filter,
+        selected_stage=stage_filter,
+        selected_status=status_filter,
+        selected_source=source_filter,
+        selected_county=county_filter,
+        is_manager=user_is_manager(),
+    )
+
+
+@daily_activity_bp.route(
+    "/leads/add",
+    methods=["GET", "POST"],
+)
+def add_lead():
+    if not user_is_manager():
+        abort(403)
+
+    if request.method == "POST":
+        company_name = request.form.get(
+            "company_name",
+            "",
+        ).strip()
+
+        assigned_user_raw = request.form.get(
+            "assigned_user_id",
+            "",
+        ).strip()
+
+        if not company_name:
+            flash(
+                "Company name is required.",
+                "error",
+            )
+            return redirect(
+                da_url("add_lead")
+            )
+
+        try:
+            assigned_user_id = int(assigned_user_raw)
+        except ValueError:
+            assigned_user_id = 0
+
+        assigned_rep = TRACKED_REPS.get(
+            assigned_user_id
+        )
+
+        if not assigned_rep:
+            flash(
+                "Please assign the lead to a valid sales rep.",
+                "error",
+            )
+            return redirect(
+                da_url("add_lead")
+            )
+
+        existing_lead = (
+            SalesLead.query
+            .filter(
+                db.func.lower(
+                    SalesLead.company_name
+                ) == company_name.lower()
+            )
+            .first()
+        )
+
+        existing_customer = (
+            Customer.query
+            .filter(
+                db.func.lower(
+                    Customer.company_name
+                ) == company_name.lower()
+            )
+            .first()
+        )
+
+        if existing_lead:
+            flash(
+                f"Possible duplicate: {company_name} "
+                "already exists in Leads.",
+                "error",
+            )
+            return redirect(
+                da_url(
+                    "lead_detail",
+                    lead_id=existing_lead.id,
+                )
+            )
+
+        if existing_customer:
+            flash(
+                f"Possible duplicate: {company_name} "
+                "already exists as a customer.",
+                "error",
+            )
+            return redirect(
+                da_url("add_lead")
+            )
+
+        lead = SalesLead(
+            assigned_user_id=assigned_user_id,
+            assigned_rep=assigned_rep,
+            lead_source=request.form.get(
+                "lead_source",
+                "",
+            ).strip(),
+            company_name=company_name,
+            address=request.form.get(
+                "address",
+                "",
+            ).strip(),
+            city=request.form.get(
+                "city",
+                "",
+            ).strip(),
+            county=request.form.get(
+                "county",
+                "",
+            ).strip(),
+            status=request.form.get(
+                "status",
+                "Active",
+            ).strip() or "Active",
+            current_stage=request.form.get(
+                "current_stage",
+                "Homework",
+            ).strip() or "Homework",
+            general_notes=request.form.get(
+                "general_notes",
+                "",
+            ).strip(),
+            next_action=request.form.get(
+                "next_action",
+                "",
+            ).strip(),
+            next_action_date=request.form.get(
+                "next_action_date",
+                "",
+            ).strip(),
+            created_by_user_id=current_user_id(),
+        )
+
+        db.session.add(lead)
+        db.session.flush()
+
+        process = LeadSalesProcess(
+            lead_id=lead.id
+        )
+
+        db.session.add(process)
+        db.session.commit()
+
+        flash(
+            f"{company_name} added and assigned to "
+            f"{assigned_rep}.",
+            "success",
+        )
+
+        return redirect(
+            da_url(
+                "lead_detail",
+                lead_id=lead.id,
+            )
+        )
+
+    return render_template(
+        "daily_activity/add_lead.html",
+        tracked_reps=TRACKED_REPS,
+        is_manager=True,
+    )
+
+
+@daily_activity_bp.route(
+    "/leads/<int:lead_id>"
+)
+def lead_detail(lead_id):
+    lead = get_lead_or_403(lead_id)
+
+    if not lead.sales_process:
+        lead.sales_process = LeadSalesProcess(
+            lead_id=lead.id
+        )
+        db.session.commit()
+
+    return render_template(
+        "daily_activity/lead_detail.html",
+        lead=lead,
+        tracked_reps=TRACKED_REPS,
+        is_manager=user_is_manager(),
+    )
+
+
+@daily_activity_bp.route(
+    "/leads/<int:lead_id>/edit",
+    methods=["GET", "POST"],
+)
+def edit_lead(lead_id):
+    lead = get_lead_or_403(lead_id)
+
+    if request.method == "POST":
+        if user_is_manager():
+            assigned_user_raw = request.form.get(
+                "assigned_user_id",
+                str(lead.assigned_user_id),
+            ).strip()
+
+            try:
+                assigned_user_id = int(
+                    assigned_user_raw
+                )
+            except ValueError:
+                assigned_user_id = (
+                    lead.assigned_user_id
+                )
+
+            assigned_rep = TRACKED_REPS.get(
+                assigned_user_id
+            )
+
+            if assigned_rep:
+                lead.assigned_user_id = (
+                    assigned_user_id
+                )
+                lead.assigned_rep = assigned_rep
+
+        lead.lead_source = request.form.get(
+            "lead_source",
+            "",
+        ).strip()
+
+        lead.company_name = request.form.get(
+            "company_name",
+            "",
+        ).strip()
+
+        lead.address = request.form.get(
+            "address",
+            "",
+        ).strip()
+
+        lead.city = request.form.get(
+            "city",
+            "",
+        ).strip()
+
+        lead.county = request.form.get(
+            "county",
+            "",
+        ).strip()
+
+        lead.status = request.form.get(
+            "status",
+            "Active",
+        ).strip() or "Active"
+
+        lead.current_stage = request.form.get(
+            "current_stage",
+            "Homework",
+        ).strip() or "Homework"
+
+        lead.general_notes = request.form.get(
+            "general_notes",
+            "",
+        ).strip()
+
+        lead.next_action = request.form.get(
+            "next_action",
+            "",
+        ).strip()
+
+        lead.next_action_date = request.form.get(
+            "next_action_date",
+            "",
+        ).strip()
+
+        db.session.commit()
+
+        flash(
+            "Lead updated successfully.",
+            "success",
+        )
+
+        return redirect(
+            da_url(
+                "lead_detail",
+                lead_id=lead.id,
+            )
+        )
+
+    return render_template(
+        "daily_activity/edit_lead.html",
+        lead=lead,
+        tracked_reps=TRACKED_REPS,
+        is_manager=user_is_manager(),
+    )
+
+
+@daily_activity_bp.route(
+    "/leads/<int:lead_id>/process",
+    methods=["POST"],
+)
+def update_lead_process(lead_id):
+    lead = get_lead_or_403(lead_id)
+
+    process = lead.sales_process
+
+    if not process:
+        process = LeadSalesProcess(
+            lead_id=lead.id
+        )
+        db.session.add(process)
+
+    process.homework = request.form.get(
+        "homework",
+        "",
+    ).strip()
+
+    process.rapport = request.form.get(
+        "rapport",
+        "",
+    ).strip()
+
+    process.pain_point = request.form.get(
+        "pain_point",
+        "",
+    ).strip()
+
+    process.buying_process = request.form.get(
+        "buying_process",
+        "",
+    ).strip()
+
+    process.solve_pain_points = request.form.get(
+        "solve_pain_points",
+        "",
+    ).strip()
+
+    process.proposal = request.form.get(
+        "proposal",
+        "",
+    ).strip()
+
+    process.close_plan = request.form.get(
+        "close_plan",
+        "",
+    ).strip()
+
+    process.lost_reason = request.form.get(
+        "lost_reason",
+        "",
+    ).strip()
+
+    new_stage = request.form.get(
+        "current_stage",
+        lead.current_stage,
+    ).strip()
+
+    valid_stages = {
+        "Homework",
+        "Rapport",
+        "Pain Point",
+        "Buying Process",
+        "Solve Pain Points",
+        "Proposal",
+        "Close",
+        "Lost",
+    }
+
+    if new_stage in valid_stages:
+        lead.current_stage = new_stage
+
+    lead.next_action = request.form.get(
+        "next_action",
+        lead.next_action or "",
+    ).strip()
+
+    lead.next_action_date = request.form.get(
+        "next_action_date",
+        lead.next_action_date or "",
+    ).strip()
+
+    now = datetime.utcnow()
+
+    completion_fields = {
+        "Homework": "homework_completed_at",
+        "Rapport": "rapport_completed_at",
+        "Pain Point": "pain_point_completed_at",
+        "Buying Process": "buying_process_completed_at",
+        "Solve Pain Points": "solve_pain_points_completed_at",
+        "Proposal": "proposal_completed_at",
+        "Close": "close_completed_at",
+    }
+
+    completed_stage = request.form.get(
+        "completed_stage",
+        "",
+    ).strip()
+
+    completion_field = completion_fields.get(
+        completed_stage
+    )
+
+    if completion_field:
+        setattr(
+            process,
+            completion_field,
+            now,
+        )
+
+    db.session.commit()
+
+    flash(
+        "Sales process updated successfully.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "lead_detail",
+            lead_id=lead.id,
+        )
+    )
+
+@daily_activity_bp.route(
+    "/leads/<int:lead_id>/convert-to-customer",
+    methods=["POST"],
+)
+def convert_lead_to_customer(lead_id):
+    if not user_is_manager():
+        abort(403)
+
+    lead = SalesLead.query.get_or_404(lead_id)
+
+    # Prevent the same lead from being converted twice.
+    if lead.converted_customer_id:
+        existing_customer = Customer.query.get(
+            lead.converted_customer_id
+        )
+
+        if existing_customer:
+            flash(
+                "This lead has already been converted to a customer.",
+                "error",
+            )
+
+            return redirect(
+                da_url(
+                    "customer_detail",
+                    customer_id=existing_customer.id,
+                )
+            )
+
+    # Check whether a customer with the same company name already exists.
+    existing_customer = (
+        Customer.query
+        .filter(
+            db.func.lower(
+                Customer.company_name
+            ) == lead.company_name.lower()
+        )
+        .first()
+    )
+
+    if existing_customer:
+        lead.converted_customer_id = existing_customer.id
+
+        db.session.commit()
+
+        flash(
+            "A customer with this company name already exists. "
+            "The lead has been linked to that customer.",
+            "success",
+        )
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=existing_customer.id,
+            )
+        )
+
+    process = lead.sales_process
+
+    sales_process_notes = []
+
+    if process:
+        if process.homework:
+            sales_process_notes.append(
+                f"Homework:\n{process.homework}"
+            )
+
+        if process.rapport:
+            sales_process_notes.append(
+                f"Rapport:\n{process.rapport}"
+            )
+
+        if process.pain_point:
+            sales_process_notes.append(
+                f"Pain Point:\n{process.pain_point}"
+            )
+
+        if process.buying_process:
+            sales_process_notes.append(
+                f"Buying Process:\n{process.buying_process}"
+            )
+
+        if process.solve_pain_points:
+            sales_process_notes.append(
+                "How We Solve Pain Points:\n"
+                f"{process.solve_pain_points}"
+            )
+
+        if process.proposal:
+            sales_process_notes.append(
+                f"Proposal:\n{process.proposal}"
+            )
+
+        if process.close_plan:
+            sales_process_notes.append(
+                f"Close Plan:\n{process.close_plan}"
+            )
+
+        if process.lost_reason:
+            sales_process_notes.append(
+                f"Lost Reason:\n{process.lost_reason}"
+            )
+
+    notes_parts = []
+
+    if lead.lead_source:
+        notes_parts.append(
+            f"Lead Source: {lead.lead_source}"
+        )
+
+    if lead.general_notes:
+        notes_parts.append(
+            f"Lead Notes:\n{lead.general_notes}"
+        )
+
+    if sales_process_notes:
+        notes_parts.append(
+            "Sales Process:\n\n"
+            + "\n\n".join(sales_process_notes)
+        )
+
+    combined_notes = "\n\n".join(notes_parts)
+
+    customer = Customer(
+        user_id=lead.assigned_user_id,
+        company_name=lead.company_name,
+        address=lead.address,
+        city=lead.city,
+        county=lead.county,
+        assigned_rep=lead.assigned_rep,
+        status="Customer",
+        priority_level="Medium",
+        relationship_type="customer",
+        notes=combined_notes,
+    )
+
+    db.session.add(customer)
+    db.session.flush()
+
+    lead.converted_customer_id = customer.id
+    lead.status = "Won"
+
+    db.session.commit()
+
+    flash(
+        f"{lead.company_name} was converted to a customer.",
+        "success",
+    )
+
+    return redirect(
+        da_url(
+            "customer_detail",
+            customer_id=customer.id,
+        )
+    )
+
+
+@daily_activity_bp.route(
+    "/leads/<int:lead_id>/ai-coach",
+    methods=["POST"],
+)
+def lead_ai_coach(lead_id):
+    lead = get_lead_or_403(lead_id)
+    process = lead.sales_process
+
+    if not process:
+        process = LeadSalesProcess(
+            lead_id=lead.id
+        )
+        db.session.add(process)
+        db.session.commit()
+
+    lead_context = f"""
+Company: {lead.company_name}
+Lead Source: {lead.lead_source or "Not provided"}
+City: {lead.city or "Not provided"}
+County: {lead.county or "Not provided"}
+Assigned Rep: {lead.assigned_rep}
+Current Stage: {lead.current_stage}
+Status: {lead.status}
+
+General Lead Notes:
+{lead.general_notes or "None"}
+
+Current Next Action:
+{lead.next_action or "None"}
+
+Next Action Date:
+{lead.next_action_date or "None"}
+
+SALES PROCESS
+
+Homework:
+{process.homework or "Not completed"}
+
+Rapport:
+{process.rapport or "Not completed"}
+
+Pain Point:
+{process.pain_point or "Not completed"}
+
+Buying Process:
+{process.buying_process or "Not completed"}
+
+How We Solve Pain Points:
+{process.solve_pain_points or "Not completed"}
+
+Proposal:
+{process.proposal or "Not completed"}
+
+Close Plan:
+{process.close_plan or "Not completed"}
+
+Lost Reason:
+{process.lost_reason or "Not applicable"}
+"""
+
+    instructions = """
+You are a sales coach for a material handling equipment sales team.
+
+The company sells forklifts, warehouse equipment, service, parts,
+preventive maintenance, financing, and related material handling solutions.
+
+The team's sales process is:
+
+1. Homework
+2. Rapport
+3. Pain Point
+4. Buying Process
+5. How We Solve Pain Points
+6. Proposal
+7. Close
+8. If lost, why did we lose?
+
+Analyze only the lead information provided.
+
+Your job is not to write generic motivational sales advice.
+
+Help the sales representative determine:
+- what they already know
+- what important information is still missing
+- whether they are truly ready to move to the next sales stage
+- what specific questions they should ask the customer
+- what specific action they should take next
+
+Be practical and concise.
+
+Return the response using these headings:
+
+CURRENT POSITION
+Briefly explain where the opportunity currently stands.
+
+WHAT WE KNOW
+Summarize the strongest useful information already collected.
+
+WHAT IS MISSING
+Identify the most important unanswered questions or gaps.
+
+QUESTIONS TO ASK
+Give 3 to 6 specific questions the rep should ask.
+
+RECOMMENDED NEXT ACTION
+Give one clear next action.
+
+READY FOR NEXT STAGE?
+Answer Yes, No, or Almost, then briefly explain why.
+
+Do not invent facts about the customer.
+"""
+
+    try:
+        response = openai_client.responses.create(
+            model="gpt-4.1-mini",
+            instructions=instructions,
+            input=lead_context,
+        )
+
+        ai_advice = response.output_text
+
+    except Exception as exc:
+        print(
+            f"Lead AI Coach error for lead {lead.id}: {exc}"
+        )
+
+        flash(
+            "The AI Sales Coach could not generate a recommendation right now.",
+            "error",
+        )
+
+        return redirect(
+            da_url(
+                "lead_detail",
+                lead_id=lead.id,
+            )
+        )
+
+    return render_template(
+        "daily_activity/lead_detail.html",
+        lead=lead,
+        tracked_reps=TRACKED_REPS,
+        is_manager=user_is_manager(),
+        ai_advice=ai_advice,
+    )
 
 @daily_activity_bp.route("/customer/<int:customer_id>")
 def customer_detail(customer_id):

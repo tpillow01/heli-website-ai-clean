@@ -404,3 +404,213 @@ class FleetInfo(db.Model):
         db.DateTime,
         default=datetime.utcnow
     )
+
+class SalesLead(db.Model):
+    __tablename__ = "sales_leads"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    # User ID of the sales rep who owns this lead.
+    assigned_user_id = db.Column(
+        db.Integer,
+        nullable=False
+    )
+
+    assigned_rep = db.Column(
+        db.String(100),
+        nullable=False
+    )
+
+    lead_source = db.Column(
+        db.String(100),
+        nullable=True
+    )
+
+    company_name = db.Column(
+        db.String(200),
+        nullable=False
+    )
+
+    address = db.Column(
+        db.String(200),
+        nullable=True
+    )
+
+    city = db.Column(
+        db.String(100),
+        nullable=True
+    )
+
+    county = db.Column(
+        db.String(100),
+        nullable=True
+    )
+
+    status = db.Column(
+        db.String(50),
+        nullable=False,
+        default="Active"
+    )
+
+    current_stage = db.Column(
+        db.String(100),
+        nullable=False,
+        default="Homework"
+    )
+
+    general_notes = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    next_action = db.Column(
+        db.String(255),
+        nullable=True
+    )
+
+    next_action_date = db.Column(
+        db.String(50),
+        nullable=True
+    )
+
+    # Used later if the lead is converted into a customer.
+    converted_customer_id = db.Column(
+        db.Integer,
+        nullable=True
+    )
+
+    created_by_user_id = db.Column(
+        db.Integer,
+        nullable=True
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+
+    sales_process = db.relationship(
+        "LeadSalesProcess",
+        backref="lead",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+
+class LeadSalesProcess(db.Model):
+    __tablename__ = "lead_sales_process"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    lead_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sales_leads.id"),
+        nullable=False,
+        unique=True
+    )
+
+    # 1. Homework
+    homework = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    homework_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 2. Rapport
+    rapport = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    rapport_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 3. Pain Point
+    pain_point = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    pain_point_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 4. What is the buying process?
+    buying_process = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    buying_process_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 5. How do we solve the pain points?
+    solve_pain_points = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    solve_pain_points_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 6. What is our proposal?
+    proposal = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    proposal_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 7. How do we close?
+    close_plan = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    close_completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # 8. If lost, why did we lose?
+    lost_reason = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )  

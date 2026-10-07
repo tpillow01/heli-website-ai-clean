@@ -1,0 +1,431 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Add Lead | Daily Activity App{% endblock %}
+{% block page_title %}Add Sales Lead{% endblock %}
+{% block page_subtitle %}
+Create a new lead and assign it to the correct sales representative
+{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+
+    <div class="hero-panel-left">
+
+        <div class="hero-eyebrow">
+            Lead Management
+        </div>
+
+        <h3>Add New Lead</h3>
+
+        <p>
+            Enter the lead information, assign ownership,
+            and define the first action needed to begin working the opportunity.
+        </p>
+
+    </div>
+
+</div>
+
+
+<div class="panel-card">
+
+    <div class="panel-top">
+
+        <div>
+            <h3>Lead Information</h3>
+
+            <p>
+                Company, location, source, ownership, and initial next steps.
+            </p>
+        </div>
+
+    </div>
+
+
+    <form
+        method="POST"
+        action="{{ url_for('add_lead') }}"
+    >
+
+        <div
+            style="
+                display:grid;
+                grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+                gap:18px;
+            "
+        >
+
+            <div class="form-row">
+
+                <label for="company_name">
+                    Company Name *
+                </label>
+
+                <input
+                    type="text"
+                    id="company_name"
+                    name="company_name"
+                    required
+                    placeholder="Company name"
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="lead_source">
+                    Lead Source
+                </label>
+
+                <select
+                    id="lead_source"
+                    name="lead_source"
+                >
+                    <option value="">Select Source</option>
+                    <option value="SalesLeadinc">SalesLeadinc</option>
+                    <option value="EDA">EDA</option>
+                    <option value="Tynan Web">Tynan Web</option>
+                    <option value="Referral">Referral</option>
+                    <option value="Cold Call">Cold Call</option>
+                    <option value="Existing Relationship">Existing Relationship</option>
+                    <option value="Other">Other</option>
+                </select>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="assigned_user_id">
+                    Assigned Sales Rep *
+                </label>
+
+                <select
+                    id="assigned_user_id"
+                    name="assigned_user_id"
+                    required
+                >
+
+                    <option value="">
+                        Select Rep
+                    </option>
+
+                    {% for user_id, rep_name in tracked_reps.items() %}
+
+                        <option value="{{ user_id }}">
+                            {{ rep_name }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="status">
+                    Lead Status
+                </label>
+
+                <select
+                    id="status"
+                    name="status"
+                >
+                    <option value="Active" selected>Active</option>
+                    <option value="On Hold">On Hold</option>
+                    <option value="Won">Won</option>
+                    <option value="Lost">Lost</option>
+                </select>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="current_stage">
+                    Starting Sales Stage
+                </label>
+
+                <select
+                    id="current_stage"
+                    name="current_stage"
+                >
+                    <option value="Homework" selected>Homework</option>
+                    <option value="Rapport">Rapport</option>
+                    <option value="Pain Point">Pain Point</option>
+                    <option value="Buying Process">Buying Process</option>
+                    <option value="Solve Pain Points">Solve Pain Points</option>
+                    <option value="Proposal">Proposal</option>
+                    <option value="Close">Close</option>
+                    <option value="Lost">Lost</option>
+                </select>
+
+            </div>
+
+        </div>
+
+
+        <div
+            style="
+                margin-top:26px;
+                display:grid;
+                grid-template-columns:2fr 1fr 1fr;
+                gap:18px;
+            "
+        >
+
+            <div class="form-row">
+
+                <label for="address">
+                    Address
+                </label>
+
+                <input
+                    type="text"
+                    id="address"
+                    name="address"
+                    placeholder="Street address"
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="city">
+                    City
+                </label>
+
+                <input
+                    type="text"
+                    id="city"
+                    name="city"
+                    placeholder="City"
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="county">
+                    County
+                </label>
+
+                <input
+                    type="text"
+                    id="county"
+                    name="county"
+                    placeholder="County"
+                >
+
+            </div>
+
+        </div>
+
+
+        <div
+            style="
+                margin-top:26px;
+                display:grid;
+                grid-template-columns:2fr 1fr;
+                gap:18px;
+            "
+        >
+
+            <div class="form-row">
+
+                <label for="next_action">
+                    Next Action
+                </label>
+
+                <input
+                    type="text"
+                    id="next_action"
+                    name="next_action"
+                    placeholder="Example: Find operations manager and schedule introduction"
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="next_action_date">
+                    Next Action Date
+                </label>
+
+                <input
+                    type="date"
+                    id="next_action_date"
+                    name="next_action_date"
+                >
+
+            </div>
+
+        </div>
+
+
+        <div
+            class="form-row"
+            style="margin-top:26px;"
+        >
+
+            <label for="general_notes">
+                Initial Lead Notes
+            </label>
+
+            <textarea
+                id="general_notes"
+                name="general_notes"
+                rows="6"
+                placeholder="Add any initial lead information, project details, contacts, expansion information, or background here."
+            ></textarea>
+
+        </div>
+
+
+        <div
+            style="
+                margin-top:26px;
+                display:flex;
+                gap:10px;
+                flex-wrap:wrap;
+            "
+        >
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                Add Lead
+            </button>
+
+
+            <a
+                href="{{ url_for('leads') }}"
+                class="btn btn-secondary"
+            >
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<div class="panel-card">
+
+    <div class="panel-top">
+        <div>
+            <h3>Sales Process</h3>
+
+            <p>
+                New leads begin in Homework unless a later stage
+                is selected above.
+            </p>
+        </div>
+    </div>
+
+
+    <div class="item-list">
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">1. Homework</div>
+                <div class="list-text">
+                    Research the company, facility, contacts, fleet,
+                    expansion project, and any information that will help
+                    prepare for the first meaningful conversation.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">2. Rapport</div>
+                <div class="list-text">
+                    Establish credibility and begin building a relationship
+                    with the right people.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">3. Pain Point</div>
+                <div class="list-text">
+                    Understand the operational issues, frustrations,
+                    downtime, cost, or problems the customer wants solved.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">4. Buying Process</div>
+                <div class="list-text">
+                    Identify decision makers, approval requirements,
+                    budget timing, purchasing steps, and expected timeline.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">5. Solve Pain Points</div>
+                <div class="list-text">
+                    Determine exactly how Tynan and HELI can address
+                    the customer's identified needs.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">6. Proposal</div>
+                <div class="list-text">
+                    Build and present the right equipment, service,
+                    financial, and support solution.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">7. Close</div>
+                <div class="list-text">
+                    Identify what remains before the customer can commit
+                    and create a clear path to the final decision.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="list-item">
+            <div class="list-item-main">
+                <div class="list-title">8. Lost</div>
+                <div class="list-text">
+                    If the opportunity is lost, document exactly why
+                    so the team can learn from the outcome.
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

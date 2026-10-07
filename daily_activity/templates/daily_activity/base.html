@@ -30,18 +30,23 @@
                         Customers
                     </a>
 
+                    <a href="{{ url_for('daily_activity.leads') }}"
+                       class="nav-pill {% if request.endpoint in ['daily_activity.leads', 'daily_activity.add_lead', 'daily_activity.lead_detail', 'daily_activity.edit_lead'] %}active{% endif %}">
+                        Leads
+                    </a>
+
                     <a href="{{ url_for('daily_activity.activity') }}"
-                        class="nav-pill {% if request.endpoint in ['daily_activity.activity', 'daily_activity.add_activity', 'daily_activity.add_activity_for_customer'] %}active{% endif %}">
+                       class="nav-pill {% if request.endpoint in ['daily_activity.activity', 'daily_activity.add_activity', 'daily_activity.add_activity_for_customer'] %}active{% endif %}">
                         Activity
                     </a>
 
                     <a href="{{ url_for('daily_activity.metrics') }}"
-                    class="nav-pill {% if request.endpoint == 'daily_activity.metrics' %}active{% endif %}">
+                       class="nav-pill {% if request.endpoint == 'daily_activity.metrics' %}active{% endif %}">
                         Metrics
                     </a>
 
                     <a href="{{ url_for('daily_activity.calendar_page') }}"
-                    class="nav-pill {% if request.endpoint == 'daily_activity.calendar_page' %}active{% endif %}">
+                       class="nav-pill {% if request.endpoint == 'daily_activity.calendar_page' %}active{% endif %}">
                         Calendar
                     </a>
 
@@ -69,7 +74,7 @@
                     <h2 class="page-title">{% block page_title %}Daily Activity App{% endblock %}</h2>
                     <p class="page-subtitle">
                         {% block page_subtitle %}
-                        Customer planning, activity tracking, and map visibility
+                        Customer planning, lead management, activity tracking, and map visibility
                         {% endblock %}
                     </p>
                 </div>

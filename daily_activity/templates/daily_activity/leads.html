@@ -1,0 +1,563 @@
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Leads | Daily Activity App{% endblock %}
+{% block page_title %}Sales Leads{% endblock %}
+{% block page_subtitle %}
+Track assigned leads, sales-process progress, next actions, and opportunities
+{% endblock %}
+
+{% block content %}
+
+<div class="hero-panel">
+
+    <div class="hero-panel-left">
+
+        <div class="hero-eyebrow">
+            Sales Pipeline
+        </div>
+
+        <h3>
+            {% if is_manager %}
+                Team Leads
+            {% else %}
+                My Leads
+            {% endif %}
+        </h3>
+
+        <p>
+            Track every lead from initial homework through close,
+            including the next action required to move the opportunity forward.
+        </p>
+
+        <div class="hero-actions">
+
+            {% if is_manager %}
+
+                <a
+                    href="{{ url_for('add_lead') }}"
+                    class="btn btn-primary"
+                >
+                    + Add Lead
+                </a>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <div class="hero-panel-right">
+
+        <div class="mini-stat-card">
+            <span>Leads Shown</span>
+            <strong>{{ leads|length }}</strong>
+        </div>
+
+
+        <div class="mini-stat-card">
+            <span>Active</span>
+
+            <strong>
+                {{ leads|selectattr("status", "equalto", "Active")|list|length }}
+            </strong>
+        </div>
+
+
+        <div class="mini-stat-card">
+            <span>Proposal</span>
+
+            <strong>
+                {{ leads|selectattr("current_stage", "equalto", "Proposal")|list|length }}
+            </strong>
+        </div>
+
+
+        <div class="mini-stat-card">
+            <span>Won</span>
+
+            <strong>
+                {{ leads|selectattr("status", "equalto", "Won")|list|length }}
+            </strong>
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- FILTERS -->
+
+<div class="panel-card">
+
+    <div class="panel-top">
+
+        <div>
+            <h3>Lead Filters</h3>
+
+            <p>
+                Narrow the lead list by rep, sales stage,
+                source, county, or status.
+            </p>
+        </div>
+
+    </div>
+
+
+    <form
+        method="GET"
+        action="{{ url_for('leads') }}"
+    >
+
+        <div
+            style="
+                display:grid;
+                grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));
+                gap:14px;
+                align-items:end;
+            "
+        >
+
+            {% if is_manager %}
+
+                <div class="form-row">
+
+                    <label for="rep">
+                        Sales Rep
+                    </label>
+
+                    <select
+                        id="rep"
+                        name="rep"
+                    >
+
+                        <option value="">
+                            All Reps
+                        </option>
+
+                        {% for user_id, rep_name in tracked_reps.items() %}
+
+                            <option
+                                value="{{ user_id }}"
+                                {% if selected_rep == user_id|string %}
+                                    selected
+                                {% endif %}
+                            >
+                                {{ rep_name }}
+                            </option>
+
+                        {% endfor %}
+
+                    </select>
+
+                </div>
+
+            {% endif %}
+
+
+            <div class="form-row">
+
+                <label for="stage">
+                    Sales Stage
+                </label>
+
+                <select
+                    id="stage"
+                    name="stage"
+                >
+
+                    <option value="">
+                        All Stages
+                    </option>
+
+                    {% for stage in stages %}
+
+                        <option
+                            value="{{ stage }}"
+                            {% if selected_stage == stage %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ stage }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="status">
+                    Status
+                </label>
+
+                <select
+                    id="status"
+                    name="status"
+                >
+
+                    <option value="">
+                        All Statuses
+                    </option>
+
+                    {% for status in statuses %}
+
+                        <option
+                            value="{{ status }}"
+                            {% if selected_status == status %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ status }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="source">
+                    Lead Source
+                </label>
+
+                <select
+                    id="source"
+                    name="source"
+                >
+
+                    <option value="">
+                        All Sources
+                    </option>
+
+                    {% for source in lead_sources %}
+
+                        <option
+                            value="{{ source }}"
+                            {% if selected_source == source %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ source }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <label for="county">
+                    County
+                </label>
+
+                <select
+                    id="county"
+                    name="county"
+                >
+
+                    <option value="">
+                        All Counties
+                    </option>
+
+                    {% for county in counties %}
+
+                        <option
+                            value="{{ county }}"
+                            {% if selected_county == county %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ county }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div
+                style="
+                    display:flex;
+                    gap:8px;
+                    flex-wrap:wrap;
+                "
+            >
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    Apply Filters
+                </button>
+
+                <a
+                    href="{{ url_for('leads') }}"
+                    class="btn btn-secondary"
+                >
+                    Clear
+                </a>
+
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<!-- LEAD LIST -->
+
+<div class="panel-card">
+
+    <div class="panel-top">
+
+        <div>
+            <h3>Lead Pipeline</h3>
+
+            <p>
+                Open a company to review the full sales process
+                and update its next action.
+            </p>
+        </div>
+
+
+        {% if is_manager %}
+
+            <div>
+
+                <a
+                    href="{{ url_for('add_lead') }}"
+                    class="btn btn-primary btn-sm"
+                >
+                    + Add Lead
+                </a>
+
+            </div>
+
+        {% endif %}
+
+    </div>
+
+
+    {% if leads %}
+
+        <div class="table-wrap">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Company</th>
+                        <th>Source</th>
+                        <th>City</th>
+                        <th>County</th>
+
+                        {% if is_manager %}
+                            <th>Rep</th>
+                        {% endif %}
+
+                        <th>Stage</th>
+                        <th>Next Action</th>
+                        <th>Due</th>
+                        <th>Status</th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% for lead in leads %}
+
+                        <tr>
+
+                            <td>
+
+                                <a
+                                    href="{{ url_for(
+                                        'lead_detail',
+                                        lead_id=lead.id
+                                    ) }}"
+                                    style="
+                                        font-weight:800;
+                                        text-decoration:none;
+                                    "
+                                >
+                                    {{ lead.company_name }}
+                                </a>
+
+                                {% if lead.address %}
+
+                                    <div
+                                        class="list-meta"
+                                        style="margin-top:4px;"
+                                    >
+                                        {{ lead.address }}
+                                    </div>
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+                                {{ lead.lead_source or "—" }}
+                            </td>
+
+
+                            <td>
+                                {{ lead.city or "—" }}
+                            </td>
+
+
+                            <td>
+                                {{ lead.county or "—" }}
+                            </td>
+
+
+                            {% if is_manager %}
+
+                                <td>
+                                    <strong>
+                                        {{ lead.assigned_rep }}
+                                    </strong>
+                                </td>
+
+                            {% endif %}
+
+
+                            <td>
+
+                                <span
+                                    style="
+                                        display:inline-block;
+                                        padding:5px 10px;
+                                        border-radius:999px;
+                                        border:1px solid rgba(255,255,255,.15);
+                                        font-size:.82rem;
+                                        font-weight:700;
+                                    "
+                                >
+                                    {{ lead.current_stage }}
+                                </span>
+
+                            </td>
+
+
+                            <td>
+
+                                {% if lead.next_action %}
+
+                                    {{ lead.next_action }}
+
+                                {% else %}
+
+                                    <span class="list-meta">
+                                        No next action
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+                                {{ lead.next_action_date or "—" }}
+                            </td>
+
+
+                            <td>
+
+                                {% if lead.status == "Active" %}
+
+                                    <span
+                                        style="
+                                            font-weight:800;
+                                        "
+                                    >
+                                        Active
+                                    </span>
+
+                                {% elif lead.status == "Won" %}
+
+                                    <span
+                                        style="
+                                            font-weight:800;
+                                        "
+                                    >
+                                        Won
+                                    </span>
+
+                                {% elif lead.status == "Lost" %}
+
+                                    <span
+                                        style="
+                                            font-weight:800;
+                                            opacity:.75;
+                                        "
+                                    >
+                                        Lost
+                                    </span>
+
+                                {% else %}
+
+                                    {{ lead.status or "Active" }}
+
+                                {% endif %}
+
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+
+            <p>
+                No leads match the current filters.
+            </p>
+
+            {% if is_manager %}
+
+                <div style="margin-top:14px;">
+
+                    <a
+                        href="{{ url_for('add_lead') }}"
+                        class="btn btn-primary"
+                    >
+                        Add First Lead
+                    </a>
+
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}
