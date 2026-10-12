@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 from openai import OpenAI
+from flask import current_app
 
 from flask import (
     render_template,
@@ -974,62 +975,228 @@ def customers():
     )
 
 
+
 @daily_activity_bp.route("/customers/add", methods=["GET", "POST"])
 def add_customer():
-    if request.method == "POST":
-        company_name = request.form.get("company_name", "").strip()
-        assigned_rep = request.form.get("assigned_rep", "").strip()
-        address = request.form.get("address", "").strip()
-        city = request.form.get("city", "").strip()
-        state = request.form.get("state", "").strip()
-        zip_code = request.form.get("zip_code", "").strip()
-        county = request.form.get("county", "").strip()
 
-        status = request.form.get("status", "").strip()
+    if request.method == "POST":
+
+        user_id = current_user_id()
+
+        # ----------------------------------------
+        # CUSTOMER INFORMATION
+        # ----------------------------------------
+
+        company_name = request.form.get(
+            "company_name", ""
+        ).strip()
+
+        assigned_rep = request.form.get(
+            "assigned_rep", ""
+        ).strip()
+
+        address = request.form.get(
+            "address", ""
+        ).strip()
+
+        city = request.form.get(
+            "city", ""
+        ).strip()
+
+        state = request.form.get(
+            "state", ""
+        ).strip()
+
+        zip_code = request.form.get(
+            "zip_code", ""
+        ).strip()
+
+        county = request.form.get(
+            "county", ""
+        ).strip()
+
+        status = request.form.get(
+            "status", ""
+        ).strip()
+
         priority_level = request.form.get(
-            "priority_level",
-            "",
+            "priority_level", ""
         ).strip()
 
         relationship_type = normalize_relationship_type(
-            request.form.get("relationship_type", "").strip()
+            request.form.get(
+                "relationship_type", ""
+            ).strip()
         )
+
         opposing_company = request.form.get(
-            "opposing_company",
-            "",
+            "opposing_company", ""
         ).strip()
 
         if (
             not relationship_type
             or relationship_type == "no_relationship"
         ):
-            relationship_type = derive_relationship_from_legacy_fields(
-                status=status,
-                pin_color=request.form.get("pin_color", "").strip(),
+            relationship_type = (
+                derive_relationship_from_legacy_fields(
+                    status=status,
+                    pin_color=request.form.get(
+                        "pin_color", ""
+                    ).strip(),
+                )
             )
 
         last_contact_date = request.form.get(
-            "last_contact_date",
-            "",
-        ).strip()
-        follow_up_date = request.form.get(
-            "follow_up_date",
-            "",
-        ).strip()
-        last_touch_date = request.form.get(
-            "last_touch_date",
-            "",
+            "last_contact_date", ""
         ).strip()
 
-        notes = request.form.get("notes", "").strip()
-        quote_notes = request.form.get("quote_notes", "").strip()
-        service_notes = request.form.get("service_notes", "").strip()
-        rental_notes = request.form.get("rental_notes", "").strip()
-        pm_notes = request.form.get("pm_notes", "").strip()
+        follow_up_date = request.form.get(
+            "follow_up_date", ""
+        ).strip()
+
+        last_touch_date = request.form.get(
+            "last_touch_date", ""
+        ).strip()
+
+        notes = request.form.get(
+            "notes", ""
+        ).strip()
+
+        quote_notes = request.form.get(
+            "quote_notes", ""
+        ).strip()
+
+        service_notes = request.form.get(
+            "service_notes", ""
+        ).strip()
+
+        rental_notes = request.form.get(
+            "rental_notes", ""
+        ).strip()
+
+        pm_notes = request.form.get(
+            "pm_notes", ""
+        ).strip()
 
         if not company_name:
-            flash("Company name is required.", "error")
-            return redirect(da_url("add_customer"))
+            flash(
+                "Company name is required.",
+                "error"
+            )
+            return redirect(
+                da_url("add_customer")
+            )
+
+        # ----------------------------------------
+        # INITIAL ACTIVITY INFORMATION
+        # ----------------------------------------
+
+        log_initial_activity = (
+            request.form.get(
+                "log_initial_activity", ""
+            ) == "1"
+        )
+
+        activity_type = request.form.get(
+            "activity_type", ""
+        ).strip()
+
+        activity_date = request.form.get(
+            "activity_date", ""
+        ).strip()
+
+        activity_summary = request.form.get(
+            "activity_summary", ""
+        ).strip()
+
+        activity_next_step = request.form.get(
+            "activity_next_step", ""
+        ).strip()
+
+        activity_follow_up_date = request.form.get(
+            "activity_follow_up_date", ""
+        ).strip()
+
+        valid_activity_types = {
+            "Cold Call",
+            "Phone Call",
+            "Email",
+            "Meeting",
+            "Quote",
+            "Sale",
+        }
+
+        if log_initial_activity:
+
+            if activity_type not in valid_activity_types:
+                flash(
+                    "Please select a valid activity type.",
+                    "error"
+                )
+                return redirect(
+                    da_url("add_customer")
+                )
+
+            if not activity_date:
+                activity_date = date.today().isoformat()
+
+            try:
+                date.fromisoformat(activity_date)
+            except ValueError:
+                flash(
+                    "Please enter a valid activity date.",
+                    "error"
+                )
+                return redirect(
+                    da_url("add_customer")
+                )
+
+            if activity_follow_up_date:
+                try:
+                    date.fromisoformat(
+                        activity_follow_up_date
+                    )
+                except ValueError:
+                    flash(
+                        "Please enter a valid follow-up date.",
+                        "error"
+                    )
+                    return redirect(
+                        da_url("add_customer")
+                    )
+
+                # The activity follow-up takes priority
+                # when one is provided.
+                follow_up_date = activity_follow_up_date
+
+            # Keep customer touch/contact dates
+            # consistent with the initial activity.
+
+            if (
+                not last_touch_date
+                or activity_date > last_touch_date
+            ):
+                last_touch_date = activity_date
+
+            contact_activity_types = {
+                "Cold Call",
+                "Phone Call",
+                "Email",
+                "Meeting",
+            }
+
+            if (
+                activity_type in contact_activity_types
+                and (
+                    not last_contact_date
+                    or activity_date > last_contact_date
+                )
+            ):
+                last_contact_date = activity_date
+
+        # ----------------------------------------
+        # GEOCODE CUSTOMER ADDRESS
+        # ----------------------------------------
 
         latitude, longitude = geocode_customer_address(
             address,
@@ -1038,8 +1205,12 @@ def add_customer():
             zip_code,
         )
 
+        # ----------------------------------------
+        # CREATE CUSTOMER
+        # ----------------------------------------
+
         customer = Customer(
-            user_id=current_user_id(),
+            user_id=user_id,
             company_name=company_name,
             assigned_rep=assigned_rep,
             address=address,
@@ -1067,87 +1238,204 @@ def add_customer():
             longitude=longitude,
         )
 
-        db.session.add(customer)
-        db.session.commit()
+        try:
 
-        contact_name = request.form.get(
-            "contact_name",
-            "",
-        ).strip()
-        contact_phone = request.form.get(
-            "contact_phone",
-            "",
-        ).strip()
-        contact_email = request.form.get(
-            "contact_email",
-            "",
-        ).strip()
+            db.session.add(customer)
 
-        if contact_name or contact_phone or contact_email:
-            contact = Contact(
-                user_id=current_user_id(),
-                customer_id=customer.id,
-                name=contact_name or "Primary Contact",
-                phone=format_phone_number(contact_phone),
-                email=contact_email,
-                title="Primary Contact",
-            )
-            db.session.add(contact)
+            # Flush generates the customer ID
+            # without committing the transaction.
+            db.session.flush()
 
-        fleet_make = request.form.get("fleet_make", "").strip()
-        fleet_model = request.form.get("fleet_model", "").strip()
-        fleet_capacity = request.form.get(
-            "fleet_capacity",
-            "",
-        ).strip()
-        fleet_fuel_type = request.form.get(
-            "fleet_fuel_type",
-            "",
-        ).strip()
-        fleet_quantity_raw = request.form.get(
-            "fleet_quantity",
-            "",
-        ).strip()
-        fleet_notes = request.form.get("fleet_notes", "").strip()
+            # ----------------------------------------
+            # PRIMARY CONTACT
+            # ----------------------------------------
 
-        if (
-            fleet_make
-            or fleet_model
-            or fleet_capacity
-            or fleet_fuel_type
-            or fleet_quantity_raw
-            or fleet_notes
-        ):
-            try:
-                fleet_quantity = (
-                    int(fleet_quantity_raw)
-                    if fleet_quantity_raw
-                    else None
+            contact_name = request.form.get(
+                "contact_name", ""
+            ).strip()
+
+            contact_phone = request.form.get(
+                "contact_phone", ""
+            ).strip()
+
+            contact_email = request.form.get(
+                "contact_email", ""
+            ).strip()
+
+            if (
+                contact_name
+                or contact_phone
+                or contact_email
+            ):
+
+                contact = Contact(
+                    user_id=user_id,
+                    customer_id=customer.id,
+                    name=(
+                        contact_name
+                        or "Primary Contact"
+                    ),
+                    phone=format_phone_number(
+                        contact_phone
+                    ),
+                    email=contact_email,
+                    title="Primary Contact",
                 )
-            except ValueError:
-                fleet_quantity = None
 
-            fleet = FleetInfo(
-                user_id=current_user_id(),
-                customer_id=customer.id,
-                make=fleet_make,
-                model=fleet_model,
-                capacity=fleet_capacity,
-                fuel_type=fleet_fuel_type,
-                quantity=fleet_quantity,
-                notes=fleet_notes,
+                db.session.add(contact)
+
+            # ----------------------------------------
+            # FLEET INFORMATION
+            # ----------------------------------------
+
+            fleet_make = request.form.get(
+                "fleet_make", ""
+            ).strip()
+
+            fleet_model = request.form.get(
+                "fleet_model", ""
+            ).strip()
+
+            fleet_capacity = request.form.get(
+                "fleet_capacity", ""
+            ).strip()
+
+            fleet_fuel_type = request.form.get(
+                "fleet_fuel_type", ""
+            ).strip()
+
+            fleet_quantity_raw = request.form.get(
+                "fleet_quantity", ""
+            ).strip()
+
+            fleet_notes = request.form.get(
+                "fleet_notes", ""
+            ).strip()
+
+            if (
+                fleet_make
+                or fleet_model
+                or fleet_capacity
+                or fleet_fuel_type
+                or fleet_quantity_raw
+                or fleet_notes
+            ):
+
+                try:
+                    fleet_quantity = (
+                        int(fleet_quantity_raw)
+                        if fleet_quantity_raw
+                        else None
+                    )
+
+                    if (
+                        fleet_quantity is not None
+                        and fleet_quantity < 1
+                    ):
+                        fleet_quantity = None
+
+                except ValueError:
+                    fleet_quantity = None
+
+                fleet = FleetInfo(
+                    user_id=user_id,
+                    customer_id=customer.id,
+                    make=fleet_make,
+                    model=fleet_model,
+                    capacity=fleet_capacity,
+                    fuel_type=fleet_fuel_type,
+                    quantity=fleet_quantity,
+                    notes=fleet_notes,
+                )
+
+                db.session.add(fleet)
+
+            # ----------------------------------------
+            # SAVE INITIAL SALES ACTIVITY
+            # ----------------------------------------
+
+            if log_initial_activity:
+
+                # Use the logged-in sales rep's name
+                # for activity reporting.
+                rep_name = (
+                    current_rep_name()
+                    or assigned_rep
+                    or ""
+                )
+
+                activity = ActivityLog(
+                    user_id=user_id,
+                    customer_id=customer.id,
+                    activity_type=activity_type,
+                    summary=activity_summary,
+                    next_step=activity_next_step,
+                    activity_date=activity_date,
+                    rep_name=rep_name,
+                )
+
+                db.session.add(activity)
+
+            # ----------------------------------------
+            # SAVE ALL RECORDS TOGETHER
+            # ----------------------------------------
+
+            db.session.commit()
+
+        except Exception:
+
+            db.session.rollback()
+
+            current_app.logger.exception(
+                "Failed to save new customer and "
+                "associated records."
             )
-            db.session.add(fleet)
 
-        db.session.commit()
+            flash(
+                "Unable to save the customer. "
+                "Please try again.",
+                "error"
+            )
 
-        flash("Customer added successfully.", "success")
-        return redirect(da_url("customers"))
+            return redirect(
+                da_url("add_customer")
+            )
+
+        # ----------------------------------------
+        # SUCCESS MESSAGE
+        # ----------------------------------------
+
+        if log_initial_activity:
+
+            flash(
+                "Customer added successfully! "
+                "Your initial sales activity has "
+                "also been recorded.",
+                "success"
+            )
+
+        else:
+
+            flash(
+                "Customer added successfully.",
+                "success"
+            )
+
+        return redirect(
+            da_url("customers")
+        )
+
+    # ----------------------------------------
+    # GET REQUEST - DISPLAY FORM
+    # ----------------------------------------
 
     return render_template(
         "daily_activity/add_customer.html",
         is_manager=user_is_manager(),
+        current_rep_name=current_rep_name(),
+        today=date.today().isoformat(),
     )
+
 
 @daily_activity_bp.route("/leads")
 def leads():

@@ -1,8 +1,9 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Customers | Daily Activity App{% endblock %}
 {% block page_title %}Customers{% endblock %}
-{% block page_subtitle %}Manage customer records, relationship status, competitor accounts, and follow-up opportunities{% endblock %}
+{% block page_subtitle %}Manage customer records, territories, relationships, and follow-up opportunities{% endblock %}
 
 {% block content %}
 
@@ -11,8 +12,9 @@
         <div class="hero-eyebrow">Customer Management</div>
         <h3>Keep your accounts organized and easy to work</h3>
         <p>
-            Quickly review account ownership, relationship status, follow-up timing, and next actions.
-            This layout is designed to make it easier for reps to scan customers and move into the next step fast.
+            Quickly review account ownership, relationship status, follow-up timing,
+            and next actions. Filter customers by sales rep, territory, relationship,
+            and priority to focus on the accounts that matter.
         </p>
 
         <div class="hero-actions">
@@ -29,105 +31,526 @@
             <strong>{{ customers|length }}</strong>
         </div>
         <div class="mini-stat-card">
-            <span>Main Focus</span>
-            <strong>Follow-Up</strong>
+            <span>Showing</span>
+            <strong id="visibleCustomerCount">{{ customers|length }}</strong>
         </div>
         <div class="mini-stat-card">
-            <span>Best Used With</span>
-            <strong>Planner</strong>
+            <span>Sales Reps</span>
+            <strong id="totalRepCount">—</strong>
         </div>
         <div class="mini-stat-card">
-            <span>Best Used With</span>
-            <strong>Map</strong>
+            <span>Counties</span>
+            <strong id="totalCountyCount">—</strong>
         </div>
     </div>
 </div>
 
+<!-- CUSTOMER FILTERS -->
+<div class="panel-card customer-filter-panel">
+    <div class="panel-top">
+        <div>
+            <h3>Filter Customers</h3>
+            <p>Use one or multiple filters to narrow down your customer list.</p>
+        </div>
+        <button type="button" class="btn btn-secondary btn-small" id="clearFilters">
+            Clear Filters
+        </button>
+    </div>
+
+    <div class="form-row customer-search-row">
+        <label for="customerSearch">Search Customers</label>
+        <input type="search" id="customerSearch"
+               placeholder="Search company name, assigned rep, city, county, or state..."
+               autocomplete="off">
+    </div>
+
+    <div class="customer-filter-grid">
+
+        <div class="form-row">
+            <label for="filterRep">Sales Rep</label>
+            <select id="filterRep">
+                <option value="">All Sales Reps</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterCounty">County / Territory</label>
+            <select id="filterCounty">
+                <option value="">All Counties</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterCity">City</label>
+            <select id="filterCity">
+                <option value="">All Cities</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterState">State</label>
+            <select id="filterState">
+                <option value="">All States</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterRelationship">Relationship</label>
+            <select id="filterRelationship">
+                <option value="">All Relationships</option>
+                <option value="no_relationship">No Relationship</option>
+                <option value="quoted">Quoted</option>
+                <option value="current_customer">Current Customer</option>
+                <option value="competitor_owned">Competitor-Owned</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterFollowUp">Follow-Up Status</label>
+            <select id="filterFollowUp">
+                <option value="">All Follow-Ups</option>
+                <option value="overdue">Overdue</option>
+                <option value="today">Due Today</option>
+                <option value="upcoming">Upcoming</option>
+                <option value="none">No Follow-Up</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterPriority">Priority</label>
+            <select id="filterPriority">
+                <option value="">All Priorities</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="none">No Priority</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label for="filterLastTouch">Last Touch</label>
+            <select id="filterLastTouch">
+                <option value="">Any Time</option>
+                <option value="7">Last 7 Days</option>
+                <option value="30">Last 30 Days</option>
+                <option value="60">Last 60 Days</option>
+                <option value="90">Last 90 Days</option>
+                <option value="none">Never Contacted</option>
+            </select>
+        </div>
+
+    </div>
+
+    <div class="customer-filter-footer">
+        <span id="filterResultText">
+            Showing {{ customers|length }} of {{ customers|length }} customers
+        </span>
+        <span id="activeFilterCount"></span>
+    </div>
+</div>
+
+<!-- CUSTOMER WORKSPACE -->
 <div class="panel-card">
     <div class="panel-top">
         <div>
             <h3>Customer Workspace</h3>
             <p>
-                Review each account in a cleaner card layout with quick actions for opening, editing, and logging activity.
+                Review each account with quick actions for opening,
+                editing, and logging activity.
             </p>
         </div>
     </div>
 
     {% if customers %}
-        <div class="customer-card-grid">
-            {% for customer in customers %}
-                <div class="customer-card">
-                    <div class="customer-card-top">
-                        <div>
-                            <div class="customer-card-title">{{ customer.company_name }}</div>
-                            <div class="customer-card-location">
-                                {{ customer.city or "No City" }}{% if customer.city and customer.state %}, {% endif %}{{ customer.state or "" }}
-                                {% if customer.county %} • {{ customer.county }}{% endif %}
-                            </div>
-                        </div>
+    <div class="customer-card-grid" id="customerCardGrid">
 
-                        <div class="customer-card-badges">
-                            <span class="customer-badge status-badge">
-                                {{ customer.status or "No Status" }}
-                            </span>
-                            <span class="customer-badge priority-badge">
-                                {{ customer.priority_level or "No Priority" }}
-                            </span>
-                        </div>
-                    </div>
+        {% for customer in customers %}
+        <div class="customer-card"
+             data-name="{{ customer.company_name or '' }}"
+             data-rep="{{ customer.assigned_rep or '' }}"
+             data-city="{{ customer.city or '' }}"
+             data-county="{{ customer.county or '' }}"
+             data-state="{{ customer.state or '' }}"
+             data-relationship="{{ customer.relationship_type or 'no_relationship' }}"
+             data-priority="{{ customer.priority_level or '' }}"
+             data-followup="{{ customer.follow_up_date or '' }}"
+             data-lasttouch="{{ customer.last_touch_date or '' }}">
 
-                    <div class="customer-card-body">
-                        <div class="customer-info-row">
-                            <span class="customer-info-label">Assigned Rep</span>
-                            <span class="customer-info-value">{{ customer.assigned_rep or "—" }}</span>
-                        </div>
-
-                        <div class="customer-info-row">
-                            <span class="customer-info-label">Relationship</span>
-                            <span class="customer-info-value">
-                                {% if customer.relationship_type %}
-                                    {{ customer.relationship_type.replace('_', ' ').title() }}
-                                {% else %}
-                                    No Relationship
-                                {% endif %}
-                            </span>
-                        </div>
-
-                        <div class="customer-info-row">
-                            <span class="customer-info-label">Opposing Company</span>
-                            <span class="customer-info-value">{{ customer.opposing_company or "—" }}</span>
-                        </div>
-
-                        <div class="customer-info-row">
-                            <span class="customer-info-label">Follow-Up</span>
-                            <span class="customer-info-value">{{ customer.follow_up_date or "—" }}</span>
-                        </div>
-
-                        <div class="customer-info-row">
-                            <span class="customer-info-label">Last Touch</span>
-                            <span class="customer-info-value">{{ customer.last_touch_date or "—" }}</span>
-                        </div>
-                    </div>
-
-                    <div class="customer-card-actions">
-                        <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-primary btn-small">
-                            Open
-                        </a>
-                        <a href="{{ url_for('edit_customer', customer_id=customer.id) }}" class="btn btn-secondary btn-small">
-                            Edit
-                        </a>
-                        <a href="{{ url_for('add_activity_for_customer', customer_id=customer.id) }}" class="btn btn-secondary btn-small">
-                            Log Activity
-                        </a>
+            <div class="customer-card-top">
+                <div>
+                    <div class="customer-card-title">{{ customer.company_name }}</div>
+                    <div class="customer-card-location">
+                        {{ customer.city or "No City" }}
+                        {% if customer.city and customer.state %}, {% endif %}
+                        {{ customer.state or "" }}
+                        {% if customer.county %} • {{ customer.county }}{% endif %}
                     </div>
                 </div>
-            {% endfor %}
+
+                <div class="customer-card-badges">
+                    <span class="customer-badge status-badge">
+                        {{ customer.status or "No Status" }}
+                    </span>
+                    <span class="customer-badge priority-badge">
+                        {{ customer.priority_level or "No Priority" }}
+                    </span>
+                </div>
+            </div>
+
+            <div class="customer-card-body">
+
+                <div class="customer-info-row">
+                    <span class="customer-info-label">Assigned Rep</span>
+                    <span class="customer-info-value">
+                        {{ customer.assigned_rep or "—" }}
+                    </span>
+                </div>
+
+                <div class="customer-info-row">
+                    <span class="customer-info-label">Relationship</span>
+                    <span class="customer-info-value">
+                        {% if customer.relationship_type %}
+                            {{ customer.relationship_type.replace('_', ' ').title() }}
+                        {% else %}
+                            No Relationship
+                        {% endif %}
+                    </span>
+                </div>
+
+                <div class="customer-info-row">
+                    <span class="customer-info-label">Opposing Company</span>
+                    <span class="customer-info-value">
+                        {{ customer.opposing_company or "—" }}
+                    </span>
+                </div>
+
+                <div class="customer-info-row">
+                    <span class="customer-info-label">Follow-Up</span>
+                    <span class="customer-info-value">
+                        {{ customer.follow_up_date or "—" }}
+                    </span>
+                </div>
+
+                <div class="customer-info-row">
+                    <span class="customer-info-label">Last Touch</span>
+                    <span class="customer-info-value">
+                        {{ customer.last_touch_date or "—" }}
+                    </span>
+                </div>
+
+            </div>
+
+            <div class="customer-card-actions">
+                <a href="{{ url_for('customer_detail', customer_id=customer.id) }}"
+                   class="btn btn-primary btn-small">Open</a>
+
+                <a href="{{ url_for('edit_customer', customer_id=customer.id) }}"
+                   class="btn btn-secondary btn-small">Edit</a>
+
+                <a href="{{ url_for('add_activity_for_customer', customer_id=customer.id) }}"
+                   class="btn btn-secondary btn-small">Log Activity</a>
+            </div>
         </div>
+        {% endfor %}
+
+    </div>
+
+    <div class="empty-state" id="noFilterResults" hidden>
+        No customers match your selected filters.
+        Try adjusting your search or clearing the filters.
+    </div>
+
     {% else %}
-        <div class="empty-state">
-            No customers found yet. Add your first customer to begin building the account list.
-        </div>
+    <div class="empty-state">
+        No customers found yet. Add your first customer to begin building the account list.
+    </div>
     {% endif %}
 </div>
+
+<style>
+    .customer-filter-panel {
+        margin-bottom: 20px;
+    }
+
+    .customer-search-row {
+        margin-bottom: 18px;
+    }
+
+    .customer-search-row input {
+        width: 100%;
+    }
+
+    .customer-filter-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .customer-filter-grid .form-row {
+        min-width: 0;
+        margin-bottom: 0;
+    }
+
+    .customer-filter-grid select {
+        width: 100%;
+    }
+
+    .customer-filter-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+        padding-top: 15px;
+        border-top: 1px solid rgba(128,128,128,0.25);
+        font-size: 13px;
+        opacity: 0.85;
+    }
+
+    #activeFilterCount {
+        color: #cc0000;
+        font-weight: 600;
+    }
+
+    #noFilterResults[hidden],
+    .customer-card[hidden] {
+        display: none !important;
+    }
+
+    @media (max-width: 1050px) {
+        .customer-filter-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 600px) {
+        .customer-filter-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .customer-filter-footer {
+            align-items: flex-start;
+        }
+    }
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const cards = Array.from(document.querySelectorAll(".customer-card"));
+
+    const searchInput = document.getElementById("customerSearch");
+    const repFilter = document.getElementById("filterRep");
+    const countyFilter = document.getElementById("filterCounty");
+    const cityFilter = document.getElementById("filterCity");
+    const stateFilter = document.getElementById("filterState");
+    const relationshipFilter = document.getElementById("filterRelationship");
+    const followUpFilter = document.getElementById("filterFollowUp");
+    const priorityFilter = document.getElementById("filterPriority");
+    const lastTouchFilter = document.getElementById("filterLastTouch");
+
+    const allFilters = [
+        repFilter, countyFilter, cityFilter, stateFilter,
+        relationshipFilter, followUpFilter, priorityFilter,
+        lastTouchFilter
+    ];
+
+    const normalize = value => String(value || "").trim().toLowerCase();
+
+    function getLocalToday() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+
+    function normalizeDate(value) {
+        const text = String(value || "").trim();
+        if (!text) return "";
+
+        // Existing date strings stored as YYYY-MM-DD or ISO timestamps.
+        const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (match) return match[1];
+
+        // Supports older MM/DD/YYYY values.
+        const legacy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (legacy) {
+            return `${legacy[3]}-${legacy[1].padStart(2, "0")}-${legacy[2].padStart(2, "0")}`;
+        }
+
+        return "";
+    }
+
+    function dayDifference(dateString) {
+        const normalizedDate = normalizeDate(dateString);
+        if (!normalizedDate) return null;
+
+        const target = new Date(normalizedDate + "T12:00:00");
+        const today = new Date(getLocalToday() + "T12:00:00");
+
+        if (Number.isNaN(target.getTime())) return null;
+
+        return Math.round(
+            (target.getTime() - today.getTime()) / 86400000
+        );
+    }
+
+    // Populate dropdowns using customers already available on this page.
+    function populateFilter(selectElement, dataKey) {
+        const uniqueValues = new Map();
+
+        cards.forEach(card => {
+            const value = String(card.dataset[dataKey] || "").trim();
+            if (value) {
+                const key = normalize(value);
+                if (!uniqueValues.has(key)) uniqueValues.set(key, value);
+            }
+        });
+
+        const sortedValues = Array.from(uniqueValues.values())
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+        sortedValues.forEach(value => {
+            const option = document.createElement("option");
+            option.value = normalize(value);
+            option.textContent = value;
+            selectElement.appendChild(option);
+        });
+    }
+
+    populateFilter(repFilter, "rep");
+    populateFilter(countyFilter, "county");
+    populateFilter(cityFilter, "city");
+    populateFilter(stateFilter, "state");
+
+    // Display total distinct reps and counties.
+    const uniqueReps = new Set(
+        cards.map(card => normalize(card.dataset.rep)).filter(Boolean)
+    );
+
+    const uniqueCounties = new Set(
+        cards.map(card => normalize(card.dataset.county)).filter(Boolean)
+    );
+
+    document.getElementById("totalRepCount").textContent = uniqueReps.size;
+    document.getElementById("totalCountyCount").textContent = uniqueCounties.size;
+
+    function matchesFollowUp(value, filterValue) {
+        if (!filterValue) return true;
+
+        const dateValue = normalizeDate(value);
+        const days = dayDifference(value);
+
+        if (filterValue === "none") return !dateValue;
+        if (days === null) return false;
+
+        if (filterValue === "overdue") return days < 0;
+        if (filterValue === "today") return days === 0;
+        if (filterValue === "upcoming") return days > 0;
+
+        return true;
+    }
+
+    function matchesLastTouch(value, filterValue) {
+        if (!filterValue) return true;
+
+        const dateValue = normalizeDate(value);
+        const days = dayDifference(value);
+
+        if (filterValue === "none") return !dateValue;
+        if (days === null) return false;
+
+        const range = Number(filterValue);
+
+        // Negative day difference means the touch occurred in the past.
+        return days <= 0 && days >= -range;
+    }
+
+    function applyFilters() {
+        const search = normalize(searchInput.value);
+        const selectedRep = repFilter.value;
+        const selectedCounty = countyFilter.value;
+        const selectedCity = cityFilter.value;
+        const selectedState = stateFilter.value;
+        const selectedRelationship = relationshipFilter.value;
+        const selectedFollowUp = followUpFilter.value;
+        const selectedPriority = priorityFilter.value;
+        const selectedLastTouch = lastTouchFilter.value;
+
+        let visibleCount = 0;
+
+        cards.forEach(card => {
+            const data = card.dataset;
+
+            const searchableText = [
+                data.name, data.rep, data.city,
+                data.county, data.state
+            ].map(normalize).join(" ");
+
+            const matchesSearch = !search || searchableText.includes(search);
+            const matchesRep = !selectedRep || normalize(data.rep) === selectedRep;
+            const matchesCounty = !selectedCounty || normalize(data.county) === selectedCounty;
+            const matchesCity = !selectedCity || normalize(data.city) === selectedCity;
+            const matchesState = !selectedState || normalize(data.state) === selectedState;
+            const matchesRelationship = !selectedRelationship ||
+                normalize(data.relationship) === selectedRelationship;
+
+            const priority = normalize(data.priority) || "none";
+            const matchesPriority = !selectedPriority || priority === selectedPriority;
+
+            const matchesFollow = matchesFollowUp(data.followup, selectedFollowUp);
+            const matchesTouch = matchesLastTouch(data.lasttouch, selectedLastTouch);
+
+            const visible = (
+                matchesSearch &&
+                matchesRep &&
+                matchesCounty &&
+                matchesCity &&
+                matchesState &&
+                matchesRelationship &&
+                matchesPriority &&
+                matchesFollow &&
+                matchesTouch
+            );
+
+            card.hidden = !visible;
+            if (visible) visibleCount++;
+        });
+
+        document.getElementById("visibleCustomerCount").textContent = visibleCount;
+
+        document.getElementById("filterResultText").textContent =
+            `Showing ${visibleCount} of ${cards.length} customers`;
+
+        const activeCount =
+            allFilters.filter(select => select.value !== "").length +
+            (search ? 1 : 0);
+
+        document.getElementById("activeFilterCount").textContent =
+            activeCount ? `${activeCount} active filter${activeCount === 1 ? "" : "s"}` : "";
+
+        const noResults = document.getElementById("noFilterResults");
+        if (noResults) noResults.hidden = visibleCount !== 0;
+    }
+
+    // Filters update instantly without refreshing the page.
+    searchInput.addEventListener("input", applyFilters);
+
+    allFilters.forEach(select => {
+        select.addEventListener("change", applyFilters);
+    });
+
+    // Reset all filters.
+    document.getElementById("clearFilters").addEventListener("click", function () {
+        searchInput.value = "";
+        allFilters.forEach(select => select.value = "");
+        applyFilters();
+    });
+
+    applyFilters();
+});
+</script>
 
 {% endblock %}

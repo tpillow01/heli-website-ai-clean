@@ -1,19 +1,20 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Add Customer | Daily Activity App{% endblock %}
 {% block page_title %}Add Customer{% endblock %}
-{% block page_subtitle %}Create a new customer account, define the relationship, and capture follow-up details{% endblock %}
+{% block page_subtitle %}Create a new customer account and optionally log your first sales activity{% endblock %}
 
 {% block content %}
 
 <div class="hero-panel">
     <div class="hero-panel-left">
         <div class="hero-eyebrow">New Account</div>
-        <h3>Add a customer with the right relationship type from the start</h3>
+        <h3>Add a customer and record your first interaction</h3>
         <p>
-            Use this page to create a new customer, assign the rep, define whether they are a current customer,
-            quoted account, competitor-owned account, or a no-relationship prospect, and capture any immediate
-            follow-up information that matters.
+            Create a new customer, assign the sales rep, define the relationship,
+            and capture account details. If you have already contacted this
+            customer, you can log your sales activity on the same page.
         </p>
 
         <div class="hero-actions">
@@ -24,26 +25,16 @@
     </div>
 
     <div class="hero-panel-right">
-        <div class="mini-stat-card">
-            <span>Step 1</span>
-            <strong>Account</strong>
-        </div>
-        <div class="mini-stat-card">
-            <span>Step 2</span>
-            <strong>Relationship</strong>
-        </div>
-        <div class="mini-stat-card">
-            <span>Step 3</span>
-            <strong>Follow-Up</strong>
-        </div>
-        <div class="mini-stat-card">
-            <span>Step 4</span>
-            <strong>Fleet</strong>
-        </div>
+        <div class="mini-stat-card"><span>Step 1</span><strong>Account</strong></div>
+        <div class="mini-stat-card"><span>Step 2</span><strong>Activity</strong></div>
+        <div class="mini-stat-card"><span>Step 3</span><strong>Contact</strong></div>
+        <div class="mini-stat-card"><span>Step 4</span><strong>Fleet</strong></div>
     </div>
 </div>
 
-<form method="POST" class="form-stack">
+<form method="POST" class="form-stack" id="addCustomerForm">
+
+    <!-- CUSTOMER INFORMATION -->
     <div class="panel-card form-shell">
         <div class="panel-top">
             <div>
@@ -60,7 +51,8 @@
 
             <div class="form-row">
                 <label for="assigned_rep">Assigned Rep</label>
-                <input type="text" id="assigned_rep" name="assigned_rep">
+                <input type="text" id="assigned_rep" name="assigned_rep"
+                       value="{{ current_rep_name | default('', true) }}">
             </div>
 
             <div class="form-row">
@@ -98,9 +90,10 @@
                 </select>
             </div>
 
-            <div class="form-row" id="opposingCompanyRow">
+            <div class="form-row" id="opposingCompanyRow" hidden>
                 <label for="opposing_company">Opposing Company</label>
-                <input type="text" id="opposing_company" name="opposing_company" placeholder="Example: Pro-Lift">
+                <input type="text" id="opposing_company" name="opposing_company"
+                       placeholder="Example: Pro-Lift" disabled>
             </div>
 
             <div class="form-row">
@@ -143,32 +136,116 @@
 
         <div class="form-row">
             <label for="notes">Customer Notes</label>
-            <textarea id="notes" name="notes" placeholder="Enter general notes, opportunity details, service context, or follow-up comments..."></textarea>
+            <textarea id="notes" name="notes"
+                      placeholder="General notes, opportunity details, service context, or follow-up comments..."></textarea>
         </div>
 
         <div class="form-grid">
             <div class="form-row">
                 <label for="quote_notes">Quote Notes</label>
-                <textarea id="quote_notes" name="quote_notes" placeholder="Quote details, pricing notes, or model discussions..."></textarea>
+                <textarea id="quote_notes" name="quote_notes"
+                          placeholder="Quote details, pricing notes, or model discussions..."></textarea>
             </div>
 
             <div class="form-row">
                 <label for="service_notes">Service Notes</label>
-                <textarea id="service_notes" name="service_notes" placeholder="Service situation, maintenance opportunities, or repair observations..."></textarea>
+                <textarea id="service_notes" name="service_notes"
+                          placeholder="Service situation, maintenance opportunities, or repair observations..."></textarea>
             </div>
 
             <div class="form-row">
                 <label for="rental_notes">Rental Notes</label>
-                <textarea id="rental_notes" name="rental_notes" placeholder="Rental need, temporary fleet usage, or backup equipment opportunities..."></textarea>
+                <textarea id="rental_notes" name="rental_notes"
+                          placeholder="Rental needs, temporary fleet usage, or backup equipment opportunities..."></textarea>
             </div>
 
             <div class="form-row">
                 <label for="pm_notes">PM Notes</label>
-                <textarea id="pm_notes" name="pm_notes" placeholder="Preventive maintenance notes or contract opportunities..."></textarea>
+                <textarea id="pm_notes" name="pm_notes"
+                          placeholder="Preventive maintenance notes or contract opportunities..."></textarea>
             </div>
         </div>
     </div>
 
+    <!-- INITIAL SALES ACTIVITY -->
+    <div class="panel-card form-shell">
+        <div class="panel-top">
+            <div>
+                <h3>Log Initial Sales Activity</h3>
+                <p>
+                    Already visited, called, or emailed this customer?
+                    Record your activity here so it can count toward your sales metrics.
+                </p>
+            </div>
+        </div>
+
+        <label class="activity-toggle-label" for="log_initial_activity">
+            <input type="checkbox" id="log_initial_activity"
+                   name="log_initial_activity" value="1">
+            <span>
+                <strong>Log an activity for this customer</strong>
+                <small>Optional — enable this if you have already completed a sales activity.</small>
+            </span>
+        </label>
+
+        <div id="initialActivityFields" class="initial-activity-fields" hidden>
+            <div class="form-grid">
+                <div class="form-row">
+                    <label for="activity_type">Activity Type</label>
+                    <select id="activity_type" name="activity_type" disabled>
+                        <option value="">Select Activity</option>
+                        <option value="Cold Call">Cold Call</option>
+                        <option value="Phone Call">Phone Call</option>
+                        <option value="Email">Email</option>
+                        <option value="Meeting">Meeting</option>
+                        <option value="Quote">Quote</option>
+                        <option value="Sale">Sale</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <label for="activity_date">Activity Date</label>
+                    <input type="date" id="activity_date" name="activity_date"
+                           value="{{ today | default('', true) }}" disabled>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label for="activity_summary">Activity Summary</label>
+                <textarea id="activity_summary" name="activity_summary" rows="4"
+                          placeholder="Example: Stopped in and spoke with the warehouse manager. Currently operating five Toyota forklifts."
+                          disabled></textarea>
+            </div>
+
+            <div class="form-row">
+                <label for="activity_next_step">Next Steps</label>
+                <textarea id="activity_next_step" name="activity_next_step" rows="3"
+                          placeholder="Example: Follow up next week to schedule a fleet evaluation."
+                          disabled></textarea>
+            </div>
+
+            <div class="form-grid">
+                <div class="form-row">
+                    <label for="activity_follow_up_date">Activity Follow-Up Date</label>
+                    <input type="date" id="activity_follow_up_date"
+                           name="activity_follow_up_date" disabled>
+                    <small class="form-help-text">
+                        This date will also update the customer's follow-up date.
+                    </small>
+                </div>
+            </div>
+
+            <div class="activity-info-note">
+                <strong>Activity Tracking</strong>
+                <p>
+                    Saving this form will create the customer and submit the selected
+                    activity for recording in the customer's activity history.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- PRIMARY CONTACT -->
     <div class="panel-card form-shell">
         <div class="panel-top">
             <div>
@@ -195,6 +272,7 @@
         </div>
     </div>
 
+    <!-- FLEET INFORMATION -->
     <div class="panel-card form-shell">
         <div class="panel-top">
             <div>
@@ -206,17 +284,20 @@
         <div class="form-grid">
             <div class="form-row">
                 <label for="fleet_make">Fleet Make</label>
-                <input type="text" id="fleet_make" name="fleet_make" placeholder="Example: Heli, Toyota, Yale">
+                <input type="text" id="fleet_make" name="fleet_make"
+                       placeholder="Example: Heli, Toyota, Yale">
             </div>
 
             <div class="form-row">
                 <label for="fleet_model">Fleet Model</label>
-                <input type="text" id="fleet_model" name="fleet_model" placeholder="Example: CPD25, ERP050">
+                <input type="text" id="fleet_model" name="fleet_model"
+                       placeholder="Example: CPD25, ERP050">
             </div>
 
             <div class="form-row">
                 <label for="fleet_capacity">Capacity</label>
-                <input type="text" id="fleet_capacity" name="fleet_capacity" placeholder="Example: 5000 lb">
+                <input type="text" id="fleet_capacity" name="fleet_capacity"
+                       placeholder="Example: 5000 lb">
             </div>
 
             <div class="form-row">
@@ -233,41 +314,206 @@
 
             <div class="form-row">
                 <label for="fleet_quantity">Quantity</label>
-                <input type="number" id="fleet_quantity" name="fleet_quantity" min="1" placeholder="Example: 3">
+                <input type="number" id="fleet_quantity" name="fleet_quantity"
+                       min="1" placeholder="Example: 3">
             </div>
         </div>
 
         <div class="form-row">
             <label for="fleet_notes">Fleet Notes</label>
-            <textarea id="fleet_notes" name="fleet_notes" placeholder="Enter fleet notes, condition comments, age of units, service concerns, replacement opportunities, or other observations..."></textarea>
+            <textarea id="fleet_notes" name="fleet_notes"
+                      placeholder="Equipment condition, age, service concerns, or replacement opportunities..."></textarea>
         </div>
     </div>
 
+    <!-- SAVE ACTIONS -->
     <div class="hero-actions">
-        <button type="submit" class="btn btn-primary">Save Customer</button>
+        <button type="submit" class="btn btn-primary" id="saveCustomerButton">
+            Save Customer
+        </button>
         <a href="{{ url_for('customers') }}" class="btn btn-secondary">Cancel</a>
     </div>
+
 </form>
+
+<style>
+    .activity-toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid rgba(128, 128, 128, 0.3);
+        border-radius: 10px;
+        cursor: pointer;
+    }
+
+    .activity-toggle-label input {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
+        accent-color: #cc0000;
+        cursor: pointer;
+    }
+
+    .activity-toggle-label span {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .activity-toggle-label small,
+    .form-help-text {
+        font-size: 12px;
+        opacity: 0.75;
+    }
+
+    .initial-activity-fields {
+        margin-top: 20px;
+    }
+
+    .initial-activity-fields[hidden],
+    #opposingCompanyRow[hidden] {
+        display: none !important;
+    }
+
+    .initial-activity-fields .form-row {
+        margin-bottom: 15px;
+    }
+
+    .form-help-text {
+        display: block;
+        margin-top: 6px;
+    }
+
+    .activity-info-note {
+        padding: 16px;
+        margin-top: 15px;
+        border: 1px solid rgba(128, 128, 128, 0.25);
+        border-left: 3px solid #cc0000;
+        border-radius: 8px;
+    }
+
+    .activity-info-note p {
+        margin: 7px 0 0;
+        font-size: 13px;
+        line-height: 1.6;
+        opacity: 0.8;
+    }
+</style>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
     const relationshipType = document.getElementById("relationship_type");
-    const opposingCompanyRow = document.getElementById("opposingCompanyRow");
-    const opposingCompanyInput = document.getElementById("opposing_company");
+    const opposingRow = document.getElementById("opposingCompanyRow");
+    const opposingInput = document.getElementById("opposing_company");
 
+    const activityToggle = document.getElementById("log_initial_activity");
+    const activityFields = document.getElementById("initialActivityFields");
+    const activityType = document.getElementById("activity_type");
+    const activityDate = document.getElementById("activity_date");
+    const activityFollowUp = document.getElementById("activity_follow_up_date");
+    const customerFollowUp = document.getElementById("follow_up_date");
+    const lastTouchDate = document.getElementById("last_touch_date");
+    const lastContactDate = document.getElementById("last_contact_date");
+    const saveButton = document.getElementById("saveCustomerButton");
+    const form = document.getElementById("addCustomerForm");
+    const activityInputs = activityFields.querySelectorAll("input, select, textarea");
+
+    // Use the browser's local date rather than UTC.
+    function getLocalToday() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+
+    // Show opposing company only for competitor-owned accounts.
     function toggleOpposingCompany() {
-        const value = relationshipType.value;
+        const show = relationshipType.value === "competitor_owned";
+        opposingRow.hidden = !show;
+        opposingInput.disabled = !show;
 
-        if (value === "competitor_owned") {
-            opposingCompanyRow.style.display = "block";
+        if (!show) opposingInput.value = "";
+    }
+
+    // Enable activity fields only when logging is selected.
+    function toggleInitialActivity() {
+        const enabled = activityToggle.checked;
+
+        activityFields.hidden = !enabled;
+
+        activityInputs.forEach(input => {
+            input.disabled = !enabled;
+        });
+
+        activityType.required = enabled;
+        activityDate.required = enabled;
+
+        if (enabled) {
+            if (!activityDate.value) activityDate.value = getLocalToday();
+            saveButton.textContent = "Save Customer & Activity";
         } else {
-            opposingCompanyRow.style.display = "none";
-            opposingCompanyInput.value = "";
+            saveButton.textContent = "Save Customer";
         }
     }
 
+    // Keep follow-up dates synchronized.
+    function syncActivityFollowUp() {
+        if (activityFollowUp.value && activityToggle.checked) {
+            customerFollowUp.value = activityFollowUp.value;
+        }
+    }
+
+    // When manually updating the customer follow-up, reflect it
+    // in the activity follow-up field if activity logging is enabled.
+    function syncCustomerFollowUp() {
+        if (activityToggle.checked) {
+            activityFollowUp.value = customerFollowUp.value;
+        }
+    }
+
+    // Automatically populate contact dates without overwriting
+    // dates the rep has already entered.
+    function syncActivityDates() {
+        if (!activityToggle.checked || !activityDate.value) return;
+
+        if (!lastTouchDate.value) {
+            lastTouchDate.value = activityDate.value;
+        }
+
+        const contactTypes = ["Cold Call", "Phone Call", "Email", "Meeting"];
+
+        if (contactTypes.includes(activityType.value) && !lastContactDate.value) {
+            lastContactDate.value = activityDate.value;
+        }
+    }
+
+    // Default activity date to the current local date.
+    if (!activityDate.value) {
+        activityDate.value = getLocalToday();
+    }
+
+    // Initialize page state.
     toggleOpposingCompany();
+    toggleInitialActivity();
+
+    // Event listeners.
     relationshipType.addEventListener("change", toggleOpposingCompany);
+    activityToggle.addEventListener("change", toggleInitialActivity);
+    activityFollowUp.addEventListener("change", syncActivityFollowUp);
+    customerFollowUp.addEventListener("change", syncCustomerFollowUp);
+
+    // Prevent duplicate submissions.
+    form.addEventListener("submit", function (event) {
+        if (!form.checkValidity()) return;
+
+        syncActivityFollowUp();
+        syncActivityDates();
+
+        saveButton.disabled = true;
+        saveButton.textContent = "Saving...";
+    });
 });
 </script>
 
