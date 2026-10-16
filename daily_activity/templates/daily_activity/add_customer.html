@@ -50,10 +50,25 @@
             </div>
 
             <div class="form-row">
-                <label for="assigned_rep">Assigned Rep</label>
-                <input type="text" id="assigned_rep" name="assigned_rep"
-                       value="{{ current_rep_name | default('', true) }}">
+                <label for="assigned_rep">Assigned Sales Rep</label>
+                <select id="assigned_rep" name="assigned_rep" required>
+                    {% if is_manager %}
+                        <option value="">Select Sales Rep</option>
+                    {% endif %}
+
+                    {% for rep_id, rep_name in tracked_reps.items() %}
+                        {% if is_manager or rep_id == current_user_id %}
+                            <option value="{{ rep_id }}"
+                                {% if rep_id == current_user_id and not is_manager %}
+                                    selected
+                                {% endif %}>
+                                {{ rep_name }}
+                            </option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
             </div>
+
 
             <div class="form-row">
                 <label for="address">Street Address</label>

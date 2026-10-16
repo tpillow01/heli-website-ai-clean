@@ -1,3 +1,4 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Edit Customer | Daily Activity App{% endblock %}
@@ -60,12 +61,30 @@
         <div class="form-grid">
             <div class="form-row">
                 <label for="company_name">Company Name</label>
-                <input type="text" id="company_name" name="company_name" value="{{ customer.company_name or '' }}" required>
+                <input type="text" id="company_name" name="company_name"
+                       value="{{ customer.company_name or '' }}" required>
             </div>
 
+            <!-- ASSIGNED SALES REP DROPDOWN -->
             <div class="form-row">
-                <label for="assigned_rep">Assigned Rep</label>
-                <input type="text" id="assigned_rep" name="assigned_rep" value="{{ customer.assigned_rep or '' }}">
+                <label for="assigned_rep">Assigned Sales Rep</label>
+                <select id="assigned_rep" name="assigned_rep" required>
+                    {% if is_manager %}
+                        <option value="" disabled>Select Sales Rep</option>
+                    {% endif %}
+
+                    {% for rep_id, rep_name in tracked_reps.items() %}
+                        {% if is_manager or rep_id == customer.user_id %}
+                            <option value="{{ rep_id }}"
+                                {% if customer.user_id == rep_id %}selected{% endif %}>
+                                {{ rep_name }}
+                            </option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+                {% if is_manager %}
+                    <small>Changing the assigned rep will transfer this account to that sales rep.</small>
+                {% endif %}
             </div>
 
             <div class="form-row">
@@ -100,27 +119,32 @@
                     <option value="quoted" {% if customer.relationship_type == "quoted" %}selected{% endif %}>Quoted</option>
                     <option value="current_customer" {% if customer.relationship_type == "current_customer" %}selected{% endif %}>Current Customer</option>
                     <option value="competitor_owned" {% if customer.relationship_type == "competitor_owned" %}selected{% endif %}>Competitor-Owned</option>
+                    <option value="happy_current_provider" {% if customer.relationship_type == "happy_current_provider" %}selected{% endif %}>Happy With Current Provider</option>
                 </select>
             </div>
 
             <div class="form-row" id="opposingCompanyRow">
                 <label for="opposing_company">Opposing Company</label>
-                <input type="text" id="opposing_company" name="opposing_company" value="{{ customer.opposing_company or '' }}" placeholder="Example: Pro-Lift">
+                <input type="text" id="opposing_company" name="opposing_company"
+                       value="{{ customer.opposing_company or '' }}" placeholder="Example: Pro-Lift">
             </div>
 
             <div class="form-row">
                 <label for="follow_up_date">Follow-Up Date</label>
-                <input type="date" id="follow_up_date" name="follow_up_date" value="{{ customer.follow_up_date or '' }}">
+                <input type="date" id="follow_up_date" name="follow_up_date"
+                       value="{{ customer.follow_up_date or '' }}">
             </div>
 
             <div class="form-row">
                 <label for="last_touch_date">Last Touch Date</label>
-                <input type="date" id="last_touch_date" name="last_touch_date" value="{{ customer.last_touch_date or '' }}">
+                <input type="date" id="last_touch_date" name="last_touch_date"
+                       value="{{ customer.last_touch_date or '' }}">
             </div>
 
             <div class="form-row">
                 <label for="last_contact_date">Last Contact Date</label>
-                <input type="date" id="last_contact_date" name="last_contact_date" value="{{ customer.last_contact_date or '' }}">
+                <input type="date" id="last_contact_date" name="last_contact_date"
+                       value="{{ customer.last_contact_date or '' }}">
             </div>
 
             <div class="form-row">
@@ -178,7 +202,8 @@
 
     <div class="hero-actions">
         <button type="submit" class="btn btn-primary">Update Customer</button>
-        <a href="{{ url_for('customer_detail', customer_id=customer.id) }}" class="btn btn-secondary">Cancel</a>
+        <a href="{{ url_for('customer_detail', customer_id=customer.id) }}"
+           class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 
@@ -189,14 +214,9 @@ document.addEventListener("DOMContentLoaded", function () {
     const opposingCompanyInput = document.getElementById("opposing_company");
 
     function toggleOpposingCompany() {
-        const value = relationshipType.value;
-
-        if (value === "competitor_owned") {
-            opposingCompanyRow.style.display = "block";
-        } else {
-            opposingCompanyRow.style.display = "none";
-            opposingCompanyInput.value = "";
-        }
+        const isCompetitor = relationshipType.value === "competitor_owned";
+        opposingCompanyRow.style.display = isCompetitor ? "block" : "none";
+        opposingCompanyInput.disabled = !isCompetitor;
     }
 
     toggleOpposingCompany();

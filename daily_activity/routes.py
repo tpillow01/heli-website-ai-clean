@@ -819,22 +819,21 @@ def format_phone_number(value):
 # Activity update helpers
 # ----------------------------
 
+
 def should_update_last_contact(activity_type):
     value = (activity_type or "").strip().lower()
 
-    customer_contact_types = [
-        "call",
+    customer_contact_types = {
+        "cold call",
         "phone call",
-        "site visit",
-        "visit",
-        "customer visit",
         "email",
         "meeting",
-        "demo",
-        "onsite visit",
-    ]
+        "quote",
+        "sale",
+    }
 
     return value in customer_contact_types
+
 
 
 def apply_activity_updates_to_customer(
@@ -913,6 +912,7 @@ def shift_follow_up_date(customer, days=3):
 # Routes
 # ----------------------------
 
+
 @daily_activity_bp.route("/")
 def dashboard():
     customer_count = scoped_customer_query().count()
@@ -974,8 +974,6 @@ def customers():
         is_manager=user_is_manager(),
     )
 
-
-
 @daily_activity_bp.route("/customers/add", methods=["GET", "POST"])
 def add_customer():
 
@@ -991,9 +989,26 @@ def add_customer():
             "company_name", ""
         ).strip()
 
-        assigned_rep = request.form.get(
+        # Assign customer to the selected sales rep.
+        assigned_rep_raw = request.form.get(
             "assigned_rep", ""
         ).strip()
+
+        if user_is_manager():
+            try:
+                assigned_user_id = int(assigned_rep_raw)
+            except (ValueError, TypeError):
+                assigned_user_id = None
+        else:
+            # Regular reps cannot assign customers to other users.
+            assigned_user_id = current_user_id()
+
+        assigned_rep = TRACKED_REPS.get(assigned_user_id)
+
+        if not assigned_rep:
+            flash("Please select a valid sales rep.", "error")
+            return redirect(da_url("add_customer"))
+
 
         address = request.form.get(
             "address", ""
@@ -1032,19 +1047,6 @@ def add_customer():
         opposing_company = request.form.get(
             "opposing_company", ""
         ).strip()
-
-        if (
-            not relationship_type
-            or relationship_type == "no_relationship"
-        ):
-            relationship_type = (
-                derive_relationship_from_legacy_fields(
-                    status=status,
-                    pin_color=request.form.get(
-                        "pin_color", ""
-                    ).strip(),
-                )
-            )
 
         last_contact_date = request.form.get(
             "last_contact_date", ""
@@ -1210,7 +1212,7 @@ def add_customer():
         # ----------------------------------------
 
         customer = Customer(
-            user_id=user_id,
+            user_id=assigned_user_id,
             company_name=company_name,
             assigned_rep=assigned_rep,
             address=address,
@@ -1269,7 +1271,7 @@ def add_customer():
             ):
 
                 contact = Contact(
-                    user_id=user_id,
+                    user_id=assigned_user_id,
                     customer_id=customer.id,
                     name=(
                         contact_name
@@ -1338,7 +1340,7 @@ def add_customer():
                     fleet_quantity = None
 
                 fleet = FleetInfo(
-                    user_id=user_id,
+                    user_id=assigned_user_id,
                     customer_id=customer.id,
                     make=fleet_make,
                     model=fleet_model,
@@ -1355,13 +1357,10 @@ def add_customer():
             # ----------------------------------------
 
             if log_initial_activity:
-
-                # Use the logged-in sales rep's name
-                # for activity reporting.
+                # Credit the person who logged the activity.
                 rep_name = (
                     current_rep_name()
-                    or assigned_rep
-                    or ""
+                    or f"User {user_id}"
                 )
 
                 activity = ActivityLog(
@@ -1430,12 +1429,13 @@ def add_customer():
     # ----------------------------------------
 
     return render_template(
-        "daily_activity/add_customer.html",
+    "daily_activity/add_customer.html",
         is_manager=user_is_manager(),
         current_rep_name=current_rep_name(),
+        tracked_reps=TRACKED_REPS,
+        current_user_id=current_user_id(),
         today=date.today().isoformat(),
     )
-
 
 @daily_activity_bp.route("/leads")
 def leads():
@@ -2272,6 +2272,7 @@ def customer_detail(customer_id):
     )
 
 
+
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/edit",
     methods=["GET", "POST"],
@@ -2289,11 +2290,42 @@ def edit_customer(customer_id):
         if not company_name:
             flash("Company name is required.", "error")
             return redirect(
-                da_url(
-                    "edit_customer",
-                    customer_id=customer.id,
-                )
+                da_url("edit_customer", customer_id=customer.id)
             )
+
+        # ----------------------------------------
+        # SALES REP ASSIGNMENT
+        # ----------------------------------------
+
+        old_user_id = customer.user_id
+        assigned_user_id = old_user_id
+
+        if user_is_manager():
+            assigned_rep_raw = request.form.get(
+                "assigned_rep", ""
+            ).strip()
+
+            try:
+                assigned_user_id = int(assigned_rep_raw)
+            except (ValueError, TypeError):
+                flash("Please select a valid sales rep.", "error")
+                return redirect(
+                    da_url("edit_customer", customer_id=customer.id)
+                )
+
+            if assigned_user_id not in TRACKED_REPS:
+                flash("Invalid sales rep selected.", "error")
+                return redirect(
+                    da_url("edit_customer", customer_id=customer.id)
+                )
+
+        # Regular reps cannot change account ownership.
+        elif customer.user_id != current_user_id():
+            abort(403)
+
+        # ----------------------------------------
+        # CUSTOMER INFORMATION
+        # ----------------------------------------
 
         latitude, longitude = geocode_customer_address(
             address,
@@ -2304,25 +2336,16 @@ def edit_customer(customer_id):
 
         status = request.form.get("status", "").strip()
         priority_level = request.form.get(
-            "priority_level",
-            "",
+            "priority_level", ""
         ).strip()
 
         relationship_type = normalize_relationship_type(
             request.form.get("relationship_type", "").strip()
         )
-        opposing_company = request.form.get(
-            "opposing_company",
-            "",
-        ).strip()
 
-        if (
-            not relationship_type
-            or relationship_type == "no_relationship"
-        ):
-            relationship_type = derive_relationship_from_legacy_fields(
-                status=status
-            )
+        opposing_company = request.form.get(
+            "opposing_company", ""
+        ).strip()
 
         customer.company_name = company_name
         customer.address = address
@@ -2330,62 +2353,105 @@ def edit_customer(customer_id):
         customer.state = state
         customer.zip_code = zip_code
         customer.county = request.form.get("county", "").strip()
-        customer.assigned_rep = request.form.get(
-            "assigned_rep",
-            "",
-        ).strip()
+
         customer.status = status
         customer.priority_level = priority_level
         customer.relationship_type = relationship_type
+
         customer.opposing_company = (
             opposing_company
             if relationship_type == "competitor_owned"
             else ""
         )
+
         customer.last_contact_date = request.form.get(
-            "last_contact_date",
-            "",
+            "last_contact_date", ""
         ).strip()
+
         customer.follow_up_date = request.form.get(
-            "follow_up_date",
-            "",
+            "follow_up_date", ""
         ).strip()
+
         customer.last_touch_date = request.form.get(
-            "last_touch_date",
-            "",
+            "last_touch_date", ""
         ).strip()
+
         customer.notes = request.form.get("notes", "").strip()
         customer.quote_notes = request.form.get(
-            "quote_notes",
-            "",
+            "quote_notes", ""
         ).strip()
         customer.service_notes = request.form.get(
-            "service_notes",
-            "",
+            "service_notes", ""
         ).strip()
         customer.rental_notes = request.form.get(
-            "rental_notes",
-            "",
+            "rental_notes", ""
         ).strip()
-        customer.pm_notes = request.form.get("pm_notes", "").strip()
+        customer.pm_notes = request.form.get(
+            "pm_notes", ""
+        ).strip()
 
         if latitude is not None and longitude is not None:
             customer.latitude = latitude
             customer.longitude = longitude
 
-        db.session.commit()
+        # ----------------------------------------
+        # UPDATE CUSTOMER OWNERSHIP
+        # ----------------------------------------
+
+        customer.user_id = assigned_user_id
+
+        # Standardize the displayed sales rep name.
+        if assigned_user_id in TRACKED_REPS:
+            customer.assigned_rep = TRACKED_REPS[assigned_user_id]
+
+        # ----------------------------------------
+        # TRANSFER CONTACTS AND FLEET INFORMATION
+        # ----------------------------------------
+
+        if old_user_id != assigned_user_id:
+
+            for contact in customer.contacts:
+                contact.user_id = assigned_user_id
+
+            for fleet in customer.fleet_info:
+                fleet.user_id = assigned_user_id
+
+        # Historical activity records are intentionally
+        # not changed. Activity credit stays with
+        # the rep who originally performed the activity.
+
+        # Document ownership is also preserved so
+        # upload attribution is not altered.
+
+        # ----------------------------------------
+        # SAVE CHANGES
+        # ----------------------------------------
+
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Failed to update customer %s", customer.id
+            )
+            flash(
+                "Unable to update customer. Please try again.",
+                "error"
+            )
+            return redirect(
+                da_url("edit_customer", customer_id=customer.id)
+            )
 
         flash("Customer updated successfully.", "success")
+
         return redirect(
-            da_url(
-                "customer_detail",
-                customer_id=customer.id,
-            )
+            da_url("customer_detail", customer_id=customer.id)
         )
 
     return render_template(
         "daily_activity/edit_customer.html",
         customer=customer,
+        tracked_reps=TRACKED_REPS,
         is_manager=user_is_manager(),
     )
 
@@ -2641,6 +2707,7 @@ def activity():
     )
 
 
+
 @daily_activity_bp.route(
     "/activity/add",
     methods=["GET", "POST"],
@@ -2653,50 +2720,122 @@ def add_activity():
     )
 
     if request.method == "POST":
-        customer_id = request.form.get("customer_id", "").strip()
+        customer_id = request.form.get(
+            "customer_id", ""
+        ).strip()
 
         activity_type = request.form.get(
-            "activity_type",
-            "",
+            "activity_type", ""
         ).strip()
 
         summary = request.form.get(
-            "summary",
-            "",
+            "summary", ""
         ).strip()
 
         activity_date = request.form.get(
-            "activity_date",
-            "",
+            "activity_date", ""
         ).strip()
 
         next_step = request.form.get(
-            "next_step",
-            "",
+            "next_step", ""
         ).strip()
 
         follow_up_date = request.form.get(
-            "follow_up_date",
-            "",
+            "follow_up_date", ""
         ).strip()
 
         follow_up_action = request.form.get(
-            "follow_up_action",
-            "complete",
+            "follow_up_action", "complete"
         ).strip().lower()
 
         customer_outcome = request.form.get(
-            "customer_outcome",
-            "",
+            "customer_outcome", ""
         ).strip().lower()
+
+        # ----------------------------------------
+        # SALES REP ATTRIBUTION
+        # ----------------------------------------
 
         rep_name = current_rep_name()
 
         if not rep_name:
             rep_name = request.form.get(
-                "rep_name",
-                "",
+                "rep_name", ""
             ).strip()
+
+        # ----------------------------------------
+        # VALIDATE ACTIVITY TYPE
+        # ----------------------------------------
+
+        valid_activity_types = {
+            "Cold Call",
+            "Phone Call",
+            "Email",
+            "Meeting",
+            "Quote",
+            "Sale",
+        }
+
+        if activity_type not in valid_activity_types:
+            flash(
+                "Please select a valid activity type.",
+                "error",
+            )
+            return redirect(da_url("add_activity"))
+
+        # ----------------------------------------
+        # VALIDATE REQUIRED FIELDS
+        # ----------------------------------------
+
+        if not customer_id or not summary:
+            flash(
+                "Customer and summary are required.",
+                "error",
+            )
+            return redirect(da_url("add_activity"))
+
+        try:
+            customer_id = int(customer_id)
+        except (ValueError, TypeError):
+            flash(
+                "Please select a valid customer.",
+                "error",
+            )
+            return redirect(da_url("add_activity"))
+
+        # ----------------------------------------
+        # VALIDATE ACTIVITY DATE
+        # ----------------------------------------
+
+        if not activity_date:
+            activity_date = date.today().isoformat()
+
+        try:
+            date.fromisoformat(activity_date)
+        except ValueError:
+            flash(
+                "Please enter a valid activity date.",
+                "error",
+            )
+            return redirect(da_url("add_activity"))
+
+        # ----------------------------------------
+        # VALIDATE FOLLOW-UP DATE
+        # ----------------------------------------
+
+        if follow_up_date:
+            try:
+                date.fromisoformat(follow_up_date)
+            except ValueError:
+                flash(
+                    "Please enter a valid follow-up date.",
+                    "error",
+                )
+                return redirect(da_url("add_activity"))
+
+        # ----------------------------------------
+        # FOLLOW-UP AND OUTCOME SETTINGS
+        # ----------------------------------------
 
         if follow_up_action not in {
             "complete",
@@ -2710,19 +2849,17 @@ def add_activity():
         }:
             customer_outcome = ""
 
-        if not customer_id or not activity_type or not summary:
-            flash(
-                "Customer, activity type, and summary are required.",
-                "error",
-            )
-
-            return redirect(
-                da_url("add_activity")
-            )
+        # ----------------------------------------
+        # VERIFY CUSTOMER ACCESS
+        # ----------------------------------------
 
         customer = get_customer_or_403(
-            int(customer_id)
+            customer_id
         )
+
+        # ----------------------------------------
+        # CREATE ACTIVITY RECORD
+        # ----------------------------------------
 
         log = ActivityLog(
             user_id=current_user_id(),
@@ -2734,18 +2871,42 @@ def add_activity():
             rep_name=rep_name,
         )
 
-        db.session.add(log)
+        # ----------------------------------------
+        # SAVE ACTIVITY AND CUSTOMER UPDATES
+        # ----------------------------------------
 
-        apply_activity_updates_to_customer(
-            customer=customer,
-            activity_type=activity_type,
-            activity_date=activity_date,
-            follow_up_date=follow_up_date,
-            follow_up_action=follow_up_action,
-            customer_outcome=customer_outcome,
-        )
+        try:
+            db.session.add(log)
 
-        db.session.commit()
+            apply_activity_updates_to_customer(
+                customer=customer,
+                activity_type=activity_type,
+                activity_date=activity_date,
+                follow_up_date=follow_up_date,
+                follow_up_action=follow_up_action,
+                customer_outcome=customer_outcome,
+            )
+
+            db.session.commit()
+
+        except Exception:
+            db.session.rollback()
+
+            current_app.logger.exception(
+                "Failed to save activity for customer %s",
+                customer.id,
+            )
+
+            flash(
+                "Unable to save activity. Please try again.",
+                "error",
+            )
+
+            return redirect(da_url("add_activity"))
+
+        # ----------------------------------------
+        # SUCCESS MESSAGE
+        # ----------------------------------------
 
         flash(
             build_activity_update_message(
@@ -2762,13 +2923,19 @@ def add_activity():
             da_url("planner")
         )
 
+    # ----------------------------------------
+    # DISPLAY ADD ACTIVITY FORM
+    # ----------------------------------------
+
     return render_template(
         "daily_activity/add_activity.html",
         customers=customers,
         selected_customer_id=None,
         current_rep_name=current_rep_name(),
         is_manager=user_is_manager(),
+        today=date.today().isoformat(),
     )
+
 
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/add-activity",
