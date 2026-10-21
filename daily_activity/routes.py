@@ -34,6 +34,7 @@ from .models import (
     FleetInfo,
     SalesLead,
     LeadSalesProcess,
+    ContactRequest,
 )
 
 
@@ -86,6 +87,7 @@ DA_ENDPOINTS = {
     "delete_contact",
     "flag_needs_contacts",
     "clear_needs_contacts",
+    "review_contact_request",
     "add_fleet",
     "complete_followup",
     "snooze_followup",
@@ -913,8 +915,10 @@ def shift_follow_up_date(customer, days=3):
 # ----------------------------
 
 
+
 @daily_activity_bp.route("/")
 def dashboard():
+
     customer_count = scoped_customer_query().count()
     contact_count = scoped_contact_query().count()
     activity_count = scoped_activity_query().count()
@@ -936,17 +940,62 @@ def dashboard():
 
     dashboard_reminders = build_dashboard_reminders()
 
-    # Manager-only list of customers that reps have flagged
-    # because they need additional / updated contacts.
+    # ----------------------------------------
+    # MANAGER: PENDING CONTACT REQUESTS
+    # ----------------------------------------
+
     needs_contacts_customers = []
 
     if user_is_manager():
         needs_contacts_customers = (
             Customer.query
             .filter(Customer.needs_contacts.is_(True))
-            .order_by(Customer.needs_contacts_flagged_at.desc())
+            .order_by(
+                Customer.needs_contacts_flagged_at.desc()
+            )
             .all()
         )
+
+    # ----------------------------------------
+    # CONTACT REQUEST TRACKING
+    # ----------------------------------------
+
+    contact_request_query = ContactRequest.query
+
+    # Reps see requests they submitted.
+    # Managers can see requests from everyone.
+
+    if not user_is_manager():
+        contact_request_query = (
+            contact_request_query.filter(
+                ContactRequest.requested_by ==
+                current_user_id()
+            )
+        )
+
+    all_contact_requests = (
+        contact_request_query
+        .order_by(ContactRequest.requested_at.desc())
+        .all()
+    )
+
+    pending_contact_requests = [
+        contact_request
+        for contact_request in all_contact_requests
+        if contact_request.status == "pending"
+    ]
+
+    completed_contact_requests = [
+        contact_request
+        for contact_request in all_contact_requests
+        if contact_request.status == "completed"
+    ]
+
+    reviewed_contact_requests = [
+        contact_request
+        for contact_request in all_contact_requests
+        if contact_request.status == "reviewed"
+    ]
 
     return render_template(
         "daily_activity/dashboard.html",
@@ -958,6 +1007,18 @@ def dashboard():
         recent_customers=recent_customers,
         dashboard_reminders=dashboard_reminders,
         needs_contacts_customers=needs_contacts_customers,
+        pending_contact_requests=pending_contact_requests,
+        completed_contact_requests=completed_contact_requests,
+        reviewed_contact_requests=reviewed_contact_requests,
+        contact_request_pending_count=len(
+            pending_contact_requests
+        ),
+        contact_request_completed_count=len(
+            completed_contact_requests
+        ),
+        contact_request_reviewed_count=len(
+            reviewed_contact_requests
+        ),
         is_manager=user_is_manager(),
     )
 
@@ -2598,21 +2659,81 @@ def delete_contact(customer_id, contact_id):
         )
     )
 
+
+# ==========================================
+# CONTACT REQUEST TRACKING
+# ==========================================
+
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/flag-needs-contacts",
     methods=["POST"],
 )
 def flag_needs_contacts(customer_id):
+
     customer = get_customer_or_403(customer_id)
 
-    customer.needs_contacts = True
-    customer.needs_contacts_flagged_by = current_user_id()
-    customer.needs_contacts_flagged_at = datetime.utcnow()
+    # Prevent duplicate pending requests.
 
+    existing_request = (
+        ContactRequest.query
+        .filter_by(
+            customer_id=customer.id,
+            status="pending"
+        )
+        .first()
+    )
+
+    if existing_request:
+
+        # Synchronize the legacy flag if needed.
+        customer.needs_contacts = True
+        customer.needs_contacts_flagged_by = (
+            existing_request.requested_by
+        )
+        customer.needs_contacts_flagged_at = (
+            existing_request.requested_at
+        )
+
+        db.session.commit()
+
+        flash(
+            "A contact request is already pending "
+            "for this customer.",
+            "info",
+        )
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
+
+    # Create a permanent request record.
+
+    now = datetime.utcnow()
+
+    contact_request = ContactRequest(
+        customer_id=customer.id,
+        requested_by=current_user_id(),
+        requested_at=now,
+        status="pending",
+    )
+
+    # Preserve existing flag functionality.
+
+    customer.needs_contacts = True
+    customer.needs_contacts_flagged_by = (
+        current_user_id()
+    )
+    customer.needs_contacts_flagged_at = now
+
+    db.session.add(contact_request)
     db.session.commit()
 
     flash(
-        "This customer has been flagged as needing contacts.",
+        "Contact request submitted successfully. "
+        "You can track its status on your dashboard.",
         "success",
     )
 
@@ -2624,15 +2745,82 @@ def flag_needs_contacts(customer_id):
     )
 
 
+# ==========================================
+# MANAGER: COMPLETE CONTACT REQUEST
+# ==========================================
+
 @daily_activity_bp.route(
     "/customer/<int:customer_id>/clear-needs-contacts",
     methods=["POST"],
 )
 def clear_needs_contacts(customer_id):
-    customer = get_customer_or_403(customer_id)
 
     if not user_is_manager():
         abort(403)
+
+    customer = get_customer_or_403(customer_id)
+
+    pending_requests = (
+        ContactRequest.query
+        .filter_by(
+            customer_id=customer.id,
+            status="pending",
+        )
+        .all()
+    )
+
+    # Support legacy flagged customers that
+    # existed before the new tracking table.
+
+    if not pending_requests and customer.needs_contacts:
+
+        legacy_request = ContactRequest(
+            customer_id=customer.id,
+            requested_by=(
+                customer.needs_contacts_flagged_by
+                or customer.user_id
+            ),
+            requested_at=(
+                customer.needs_contacts_flagged_at
+                or datetime.utcnow()
+            ),
+            status="pending",
+        )
+
+        db.session.add(legacy_request)
+        pending_requests = [legacy_request]
+
+    if not pending_requests:
+        flash(
+            "There is no pending contact request "
+            "for this customer.",
+            "info",
+        )
+
+        return redirect(
+            da_url(
+                "customer_detail",
+                customer_id=customer.id,
+            )
+        )
+
+    # Complete all pending requests.
+    # Their history remains in the database.
+
+    manager_notes = request.form.get(
+        "manager_notes",
+        "",
+    ).strip()
+
+    for contact_request in pending_requests:
+
+        contact_request.mark_completed(
+            manager_user_id=current_user_id(),
+            notes=manager_notes or None,
+        )
+
+    # Clear the legacy flag so the customer
+    # disappears from the manager's pending list.
 
     customer.needs_contacts = False
     customer.needs_contacts_flagged_by = None
@@ -2641,7 +2829,9 @@ def clear_needs_contacts(customer_id):
     db.session.commit()
 
     flash(
-        "Needs Contacts flag cleared.",
+        "Contact request completed successfully. "
+        "The sales rep can now review the "
+        "completed request on their dashboard.",
         "success",
     )
 
@@ -2650,6 +2840,59 @@ def clear_needs_contacts(customer_id):
             "customer_detail",
             customer_id=customer.id,
         )
+    )
+
+
+# ==========================================
+# SALES REP: REVIEW COMPLETED CONTACTS
+# ==========================================
+
+@daily_activity_bp.route(
+    "/contact-request/<int:request_id>/review",
+    methods=["POST"],
+)
+def review_contact_request(request_id):
+
+    contact_request = (
+        ContactRequest.query
+        .get_or_404(request_id)
+    )
+
+    # Only the requesting rep or a manager
+    # can acknowledge the completed request.
+
+    if (
+        not user_is_manager()
+        and contact_request.requested_by
+        != current_user_id()
+    ):
+        abort(403)
+
+    if contact_request.status != "completed":
+
+        flash(
+            "Only completed contact requests "
+            "can be marked as reviewed.",
+            "error",
+        )
+
+        return redirect(
+            da_url("dashboard")
+        )
+
+    contact_request.mark_reviewed()
+
+    db.session.commit()
+
+    flash(
+        "Contact request marked as reviewed. "
+        "It will remain available in your "
+        "request history.",
+        "success",
+    )
+
+    return redirect(
+        da_url("dashboard")
     )
 
 @daily_activity_bp.route(

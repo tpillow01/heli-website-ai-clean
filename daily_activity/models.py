@@ -1,3 +1,4 @@
+
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 
@@ -20,7 +21,7 @@ class Customer(db.Model):
 
     assigned_rep = db.Column(db.String(100), nullable=True)
 
-    # Legacy fields kept for compatibility with existing data/forms.
+    # Legacy fields kept for compatibility.
     status = db.Column(
         db.String(50),
         nullable=True,
@@ -33,7 +34,7 @@ class Customer(db.Model):
         default="Medium"
     )
 
-    # Relationship-driven workflow fields
+    # Relationship workflow
     relationship_type = db.Column(
         db.String(50),
         nullable=False,
@@ -45,7 +46,8 @@ class Customer(db.Model):
         nullable=True
     )
 
-    # Reps can flag customer profiles that need contact information.
+    # Existing contact-request flags.
+    # These remain for compatibility with existing routes.
     needs_contacts = db.Column(
         db.Boolean,
         nullable=False,
@@ -62,6 +64,7 @@ class Customer(db.Model):
         nullable=True
     )
 
+    # Activity tracking dates
     last_contact_date = db.Column(
         db.String(50),
         nullable=True
@@ -77,6 +80,7 @@ class Customer(db.Model):
         nullable=True
     )
 
+    # Notes
     notes = db.Column(
         db.Text,
         nullable=True
@@ -117,6 +121,7 @@ class Customer(db.Model):
         default=datetime.utcnow
     )
 
+    # Existing relationships
     contacts = db.relationship(
         "Contact",
         backref="customer",
@@ -145,6 +150,115 @@ class Customer(db.Model):
         cascade="all, delete-orphan"
     )
 
+    # NEW: Contact request history
+    contact_requests = db.relationship(
+        "ContactRequest",
+        backref="customer",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ContactRequest.requested_at.desc()"
+    )
+
+
+# ==========================================
+# NEW: CONTACT REQUEST TRACKING
+# ==========================================
+
+class ContactRequest(db.Model):
+    __tablename__ = "contact_requests"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    # Customer associated with the request.
+    customer_id = db.Column(
+        db.Integer,
+        db.ForeignKey("customers.id"),
+        nullable=False,
+        index=True
+    )
+
+    # Rep who originally requested contacts.
+    requested_by = db.Column(
+        db.Integer,
+        nullable=False,
+        index=True
+    )
+
+    # When the request was submitted.
+    requested_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow
+    )
+
+    # pending / completed / reviewed
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="pending",
+        index=True
+    )
+
+    # Manager who completed the request.
+    completed_by = db.Column(
+        db.Integer,
+        nullable=True
+    )
+
+    completed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # Rep acknowledgement.
+    reviewed_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    # Optional manager message to the rep.
+    manager_notes = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    # Optional rep notes on the request.
+    request_notes = db.Column(
+        db.Text,
+        nullable=True
+    )
+
+    def mark_completed(self, manager_user_id, notes=None):
+        """Mark a pending request completed."""
+        if self.status != "pending":
+            raise ValueError(
+                "Only pending requests can be completed."
+            )
+
+        self.status = "completed"
+        self.completed_by = manager_user_id
+        self.completed_at = datetime.utcnow()
+
+        if notes is not None:
+            self.manager_notes = notes
+
+    def mark_reviewed(self):
+        """Acknowledge a completed request."""
+        if self.status != "completed":
+            raise ValueError(
+                "Only completed requests can be reviewed."
+            )
+
+        self.status = "reviewed"
+        self.reviewed_at = datetime.utcnow()
+
+
+# ==========================================
+# CONTACTS
+# ==========================================
 
 class Contact(db.Model):
     __tablename__ = "contacts"
@@ -175,7 +289,6 @@ class Contact(db.Model):
         nullable=True
     )
 
-    # Existing primary phone field is kept for compatibility.
     phone = db.Column(
         db.String(50),
         nullable=True
@@ -211,6 +324,10 @@ class Contact(db.Model):
     )
 
 
+# ==========================================
+# CONTACT PHONE NUMBERS
+# ==========================================
+
 class ContactPhone(db.Model):
     __tablename__ = "contact_phones"
 
@@ -241,6 +358,10 @@ class ContactPhone(db.Model):
     )
 
 
+# ==========================================
+# CUSTOMER DOCUMENTS
+# ==========================================
+
 class CustomerDocument(db.Model):
     __tablename__ = "customer_documents"
 
@@ -255,19 +376,16 @@ class CustomerDocument(db.Model):
         nullable=False
     )
 
-    # User who uploaded the document
     user_id = db.Column(
         db.Integer,
         nullable=False
     )
 
-    # Friendly name shown to the user
     original_filename = db.Column(
         db.String(255),
         nullable=False
     )
 
-    # Unique filename used on the Render persistent disk
     stored_filename = db.Column(
         db.String(255),
         nullable=False,
@@ -300,6 +418,10 @@ class CustomerDocument(db.Model):
         default=datetime.utcnow
     )
 
+
+# ==========================================
+# ACTIVITY LOGS
+# ==========================================
 
 class ActivityLog(db.Model):
     __tablename__ = "activity_logs"
@@ -350,6 +472,10 @@ class ActivityLog(db.Model):
         default=datetime.utcnow
     )
 
+
+# ==========================================
+# FLEET INFORMATION
+# ==========================================
 
 class FleetInfo(db.Model):
     __tablename__ = "fleet_info"
@@ -405,6 +531,11 @@ class FleetInfo(db.Model):
         default=datetime.utcnow
     )
 
+
+# ==========================================
+# SALES LEADS
+# ==========================================
+
 class SalesLead(db.Model):
     __tablename__ = "sales_leads"
 
@@ -413,7 +544,6 @@ class SalesLead(db.Model):
         primary_key=True
     )
 
-    # User ID of the sales rep who owns this lead.
     assigned_user_id = db.Column(
         db.Integer,
         nullable=False
@@ -476,7 +606,6 @@ class SalesLead(db.Model):
         nullable=True
     )
 
-    # Used later if the lead is converted into a customer.
     converted_customer_id = db.Column(
         db.Integer,
         nullable=True
@@ -505,6 +634,10 @@ class SalesLead(db.Model):
         cascade="all, delete-orphan"
     )
 
+
+# ==========================================
+# LEAD SALES PROCESS
+# ==========================================
 
 class LeadSalesProcess(db.Model):
     __tablename__ = "lead_sales_process"
@@ -554,7 +687,7 @@ class LeadSalesProcess(db.Model):
         nullable=True
     )
 
-    # 4. What is the buying process?
+    # 4. Buying Process
     buying_process = db.Column(
         db.Text,
         nullable=True
@@ -565,7 +698,7 @@ class LeadSalesProcess(db.Model):
         nullable=True
     )
 
-    # 5. How do we solve the pain points?
+    # 5. Solve Pain Points
     solve_pain_points = db.Column(
         db.Text,
         nullable=True
@@ -576,7 +709,7 @@ class LeadSalesProcess(db.Model):
         nullable=True
     )
 
-    # 6. What is our proposal?
+    # 6. Proposal
     proposal = db.Column(
         db.Text,
         nullable=True
@@ -587,7 +720,7 @@ class LeadSalesProcess(db.Model):
         nullable=True
     )
 
-    # 7. How do we close?
+    # 7. Closing Plan
     close_plan = db.Column(
         db.Text,
         nullable=True
@@ -598,7 +731,7 @@ class LeadSalesProcess(db.Model):
         nullable=True
     )
 
-    # 8. If lost, why did we lose?
+    # 8. Lost Reason
     lost_reason = db.Column(
         db.Text,
         nullable=True
@@ -613,4 +746,4 @@ class LeadSalesProcess(db.Model):
         db.DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow
-    )  
+    )

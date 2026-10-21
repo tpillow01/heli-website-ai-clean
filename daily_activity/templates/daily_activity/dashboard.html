@@ -247,9 +247,9 @@
 
                                     <button
                                         type="submit"
-                                        class="btn btn-small btn-secondary"
+                                        class="btn btn-small btn-primary"
                                     >
-                                        Clear Flag
+                                         Mark Contacts Added
                                     </button>
 
                                 </form>
@@ -277,6 +277,423 @@
 </div>
 
 {% endif %}
+
+
+<!-- ===================================================== -->
+<!-- SALES REP - CONTACT REQUEST TRACKING                  -->
+<!-- ===================================================== -->
+
+{% if not is_manager %}
+
+<div class="panel-card" style="margin-bottom:24px;">
+
+    <div class="panel-top">
+        <div>
+            <div class="hero-eyebrow">
+                Contact Management
+            </div>
+
+            <h3>My Contact Requests</h3>
+
+            <p>
+                Track companies where you have requested
+                contact information. Review completed
+                requests and keep a history of your requests.
+            </p>
+        </div>
+    </div>
+
+    <!-- REQUEST COUNTS -->
+
+    <div class="contact-request-stats">
+
+        <div class="mini-stat-card">
+            <span>Awaiting Contacts</span>
+            <strong>
+                {{ contact_request_pending_count }}
+            </strong>
+        </div>
+
+        <div class="mini-stat-card">
+            <span>Contacts Added</span>
+            <strong>
+                {{ contact_request_completed_count }}
+            </strong>
+        </div>
+
+        <div class="mini-stat-card">
+            <span>Reviewed</span>
+            <strong>
+                {{ contact_request_reviewed_count }}
+            </strong>
+        </div>
+
+    </div>
+
+    <!-- PENDING REQUESTS -->
+
+    <div class="contact-request-group">
+
+        <h3>Awaiting Contacts</h3>
+
+        <p class="contact-request-description">
+            These requests have been submitted and are
+            waiting for contact information to be added.
+        </p>
+
+        {% if pending_contact_requests %}
+
+            <div class="item-list">
+
+                {% for contact_request in pending_contact_requests %}
+
+                    <div class="list-item">
+
+                        <div class="list-item-main">
+
+                            <div class="list-title">
+                                {{ contact_request.customer.company_name }}
+                            </div>
+
+                            <div class="list-meta">
+                                Requested:
+                                {{ contact_request.requested_at.strftime("%m/%d/%Y") }}
+                            </div>
+
+                            {% if contact_request.request_notes %}
+                                <div class="list-text">
+                                    {{ contact_request.request_notes }}
+                                </div>
+                            {% endif %}
+
+                            <div class="list-meta">
+                                Status:
+                                <span class="contact-status pending">
+                                    Awaiting Contacts
+                                </span>
+                            </div>
+
+                        </div>
+
+                        <div class="list-item-action">
+
+                            <a
+                                href="{{ url_for(
+                                    'customer_detail',
+                                    customer_id=contact_request.customer_id
+                                ) }}"
+                                class="btn btn-small btn-secondary"
+                            >
+                                Open Customer
+                            </a>
+
+                        </div>
+
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% else %}
+
+            <div class="empty-state">
+                You have no pending contact requests.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+    <!-- COMPLETED REQUESTS -->
+
+    <div class="contact-request-group">
+
+        <h3>Contacts Added - Ready to Review</h3>
+
+        <p class="contact-request-description">
+            These companies have had their contact requests
+            completed. Open the customer profile to view
+            the contact information, then mark the request
+            as reviewed.
+        </p>
+
+        {% if completed_contact_requests %}
+
+            <div class="item-list">
+
+                {% for contact_request in completed_contact_requests %}
+
+                    <div class="list-item">
+
+                        <div class="list-item-main">
+
+                            <div class="list-title">
+                                {{ contact_request.customer.company_name }}
+                            </div>
+
+                            <div class="list-meta">
+                                Requested:
+                                {{ contact_request.requested_at.strftime("%m/%d/%Y") }}
+                            </div>
+
+                            {% if contact_request.completed_at %}
+                                <div class="list-meta">
+                                    Completed:
+                                    {{ contact_request.completed_at.strftime("%m/%d/%Y") }}
+                                </div>
+                            {% endif %}
+
+                            <div class="list-meta">
+                                Status:
+                                <span class="contact-status completed">
+                                    Contacts Added
+                                </span>
+                            </div>
+
+                            {% if contact_request.manager_notes %}
+
+                                <div class="list-text"
+                                     style="margin-top:8px;">
+
+                                    <strong>Manager Notes:</strong>
+                                    {{ contact_request.manager_notes }}
+
+                                </div>
+
+                            {% endif %}
+
+                        </div>
+
+                        <div class="contact-request-actions">
+
+                            <a
+                                href="{{ url_for(
+                                    'customer_detail',
+                                    customer_id=contact_request.customer_id
+                                ) }}"
+                                class="btn btn-small btn-primary"
+                            >
+                                View Contacts
+                            </a>
+
+                            <form
+                                method="POST"
+                                action="{{ url_for(
+                                    'review_contact_request',
+                                    request_id=contact_request.id
+                                ) }}"
+                            >
+
+                                <button
+                                    type="submit"
+                                    class="btn btn-small btn-secondary"
+                                >
+                                    Mark Reviewed
+                                </button>
+
+                            </form>
+
+                        </div>
+
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% else %}
+
+            <div class="empty-state">
+                No completed requests are waiting for review.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+    <!-- REVIEWED HISTORY -->
+
+    <div class="contact-request-group">
+
+        <details class="contact-history-details">
+
+            <summary>
+                Reviewed Contact Request History
+                ({{ contact_request_reviewed_count }})
+            </summary>
+
+            <div style="margin-top:16px;">
+
+                {% if reviewed_contact_requests %}
+
+                    <div class="item-list">
+
+                        {% for contact_request in reviewed_contact_requests %}
+
+                            <div class="list-item">
+
+                                <div class="list-item-main">
+
+                                    <div class="list-title">
+                                        {{ contact_request.customer.company_name }}
+                                    </div>
+
+                                    <div class="list-meta">
+                                        Requested:
+                                        {{ contact_request.requested_at.strftime("%m/%d/%Y") }}
+                                    </div>
+
+                                    {% if contact_request.completed_at %}
+
+                                        <div class="list-meta">
+                                            Completed:
+                                            {{ contact_request.completed_at.strftime("%m/%d/%Y") }}
+                                        </div>
+
+                                    {% endif %}
+
+                                    {% if contact_request.reviewed_at %}
+
+                                        <div class="list-meta">
+                                            Reviewed:
+                                            {{ contact_request.reviewed_at.strftime("%m/%d/%Y") }}
+                                        </div>
+
+                                    {% endif %}
+
+                                    <div class="list-meta">
+                                        <span class="contact-status reviewed">
+                                            Reviewed
+                                        </span>
+                                    </div>
+
+                                </div>
+
+                                <div class="list-item-action">
+
+                                    <a
+                                        href="{{ url_for(
+                                            'customer_detail',
+                                            customer_id=contact_request.customer_id
+                                        ) }}"
+                                        class="btn btn-small btn-secondary"
+                                    >
+                                        Open Customer
+                                    </a>
+
+                                </div>
+
+                            </div>
+
+                        {% endfor %}
+
+                    </div>
+
+                {% else %}
+
+                    <div class="empty-state">
+                        No reviewed contact requests yet.
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+        </details>
+
+    </div>
+
+</div>
+
+{% endif %}
+
+
+<!-- CONTACT REQUEST STYLING -->
+
+<style>
+
+.contact-request-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.contact-request-group {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(128,128,128,0.2);
+}
+
+.contact-request-group h3 {
+    margin-bottom: 6px;
+}
+
+.contact-request-description {
+    margin-bottom: 16px;
+    font-size: 13px;
+    opacity: 0.75;
+    line-height: 1.6;
+}
+
+.contact-status {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.contact-status.pending {
+    background: rgba(245,158,11,0.12);
+    color: #b7791f;
+}
+
+.contact-status.completed {
+    background: rgba(34,197,94,0.12);
+    color: #15803d;
+}
+
+.contact-status.reviewed {
+    background: rgba(100,116,139,0.12);
+    color: #64748b;
+}
+
+.contact-request-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.contact-request-actions form {
+    margin: 0;
+}
+
+.contact-history-details {
+    padding: 12px;
+    border: 1px solid rgba(128,128,128,0.2);
+    border-radius: 8px;
+}
+
+.contact-history-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 4px;
+}
+
+@media (max-width: 700px) {
+    .contact-request-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .contact-request-actions {
+        width: 100%;
+    }
+}
+
+</style>
 
 
 <!-- ===================================================== -->

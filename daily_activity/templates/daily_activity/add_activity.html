@@ -1,3 +1,4 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Add Activity | Daily Activity App{% endblock %}
@@ -54,7 +55,6 @@
     </div>
 </div>
 
-
 <div class="panel-card form-shell">
 
     <div class="panel-top">
@@ -68,10 +68,11 @@
         </div>
     </div>
 
-
     <form method="POST" class="main-form" autocomplete="on">
 
         <div class="form-grid">
+
+            <!-- CUSTOMER -->
 
             <div class="form-row">
                 <label for="customer_id">Customer</label>
@@ -102,6 +103,7 @@
                 {% endif %}
             </div>
 
+            <!-- ACTIVITY TYPE -->
 
             <div class="form-row">
                 <label for="activity_type">Activity Type</label>
@@ -113,29 +115,12 @@
                 >
                     <option value="">Select Type</option>
 
-                    <option value="Cold Call">
-                        Cold Call
-                    </option>
-
-                    <option value="Phone Call">
-                        Phone Call
-                    </option>
-
-                    <option value="Email">
-                        Email
-                    </option>
-
-                    <option value="Meeting">
-                        Meeting
-                    </option>
-
-                    <option value="Quote">
-                        Quote
-                    </option>
-
-                    <option value="Sale">
-                        Sale
-                    </option>
+                    <option value="Cold Call">Cold Call</option>
+                    <option value="Phone Call">Phone Call</option>
+                    <option value="Email">Email</option>
+                    <option value="Meeting">Meeting</option>
+                    <option value="Quote">Quote</option>
+                    <option value="Sale">Sale</option>
                 </select>
 
                 <small class="form-help">
@@ -144,6 +129,7 @@
                 </small>
             </div>
 
+            <!-- SALES REP -->
 
             {% if current_rep_name %}
 
@@ -176,6 +162,7 @@
 
             {% endif %}
 
+            <!-- ACTIVITY DATE -->
 
             <div class="form-row">
                 <label for="activity_date">Activity Date</label>
@@ -184,11 +171,17 @@
                     type="date"
                     id="activity_date"
                     name="activity_date"
-                    value="{{ today }}"
+                    value="{{ today | default('', true) }}"
                     required
                 >
+
+                <small class="form-help">
+                    Automatically set to today's date.
+                    You can change it if you're logging a previous activity.
+                </small>
             </div>
 
+            <!-- CUSTOMER OUTCOME -->
 
             <div class="form-row">
                 <label for="customer_outcome">
@@ -215,6 +208,7 @@
                 </small>
             </div>
 
+            <!-- FOLLOW-UP ACTION -->
 
             <div class="form-row">
                 <label for="follow_up_action">
@@ -225,10 +219,7 @@
                     id="follow_up_action"
                     name="follow_up_action"
                 >
-                    <option
-                        value="complete"
-                        selected
-                    >
+                    <option value="complete" selected>
                         Mark Current Follow-Up Complete
                     </option>
 
@@ -243,6 +234,7 @@
                 </small>
             </div>
 
+            <!-- NEXT FOLLOW-UP DATE -->
 
             <div class="form-row">
                 <label for="follow_up_date">
@@ -258,6 +250,7 @@
 
         </div>
 
+        <!-- SUMMARY -->
 
         <div class="form-row">
             <label for="summary">Summary</label>
@@ -271,6 +264,7 @@
             ></textarea>
         </div>
 
+        <!-- NEXT STEP -->
 
         <div class="form-row">
             <label for="next_step">Next Step</label>
@@ -283,6 +277,7 @@
             >
         </div>
 
+        <!-- SAVE BUTTON -->
 
         <div class="hero-actions" style="margin-top: 8px;">
 
@@ -305,5 +300,68 @@
     </form>
 
 </div>
+
+<!-- AUTOMATIC INDIANA ACTIVITY DATE -->
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const activityDate = document.getElementById("activity_date");
+
+    if (!activityDate) {
+        return;
+    }
+
+    let dateManuallyChanged = false;
+
+    // Use Indiana Eastern Time rather than UTC.
+    function getIndianaToday() {
+
+        const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone: "America/Indiana/Indianapolis",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+        }).formatToParts(new Date());
+
+        const dateParts = Object.fromEntries(
+            parts.map(part => [part.type, part.value])
+        );
+
+        return (
+            dateParts.year + "-" +
+            dateParts.month + "-" +
+            dateParts.day
+        );
+    }
+
+    // Populate today's date automatically.
+    function setDefaultActivityDate() {
+        if (!dateManuallyChanged) {
+            activityDate.value = getIndianaToday();
+        }
+    }
+
+    setDefaultActivityDate();
+
+    // Let reps manually change the activity date.
+    activityDate.addEventListener("input", function () {
+        dateManuallyChanged = true;
+    });
+
+    // Refresh date when returning to the tab,
+    // unless the rep manually selected another date.
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) {
+            setDefaultActivityDate();
+        }
+    });
+
+    window.addEventListener("pageshow", function () {
+        setDefaultActivityDate();
+    });
+
+});
+</script>
 
 {% endblock %}
