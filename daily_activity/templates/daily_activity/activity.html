@@ -1,259 +1,839 @@
 
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Activity | Daily Activity App{% endblock %}
-{% block page_title %}Activity{% endblock %}
-{% block page_subtitle %}
-Track calls, emails, meetings, quotes, sales, and follow-up actions in one organized log
-{% endblock %}
+{% block page_title %}Sales Activity{% endblock %}
+{% block page_subtitle %}Monitor customer interactions and sales activity{% endblock %}
 
 {% block content %}
 
-<div class="hero-panel">
-    <div class="hero-panel-left">
-        <div class="hero-eyebrow">Rep Activity</div>
+<style>
+/* COMPACT ACTIVITY DASHBOARD */
 
-        <h3>Review recent customer activity and next actions</h3>
+.act-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
 
-        <p>
-            Use the activity log to keep a running record
-            of cold calls, phone calls, emails, meetings,
-            quotes, and sales.
-        </p>
+.act-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
 
-        <div class="hero-actions">
-            <a href="{{ url_for('add_activity') }}"
-               class="btn btn-primary">
-                Add Activity
-            </a>
+.act-header h2 {
+    font-size: 1.45rem;
+    font-weight: 800;
+    margin: 0 0 4px;
+}
 
-            <a href="{{ url_for('customers') }}"
-               class="btn btn-secondary">
-                View Customers
-            </a>
+.act-header p {
+    margin: 0;
+    opacity: .7;
+    font-size: .88rem;
+}
 
-            <a href="{{ url_for('planner') }}"
-               class="btn btn-secondary">
-                Open Planner
-            </a>
-        </div>
-    </div>
+.act-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
 
-    <div class="hero-panel-right">
-        <div class="mini-stat-card">
-            <span>Total Logs</span>
-            <strong>{{ logs|length }}</strong>
-        </div>
+/* STATISTICS */
 
-        <div class="mini-stat-card">
-            <span>Cold Calls</span>
-            <strong>
-                {{ logs|selectattr('activity_type', 'equalto', 'Cold Call')|list|length }}
-            </strong>
-        </div>
+.act-stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0,1fr));
+    gap: 10px;
+}
 
-        <div class="mini-stat-card">
-            <span>Phone Calls</span>
-            <strong>
-                {{ logs|selectattr('activity_type', 'equalto', 'Phone Call')|list|length }}
-            </strong>
-        </div>
+.act-stat {
+    padding: 14px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(128,128,128,.22);
+    background: rgba(128,128,128,.055);
+    text-align: center;
+}
 
-        <div class="mini-stat-card">
-            <span>Meetings</span>
-            <strong>
-                {{ logs|selectattr('activity_type', 'equalto', 'Meeting')|list|length }}
-            </strong>
-        </div>
-    </div>
-</div>
+.act-stat .number {
+    font-size: 1.7rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
 
-<!-- ACTIVITY FILTERS -->
+.act-stat .label {
+    font-size: .76rem;
+    opacity: .75;
+    margin-top: 5px;
+}
 
-<div class="panel-card">
-    <div class="panel-top">
+/* FILTER BAR */
+
+.act-filter-card {
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(128,128,128,.22);
+}
+
+.act-filter-title {
+    font-size: .98rem;
+    font-weight: 800;
+    margin-bottom: 12px;
+}
+
+.act-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3,minmax(0,1fr)) auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.act-field label {
+    display: block;
+    font-size: .79rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.act-field input,
+.act-field select {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding: 8px 10px;
+    border-radius: 8px;
+}
+
+.act-filter-buttons {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    align-items: end;
+}
+
+.act-filter-buttons .btn {
+    white-space: nowrap;
+}
+
+/* ACTIVITY TABLE */
+
+.act-list-card {
+    border: 1px solid rgba(128,128,128,.22);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.act-list-head {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-bottom: 1px solid rgba(128,128,128,.2);
+}
+
+.act-list-head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.act-list-head span {
+    font-size: .8rem;
+    opacity: .72;
+}
+
+.act-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.act-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.act-table th {
+    text-align: left;
+    font-size: .76rem;
+    font-weight: 800;
+    opacity: .75;
+    padding: 11px 13px;
+    border-bottom: 1px solid rgba(128,128,128,.2);
+    background: rgba(128,128,128,.055);
+}
+
+.act-table td {
+    vertical-align: top;
+    padding: 12px 13px;
+    font-size: .85rem;
+    line-height: 1.45;
+    border-bottom: 1px solid rgba(128,128,128,.12);
+    overflow-wrap: anywhere;
+}
+
+.act-table tbody tr:hover {
+    background: rgba(128,128,128,.055);
+}
+
+.act-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.act-company {
+    font-weight: 750;
+    text-decoration: none;
+}
+
+.act-muted {
+    opacity: .67;
+    font-size: .78rem;
+}
+
+.act-type {
+    display: inline-block;
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: rgba(128,128,128,.12);
+    font-size: .76rem;
+    font-weight: 750;
+    white-space: nowrap;
+}
+
+.act-summary {
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+}
+
+.act-details summary {
+    cursor: pointer;
+    font-size: .76rem;
+    font-weight: 700;
+    margin-top: 5px;
+}
+
+.act-full-notes {
+    padding-top: 7px;
+    font-size: .82rem;
+    white-space: pre-wrap;
+}
+
+.act-next-step {
+    font-size: .82rem;
+}
+
+.act-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(128,128,128,.2);
+}
+
+.act-page-buttons {
+    display: flex;
+    gap: 7px;
+}
+
+.act-page-buttons button {
+    padding: 7px 12px;
+    border: 1px solid rgba(128,128,128,.3);
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.act-page-buttons button:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+}
+
+.act-empty {
+    padding: 35px 18px;
+    text-align: center;
+    opacity: .75;
+}
+
+@media(max-width:1050px) {
+    .act-stats {
+        grid-template-columns: repeat(3,1fr);
+    }
+
+    .act-filter-grid {
+        grid-template-columns: repeat(2,minmax(0,1fr));
+    }
+}
+
+@media(max-width:650px) {
+    .act-header {
+        align-items: flex-start;
+    }
+
+    .act-header h2 {
+        font-size: 1.25rem;
+    }
+
+    .act-stats {
+        grid-template-columns: repeat(3,1fr);
+        gap: 7px;
+    }
+
+    .act-stat {
+        padding: 11px 6px;
+    }
+
+    .act-stat .number {
+        font-size: 1.35rem;
+    }
+
+    .act-stat .label {
+        font-size: .68rem;
+    }
+
+    .act-filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .act-table,
+    .act-table tbody,
+    .act-table tr,
+    .act-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .act-table thead {
+        display: none;
+    }
+
+    .act-table tbody tr {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(128,128,128,.2);
+    }
+
+    .act-table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 5px 0;
+        border: none;
+        text-align: right;
+    }
+
+    .act-table td::before {
+        content: attr(data-label);
+        font-size: .75rem;
+        font-weight: 750;
+        opacity: .7;
+        text-align: left;
+        flex: 0 0 85px;
+    }
+
+    .act-table td > div {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .act-table td .act-summary {
+        text-align: right;
+    }
+
+    .act-pagination {
+        flex-wrap: wrap;
+    }
+}
+</style>
+
+<div class="act-page">
+
+    <!-- COMPACT HEADER -->
+
+    <div class="act-header">
         <div>
-            <h3>Activity Filters</h3>
+            <h2>
+                {% if is_manager %}
+                    Team Activity
+                {% else %}
+                    My Activity
+                {% endif %}
+            </h2>
 
             <p>
-                {% if is_manager %}
-                    Filter by sales representative and activity type.
-                {% else %}
-                    Filter your activity history by activity type.
-                {% endif %}
-                Your filters will remain selected when
-                you return to this page.
+                Review customer interactions and follow-ups.
             </p>
+        </div>
+
+        <div class="act-actions">
+            <a href="{{ url_for('customers') }}"
+               class="btn btn-secondary">
+                Customers
+            </a>
+
+            <a href="{{ url_for('add_activity') }}"
+               class="btn btn-primary">
+                + Log Activity
+            </a>
         </div>
     </div>
 
-    <form method="GET" action="{{ url_for('activity') }}">
+    <!-- ACTIVITY STATS -->
 
-        <div style="
-            display:grid;
-            grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-            gap:14px;
-            align-items:end;
-        ">
+    <div class="act-stats">
+
+        <div class="act-stat">
+            <div class="number">{{ logs|length }}</div>
+            <div class="label">Total</div>
+        </div>
+
+        <div class="act-stat">
+            <div class="number">
+                {{ logs|selectattr('activity_type','equalto','Cold Call')|list|length }}
+            </div>
+            <div class="label">Cold Calls</div>
+        </div>
+
+        <div class="act-stat">
+            <div class="number">
+                {{ logs|selectattr('activity_type','equalto','Phone Call')|list|length }}
+            </div>
+            <div class="label">Phone Calls</div>
+        </div>
+
+        <div class="act-stat">
+            <div class="number">
+                {{ logs|selectattr('activity_type','equalto','Meeting')|list|length }}
+            </div>
+            <div class="label">Meetings</div>
+        </div>
+
+        <div class="act-stat">
+            <div class="number">
+                {{ logs|selectattr('activity_type','equalto','Quote')|list|length }}
+            </div>
+            <div class="label">Quotes</div>
+        </div>
+
+        <div class="act-stat">
+            <div class="number">
+                {{ logs|selectattr('activity_type','equalto','Sale')|list|length }}
+            </div>
+            <div class="label">Sales</div>
+        </div>
+
+    </div>
+
+    <!-- FILTERS -->
+
+    <div class="act-filter-card">
+
+        <div class="act-filter-title">
+            Filter Activity
+        </div>
+
+        <form method="GET"
+              action="{{ url_for('activity') }}"
+              class="act-filter-grid">
 
             {% if is_manager %}
-            <div class="form-row">
-                <label for="rep">Sales Rep</label>
+                <div class="act-field">
+                    <label for="rep">Sales Rep</label>
 
-                <select id="rep" name="rep">
-                    <option value="">All Reps</option>
+                    <select name="rep" id="rep">
+                        <option value="">All Reps</option>
 
-                    {% for user_id, rep_name in tracked_reps.items() %}
-                        <option value="{{ user_id }}"
-                            {% if selected_rep == user_id|string %}selected{% endif %}>
-                            {{ rep_name }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
+                        {% for user_id, rep_name in tracked_reps.items() %}
+                            <option value="{{ user_id }}"
+                                {% if selected_rep == user_id|string %}
+                                    selected
+                                {% endif %}>
+                                {{ rep_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
             {% endif %}
 
-            <div class="form-row">
+            <div class="act-field">
                 <label for="type">Activity Type</label>
 
-                <select id="type" name="type">
-                    <option value="">All Activity Types</option>
+                <select name="type" id="type">
+                    <option value="">All Activities</option>
 
                     {% for activity_type in activity_types %}
                         <option value="{{ activity_type }}"
-                            {% if selected_type == activity_type %}selected{% endif %}>
+                            {% if selected_type == activity_type %}
+                                selected
+                            {% endif %}>
                             {{ activity_type }}
                         </option>
                     {% endfor %}
                 </select>
             </div>
 
-            <div class="hero-actions">
-                <button type="submit" class="btn btn-primary">
-                    Apply Filters
+            <div class="act-field">
+                <label for="customer-search">
+                    Search Customer / Notes
+                </label>
+
+                <input type="search"
+                       id="customer-search"
+                       placeholder="Search activity..."
+                       autocomplete="off">
+            </div>
+
+            <div class="act-filter-buttons">
+                <button type="submit"
+                        class="btn btn-primary">
+                    Apply
                 </button>
 
                 <a href="{{ url_for('activity', clear=1) }}"
                    class="btn btn-secondary">
-                    Clear Filters
+                    Clear
                 </a>
             </div>
 
-        </div>
-    </form>
-</div>
+        </form>
 
-<!-- ACTIVITY LOG -->
-
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>Activity Log</h3>
-
-            <p>
-                Review customer interactions, summaries,
-                contact emails, and next-step planning
-                in one table.
-            </p>
-        </div>
-
-        <a href="{{ url_for('add_activity') }}"
-           class="btn btn-primary btn-sm">
-            + Add Activity
-        </a>
     </div>
 
-    {% if logs %}
+    <!-- LOG LIST -->
 
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Rep</th>
-                        <th>Customer</th>
-                        <th>Type</th>
-                        <th>Summary</th>
-                        <th>Next Step</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
+    <div class="act-list-card">
 
-                <tbody>
-                    {% for log in logs %}
-                    <tr>
-                        <td>
-                            {{ log.rep_name or '—' }}
-                        </td>
+        <div class="act-list-head">
+            <h3>Activity History</h3>
 
-                        <td>
-                            {% if log.customer %}
-                                <a href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
-                                    {{ log.customer.company_name }}
-                                </a>
+            <span id="activity-result-count">
+                {{ logs|length }} records
+            </span>
+        </div>
 
-                                {% for contact in log.customer.contacts %}
-                                    {% if contact.email %}
-                                        <div class="list-meta">
-                                            <a href="mailto:{{ contact.email|e }}">
-                                                {{ contact.email }}
-                                            </a>
-                                        </div>
+        {% if logs %}
+
+            <div class="act-table-wrap">
+                <table class="act-table">
+                    <colgroup>
+                        <col style="width:12%;">
+                        <col style="width:19%;">
+                        <col style="width:12%;">
+                        <col style="width:28%;">
+                        <col style="width:18%;">
+                        <col style="width:11%;">
+                    </colgroup>
+
+                    <thead>
+                        <tr>
+                            <th>Rep</th>
+                            <th>Customer</th>
+                            <th>Activity</th>
+                            <th>Summary</th>
+                            <th>Next Step</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="activity-table-body">
+
+                        {% for log in logs %}
+                        <tr class="activity-row"
+                            data-search="{{ (
+                                (log.rep_name or '') ~ ' ' ~
+                                (log.customer.company_name if log.customer else '') ~ ' ' ~
+                                (log.activity_type or '') ~ ' ' ~
+                                (log.summary or '') ~ ' ' ~
+                                (log.next_step or '') ~ ' ' ~
+                                (log.activity_date or '')
+                            )|lower|e }}">
+
+                            <td data-label="Rep">
+                                <div>
+                                    {{ log.rep_name or '—' }}
+                                </div>
+                            </td>
+
+                            <td data-label="Customer">
+                                <div>
+                                    {% if log.customer %}
+                                        <a class="act-company"
+                                           href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
+                                            {{ log.customer.company_name }}
+                                        </a>
+
+                                        {% if log.customer.contacts %}
+                                            {% for contact in log.customer.contacts %}
+                                                {% if contact.email %}
+                                                    <div class="act-muted">
+                                                        <a href="mailto:{{ contact.email|e }}">
+                                                            {{ contact.email }}
+                                                        </a>
+                                                    </div>
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% endif %}
+                                    {% else %}
+                                        —
                                     {% endif %}
-                                {% endfor %}
-                            {% else %}
-                                —
-                            {% endif %}
-                        </td>
+                                </div>
+                            </td>
 
-                        <td>
-                            <span style="
-                                display:inline-block;
-                                padding:5px 10px;
-                                border-radius:999px;
-                                border:1px solid rgba(128,128,128,.25);
-                                font-size:.82rem;
-                                font-weight:700;
-                            ">
-                                {{ log.activity_type or '—' }}
-                            </span>
-                        </td>
+                            <td data-label="Activity">
+                                <div>
+                                    <span class="act-type">
+                                        {{ log.activity_type }}
+                                    </span>
+                                </div>
+                            </td>
 
-                        <td>
-                            {{ log.summary or '—' }}
-                        </td>
+                            <td data-label="Summary">
+                                <div>
+                                    {% if log.summary %}
+                                        <div class="act-summary">
+                                            {{ log.summary }}
+                                        </div>
 
-                        <td>
-                            {{ log.next_step or '—' }}
-                        </td>
+                                        {% if log.summary|length > 110 %}
+                                            <details class="act-details">
+                                                <summary>
+                                                    Read Full Notes
+                                                </summary>
 
-                        <td>
-                            {{ log.activity_date or '—' }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                                                <div class="act-full-notes">{{ log.summary }}</div>
+                                            </details>
+                                        {% endif %}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </div>
+                            </td>
 
-    {% else %}
+                            <td data-label="Next Step">
+                                <div class="act-next-step">
+                                    {{ log.next_step or '—' }}
+                                </div>
+                            </td>
 
-        <div class="empty-state">
-            No activity records match your current filters.
+                            <td data-label="Date">
+                                <div>
+                                    {{ log.activity_date or '—' }}
+                                </div>
+                            </td>
 
-            <div style="margin-top:14px;">
-                <a href="{{ url_for('activity', clear=1) }}"
-                   class="btn btn-secondary">
-                    Clear Filters
-                </a>
+                        </tr>
+                        {% endfor %}
 
-                <a href="{{ url_for('add_activity') }}"
-                   class="btn btn-primary">
-                    Add Activity
-                </a>
+                    </tbody>
+                </table>
             </div>
-        </div>
 
-    {% endif %}
+            <div class="act-empty"
+                 id="activity-no-results"
+                 hidden>
+                No activities match your search.
+            </div>
+
+            <!-- PAGINATION -->
+
+            <div class="act-pagination">
+                <span class="act-muted"
+                      id="activity-page-label">
+                    Showing activity records
+                </span>
+
+                <div class="act-page-buttons">
+                    <button type="button"
+                            id="activity-prev">
+                        Previous
+                    </button>
+
+                    <button type="button"
+                            id="activity-next">
+                        Next
+                    </button>
+                </div>
+            </div>
+
+        {% else %}
+
+            <div class="act-empty">
+                No activities match your current filters.
+
+                <div style="margin-top:12px;">
+                    <a href="{{ url_for('activity', clear=1) }}"
+                       class="btn btn-secondary">
+                        Clear Filters
+                    </a>
+                </div>
+            </div>
+
+        {% endif %}
+
+    </div>
+
 </div>
+
+<!-- CLIENT SEARCH AND PAGINATION -->
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const rows = Array.from(
+        document.querySelectorAll(".activity-row")
+    );
+
+    const searchInput = document.getElementById(
+        "customer-search"
+    );
+
+    const previousButton = document.getElementById(
+        "activity-prev"
+    );
+
+    const nextButton = document.getElementById(
+        "activity-next"
+    );
+
+    const pageLabel = document.getElementById(
+        "activity-page-label"
+    );
+
+    const resultCount = document.getElementById(
+        "activity-result-count"
+    );
+
+    const noResults = document.getElementById(
+        "activity-no-results"
+    );
+
+    const pageSize = 20;
+    let currentPage = 1;
+    let filteredRows = [...rows];
+
+    function renderActivityPage() {
+
+        const total = filteredRows.length;
+
+        const totalPages = Math.max(
+            1,
+            Math.ceil(total / pageSize)
+        );
+
+        currentPage = Math.min(
+            Math.max(1, currentPage),
+            totalPages
+        );
+
+        const start = (currentPage - 1) * pageSize;
+        const end = Math.min(start + pageSize, total);
+
+        rows.forEach(function (row) {
+            row.hidden = true;
+            row.style.display = "none";
+        });
+
+        filteredRows
+            .slice(start, end)
+            .forEach(function (row) {
+                row.hidden = false;
+                row.style.display = "";
+            });
+
+        if (pageLabel) {
+            pageLabel.textContent = total
+                ? `Showing ${start + 1}–${end} of ${total}`
+                : "Showing 0 records";
+        }
+
+        if (resultCount) {
+            resultCount.textContent =
+                `${total} record${total === 1 ? "" : "s"}`;
+        }
+
+        if (previousButton) {
+            previousButton.disabled = currentPage <= 1;
+        }
+
+        if (nextButton) {
+            nextButton.disabled =
+                currentPage >= totalPages;
+        }
+
+        if (noResults) {
+            noResults.hidden = total !== 0;
+            noResults.style.display =
+                total === 0 ? "block" : "none";
+        }
+    }
+
+    function updateSearch() {
+
+        const term = searchInput
+            ? searchInput.value.trim().toLowerCase()
+            : "";
+
+        filteredRows = rows.filter(function (row) {
+
+            const searchableText =
+                row.getAttribute("data-search") || "";
+
+            return searchableText.includes(term);
+        });
+
+        currentPage = 1;
+        renderActivityPage();
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener(
+            "input",
+            updateSearch
+        );
+    }
+
+    if (previousButton) {
+        previousButton.addEventListener(
+            "click",
+            function () {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderActivityPage();
+                }
+            }
+        );
+    }
+
+    if (nextButton) {
+        nextButton.addEventListener(
+            "click",
+            function () {
+
+                const totalPages = Math.ceil(
+                    filteredRows.length / pageSize
+                );
+
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderActivityPage();
+                }
+            }
+        );
+    }
+
+    renderActivityPage();
+
+});
+</script>
 
 {% endblock %}
