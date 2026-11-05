@@ -343,14 +343,20 @@
 }
 
 .ty-note-full {
-    padding: 11px;
-    margin-top: 8px;
+    display: block;
+    margin-top: 10px;
+    padding: 12px 14px;
     background: #f8f1e9;
     border: 1px solid #e5d9c9;
-    border-radius: 7px;
-    font-size: .81rem;
-    line-height: 1.55;
-    white-space: pre-wrap;
+    border-radius: 8px;
+
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: #302820;
+
+    text-align: left !important;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
 }
 
 .ty-next-step {
@@ -744,9 +750,7 @@
                                                     </span>
                                                 </summary>
 
-                                                <div class="ty-note-full">
-                                                    {{ log.summary }}
-                                                </div>
+                                                <div class="ty-note-full">{{ log.summary|trim }}</div>
 
                                             </details>
 

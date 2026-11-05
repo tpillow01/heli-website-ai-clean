@@ -9,551 +9,1055 @@ Track the sales process, next actions, and progress for this opportunity
 
 {% block content %}
 
-<div class="hero-panel">
-    <div class="hero-panel-left">
-        <div class="hero-eyebrow">Sales Lead</div>
+<style>
+/* LEAD DETAIL IMPROVEMENTS */
 
-        <h3>{{ lead.company_name }}</h3>
+.lead-detail-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
 
-        <p>
-            {{ lead.city or "No City" }}
-            {% if lead.county %}
-                • {{ lead.county }} County
+.lead-detail-page .hero-panel,
+.lead-detail-page .panel-card {
+    background: #fffaf3;
+    border: 1px solid #ded0bd;
+    border-radius: 12px;
+}
+
+.lead-detail-page .hero-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.lead-detail-page .hero-actions form {
+    margin: 0;
+}
+
+/* LEAD STATUS PANEL */
+
+.lead-status-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 19px 22px;
+    background: #ffffff;
+    border: 1px solid #ded0bd;
+    border-radius: 12px;
+}
+
+.lead-status-info {
+    flex: 1;
+    min-width: 230px;
+}
+
+.lead-status-info h3 {
+    margin: 0 0 6px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #302820;
+}
+
+.lead-status-info p {
+    margin: 7px 0 0;
+    font-size: .83rem;
+    color: #74675b;
+    line-height: 1.5;
+}
+
+.lead-status-badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 7px;
+    font-size: .76rem;
+    font-weight: 800;
+    background: #eee6db;
+    color: #514336;
+}
+
+.lead-status-badge.active {
+    background: #dff0e5;
+    color: #246640;
+}
+
+.lead-status-badge.dead {
+    background: #f6dfdc;
+    color: #992b23;
+}
+
+.lead-status-badge.won {
+    background: #dff0e5;
+    color: #246640;
+}
+
+.lead-status-badge.lost {
+    background: #ece1d6;
+    color: #74503c;
+}
+
+.lead-status-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.lead-status-controls form {
+    margin: 0;
+}
+
+.lead-dead-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid #aa3029;
+    background: #aa3029;
+    color: #ffffff;
+    font-size: .85rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.lead-dead-button:hover {
+    background: #85201a;
+    color: #ffffff;
+}
+
+.lead-reactivate-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid #287047;
+    background: #287047;
+    color: #ffffff;
+    font-size: .85rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.lead-reactivate-button:hover {
+    background: #205c3b;
+    color: #ffffff;
+}
+
+.lead-converted-message {
+    font-size: .81rem;
+    font-weight: 700;
+    color: #287047;
+}
+
+.lead-process-section {
+    margin-bottom: 16px;
+}
+
+.lead-process-section .list-item-main {
+    width: 100%;
+}
+
+.lead-process-section textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 115px;
+    resize: vertical;
+}
+
+.lead-process-save {
+    margin-top: 10px;
+}
+
+.lead-process-top-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.lead-process-top-grid .form-row {
+    min-width: 0;
+}
+
+.lead-process-top-grid input,
+.lead-process-top-grid select {
+    width: 100%;
+}
+
+.lead-notes-text {
+    white-space: pre-wrap;
+    text-align: left;
+    line-height: 1.6;
+}
+
+.lead-bottom-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 22px;
+}
+
+@media (max-width: 850px) {
+    .lead-process-top-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    .lead-status-panel {
+        padding: 15px;
+    }
+
+    .lead-status-controls,
+    .lead-status-controls form {
+        width: 100%;
+    }
+
+    .lead-status-controls button {
+        width: 100%;
+    }
+}
+</style>
+
+<div class="lead-detail-page">
+
+    <!-- ========================================
+         LEAD HEADER
+         ======================================== -->
+
+    <div class="hero-panel">
+
+        <div class="hero-panel-left">
+
+            <div class="hero-eyebrow">
+                Sales Lead
+            </div>
+
+            <h3>{{ lead.company_name }}</h3>
+
+            <p>
+                {{ lead.city or "No City" }}
+
+                {% if lead.county %}
+                    • {{ lead.county }} County
+                {% endif %}
+
+                {% if lead.lead_source %}
+                    • Source: {{ lead.lead_source }}
+                {% endif %}
+            </p>
+
+            <div class="hero-actions">
+
+                <a href="{{ url_for('leads', view='dead' if lead.status == 'Dead' else 'active') }}"
+                   class="btn btn-secondary">
+                    Back to Leads
+                </a>
+
+                <a href="{{ url_for('edit_lead', lead_id=lead.id) }}"
+                   class="btn btn-primary">
+                    Edit Lead
+                </a>
+
+                {% if lead.converted_customer_id %}
+
+                    <a href="{{ url_for(
+                        'customer_detail',
+                        customer_id=lead.converted_customer_id
+                    ) }}"
+                       class="btn btn-secondary">
+                        View Customer
+                    </a>
+
+                {% elif lead.status != 'Dead' %}
+
+                    <form method="POST"
+                          action="{{ url_for(
+                              'convert_lead_to_customer',
+                              lead_id=lead.id
+                          ) }}"
+                          onsubmit="return confirm('Convert this lead into a customer?');">
+
+                        <button type="submit"
+                                class="btn btn-primary">
+                            Convert to Customer
+                        </button>
+
+                    </form>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+        <div class="hero-panel-right">
+
+            <div class="mini-stat-card">
+                <span>Assigned Rep</span>
+                <strong>{{ lead.assigned_rep }}</strong>
+            </div>
+
+            <div class="mini-stat-card">
+                <span>Current Stage</span>
+                <strong>{{ lead.current_stage }}</strong>
+            </div>
+
+            <div class="mini-stat-card">
+                <span>Status</span>
+                <strong>{{ lead.status }}</strong>
+            </div>
+
+            <div class="mini-stat-card">
+                <span>Next Action Due</span>
+                <strong>
+                    {{ lead.next_action_date or "N/A" }}
+                </strong>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- ========================================
+         LEAD STATUS MANAGEMENT - NEW
+         ======================================== -->
+
+    <div class="lead-status-panel">
+
+        <div class="lead-status-info">
+
+            <h3>Lead Status</h3>
+
+            {% set status_class = '' %}
+
+            {% if lead.status == 'Active' %}
+                {% set status_class = 'active' %}
+            {% elif lead.status == 'Dead' %}
+                {% set status_class = 'dead' %}
+            {% elif lead.status == 'Won' %}
+                {% set status_class = 'won' %}
+            {% elif lead.status == 'Lost' %}
+                {% set status_class = 'lost' %}
             {% endif %}
-            {% if lead.lead_source %}
-                • Source: {{ lead.lead_source }}
-            {% endif %}
-        </p>
 
-        <div class="hero-actions">
-            <a href="{{ url_for('leads', view='dead' if lead.status == 'Dead' else 'active') }}"
-               class="btn btn-secondary">
-                Back to Leads
-            </a>
-
-            <a href="{{ url_for('edit_lead', lead_id=lead.id) }}"
-               class="btn btn-primary">
-                Edit Lead
-            </a>
+            <span class="lead-status-badge {{ status_class }}">
+                {{ lead.status or 'Active' }}
+            </span>
 
             {% if lead.converted_customer_id %}
 
-                <a href="{{ url_for('customer_detail', customer_id=lead.converted_customer_id) }}"
-                   class="btn btn-secondary">
-                    View Customer
-                </a>
+                <p>
+                    This lead has been converted into a customer.
+                    Its customer record is now available.
+                </p>
+
+            {% elif lead.status == 'Dead' %}
+
+                <p>
+                    This lead is currently archived under
+                    Dead Leads. Reactivating it will return
+                    it to your active pipeline.
+                </p>
 
             {% else %}
 
-                <form method="POST"
-                      action="{{ url_for('convert_lead_to_customer', lead_id=lead.id) }}"
-                      style="display:inline;"
-                      onsubmit="return confirm('Convert this lead into a customer?');">
+                <p>
+                    No longer pursuing this opportunity?
+                    Mark it as Dead to remove it from the
+                    active pipeline without deleting its history.
+                </p>
 
-                    <button type="submit" class="btn btn-primary">
-                        Convert to Customer
+            {% endif %}
+
+        </div>
+
+        <div class="lead-status-controls">
+
+            {% if lead.converted_customer_id %}
+
+                <span class="lead-converted-message">
+                    Converted to Customer
+                </span>
+
+            {% elif lead.status == 'Dead' %}
+
+                <!-- REACTIVATE A DEAD LEAD -->
+
+                <form method="POST"
+                      action="{{ url_for(
+                          'reactivate_lead',
+                          lead_id=lead.id
+                      ) }}">
+
+                    <button type="submit"
+                            class="lead-reactivate-button">
+                        Reactivate Lead
                     </button>
+
                 </form>
 
-                {% if lead.status == 'Dead' %}
+            {% else %}
 
-                    <form method="POST"
-                          action="{{ url_for('reactivate_lead', lead_id=lead.id) }}"
-                          style="display:inline;">
+                <!-- MARK LEAD AS DEAD -->
 
-                        <button type="submit" class="btn btn-primary">
-                            Reactivate Lead
-                        </button>
-                    </form>
+                <form method="POST"
+                      action="{{ url_for(
+                          'set_lead_dead',
+                          lead_id=lead.id
+                      ) }}"
+                      onsubmit="return confirm('Mark this lead as Dead? It will be moved to Dead Leads but will not be deleted.');">
 
-                {% else %}
+                    <button type="submit"
+                            class="lead-dead-button">
+                        Mark as Dead
+                    </button>
 
-                    <form method="POST"
-                          action="{{ url_for('set_lead_dead', lead_id=lead.id) }}"
-                          style="display:inline;"
-                          onsubmit="return confirm('Mark this lead as Dead? The lead will not be deleted.');">
+                </form>
 
-                        <button type="submit" class="btn btn-secondary">
-                            Mark as Dead
-                        </button>
-                    </form>
-
-                {% endif %}
             {% endif %}
+
         </div>
+
     </div>
 
-    <div class="hero-panel-right">
-        <div class="mini-stat-card">
-            <span>Assigned Rep</span>
-            <strong>{{ lead.assigned_rep }}</strong>
-        </div>
+    <!-- ========================================
+         LEAD INFORMATION
+         ======================================== -->
 
-        <div class="mini-stat-card">
-            <span>Current Stage</span>
-            <strong>{{ lead.current_stage }}</strong>
-        </div>
+    <div class="dashboard-grid">
 
-        <div class="mini-stat-card">
-            <span>Status</span>
-            <strong>{{ lead.status }}</strong>
-        </div>
+        <div class="panel-card">
 
-        <div class="mini-stat-card">
-            <span>Next Action Due</span>
-            <strong>{{ lead.next_action_date or "N/A" }}</strong>
-        </div>
-    </div>
-</div>
-
-<!-- LEAD INFORMATION -->
-
-<div class="dashboard-grid">
-
-    <div class="panel-card">
-        <div class="panel-top">
-            <div>
-                <h3>Lead Information</h3>
-                <p>Core account and project information.</p>
-            </div>
-        </div>
-
-        <div class="item-list">
-            {% for label, value in [
-                ('Address', lead.address),
-                ('City', lead.city),
-                ('County', lead.county),
-                ('Lead Source', lead.lead_source)
-            ] %}
-
-            <div class="list-item">
-                <div class="list-item-main">
-                    <div class="list-title">{{ label }}</div>
-                    <div class="list-text">
-                        {{ value or 'Not provided' }}
-                    </div>
+            <div class="panel-top">
+                <div>
+                    <h3>Lead Information</h3>
+                    <p>Core account and project information.</p>
                 </div>
             </div>
 
-            {% endfor %}
+            <div class="item-list">
+
+                {% for label, value in [
+                    ('Address', lead.address),
+                    ('City', lead.city),
+                    ('County', lead.county),
+                    ('Lead Source', lead.lead_source)
+                ] %}
+
+                    <div class="list-item">
+
+                        <div class="list-item-main">
+
+                            <div class="list-title">
+                                {{ label }}
+                            </div>
+
+                            <div class="list-text">
+                                {{ value or 'Not provided' }}
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
         </div>
+
+        <!-- CURRENT OPPORTUNITY -->
+
+        <div class="panel-card">
+
+            <div class="panel-top">
+                <div>
+                    <h3>Current Opportunity</h3>
+                    <p>What needs to happen next.</p>
+                </div>
+            </div>
+
+            <div class="item-list">
+
+                <div class="list-item">
+
+                    <div class="list-item-main">
+
+                        <div class="list-title">
+                            Next Action
+                        </div>
+
+                        <div class="list-text">
+                            {{ lead.next_action or 'No next action entered.' }}
+                        </div>
+
+                        <div class="list-meta">
+                            Due:
+                            {{ lead.next_action_date or 'No date set' }}
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="list-item">
+
+                    <div class="list-item-main">
+
+                        <div class="list-title">
+                            General Notes
+                        </div>
+
+                        <div class="list-text lead-notes-text">{{ lead.general_notes or 'No lead notes entered yet.' }}</div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
     </div>
 
+    <!-- ========================================
+         SALES PROCESS
+         ======================================== -->
+
     <div class="panel-card">
+
         <div class="panel-top">
             <div>
-                <h3>Current Opportunity</h3>
-                <p>What needs to happen next.</p>
+                <h3>Sales Process</h3>
+
+                <p>
+                    Document what has been learned at each stage
+                    and move the opportunity forward intentionally.
+                </p>
             </div>
         </div>
 
-        <div class="item-list">
-            <div class="list-item">
+        <form method="POST"
+              action="{{ url_for(
+                  'update_lead_process',
+                  lead_id=lead.id
+              ) }}">
+
+            <!-- GENERAL PROCESS FIELDS -->
+
+            <div class="lead-process-top-grid">
+
+                <div class="form-row">
+
+                    <label for="current_stage">
+                        Current Stage
+                    </label>
+
+                    <select id="current_stage"
+                            name="current_stage">
+
+                        {% for stage in [
+                            'Homework',
+                            'Rapport',
+                            'Pain Point',
+                            'Buying Process',
+                            'Solve Pain Points',
+                            'Proposal',
+                            'Close',
+                            'Lost'
+                        ] %}
+
+                            <option value="{{ stage }}"
+                                {% if lead.current_stage == stage %}
+                                    selected
+                                {% endif %}>
+                                {{ stage }}
+                            </option>
+
+                        {% endfor %}
+
+                    </select>
+
+                </div>
+
+                <div class="form-row">
+
+                    <label for="next_action">
+                        Next Action
+                    </label>
+
+                    <input type="text"
+                           id="next_action"
+                           name="next_action"
+                           value="{{ lead.next_action or '' }}"
+                           placeholder="What needs to happen next?">
+
+                </div>
+
+                <div class="form-row">
+
+                    <label for="next_action_date">
+                        Next Action Date
+                    </label>
+
+                    <input type="date"
+                           id="next_action_date"
+                           name="next_action_date"
+                           value="{{ lead.next_action_date or '' }}">
+
+                </div>
+
+            </div>
+
+            <!-- ====================================
+                 1. HOMEWORK
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
                 <div class="list-item-main">
-                    <div class="list-title">Next Action</div>
-                    <div class="list-text">
-                        {{ lead.next_action or 'No next action entered.' }}
+
+                    <div class="list-title">
+                        1. Homework
                     </div>
+
                     <div class="list-meta">
-                        Due: {{ lead.next_action_date or 'No date set' }}
+                        Research the company, operation,
+                        contacts, facility, fleet, project,
+                        and anything else needed before engaging.
                     </div>
+
+                    {% if lead.sales_process.homework_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.homework_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="homework"
+                              rows="5"
+                              placeholder="What do we know about this company and opportunity?">{{ lead.sales_process.homework or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Homework"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Homework Complete
+                        </button>
+
+                    </div>
+
                 </div>
+
             </div>
 
-            <div class="list-item">
+            <!-- ====================================
+                 2. RAPPORT
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
                 <div class="list-item-main">
-                    <div class="list-title">General Notes</div>
-                    <div class="list-text" style="white-space:pre-wrap;">{{ lead.general_notes or 'No lead notes entered yet.' }}</div>
+
+                    <div class="list-title">
+                        2. Rapport
+                    </div>
+
+                    <div class="list-meta">
+                        Who have we connected with and how
+                        are we building trust and credibility?
+                    </div>
+
+                    {% if lead.sales_process.rapport_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.rapport_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="rapport"
+                              rows="5"
+                              placeholder="Relationships, contacts, conversations, credibility gained...">{{ lead.sales_process.rapport or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Rapport"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Rapport Complete
+                        </button>
+
+                    </div>
+
                 </div>
+
             </div>
-        </div>
+
+            <!-- ====================================
+                 3. PAIN POINT
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
+                <div class="list-item-main">
+
+                    <div class="list-title">
+                        3. Pain Point
+                    </div>
+
+                    <div class="list-meta">
+                        What problems, frustrations, costs,
+                        risks, or operational issues does
+                        the customer need solved?
+                    </div>
+
+                    {% if lead.sales_process.pain_point_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.pain_point_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="pain_point"
+                              rows="5"
+                              placeholder="Document the customer's actual pain points...">{{ lead.sales_process.pain_point or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Pain Point"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Pain Point Complete
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- ====================================
+                 4. BUYING PROCESS
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
+                <div class="list-item-main">
+
+                    <div class="list-title">
+                        4. What Is the Buying Process?
+                    </div>
+
+                    <div class="list-meta">
+                        Who decides, who influences,
+                        what approvals are required,
+                        and when can a purchase happen?
+                    </div>
+
+                    {% if lead.sales_process.buying_process_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.buying_process_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="buying_process"
+                              rows="5"
+                              placeholder="Decision makers, budget process, approval path, timing...">{{ lead.sales_process.buying_process or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Buying Process"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Buying Process Complete
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- ====================================
+                 5. SOLVE PAIN POINTS
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
+                <div class="list-item-main">
+
+                    <div class="list-title">
+                        5. How Do We Solve the Pain Points?
+                    </div>
+
+                    <div class="list-meta">
+                        How can Tynan, HELI, service,
+                        parts, financing, or another solution
+                        address the customer's needs?
+                    </div>
+
+                    {% if lead.sales_process.solve_pain_points_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.solve_pain_points_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="solve_pain_points"
+                              rows="5"
+                              placeholder="Explain how we solve the customer's problems...">{{ lead.sales_process.solve_pain_points or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Solve Pain Points"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Solution Complete
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- ====================================
+                 6. PROPOSAL
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
+                <div class="list-item-main">
+
+                    <div class="list-title">
+                        6. What Is Our Proposal?
+                    </div>
+
+                    <div class="list-meta">
+                        What exactly are we proposing,
+                        and how does it connect back to
+                        what the customer told us?
+                    </div>
+
+                    {% if lead.sales_process.proposal_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.proposal_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="proposal"
+                              rows="5"
+                              placeholder="Equipment, service, financial structure, pricing, differentiators...">{{ lead.sales_process.proposal or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Proposal"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Proposal Complete
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- ====================================
+                 7. CLOSE
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
+                <div class="list-item-main">
+
+                    <div class="list-title">
+                        7. How Do We Close?
+                    </div>
+
+                    <div class="list-meta">
+                        What still needs to happen
+                        before the customer can make
+                        a final commitment?
+                    </div>
+
+                    {% if lead.sales_process.close_completed_at %}
+
+                        <div class="list-meta">
+                            Completed:
+                            {{ lead.sales_process.close_completed_at.strftime('%m/%d/%Y') }}
+                        </div>
+
+                    {% endif %}
+
+                    <textarea name="close_plan"
+                              rows="5"
+                              placeholder="Remaining objections, decision date, approval needs, next closing step...">{{ lead.sales_process.close_plan or '' }}</textarea>
+
+                    <div class="lead-process-save">
+
+                        <button type="submit"
+                                name="completed_stage"
+                                value="Close"
+                                class="btn btn-secondary btn-sm">
+                            Save & Mark Close Step Complete
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- ====================================
+                 8. LOST
+                 ==================================== -->
+
+            <div class="list-item lead-process-section">
+
+                <div class="list-item-main">
+
+                    <div class="list-title">
+                        8. If Lost, Why Did We Lose?
+                    </div>
+
+                    <div class="list-meta">
+                        Capture the real reason the
+                        opportunity was lost so the
+                        rep and team can learn from it.
+                    </div>
+
+                    <textarea name="lost_reason"
+                              rows="5"
+                              placeholder="Price, competitor relationship, timing, product fit, financing, lack of access, other...">{{ lead.sales_process.lost_reason or '' }}</textarea>
+
+                </div>
+
+            </div>
+
+            <!-- SAVE SALES PROCESS -->
+
+            <div class="lead-bottom-actions">
+
+                <button type="submit"
+                        class="btn btn-primary">
+                    Save Sales Process
+                </button>
+
+                <a href="{{ url_for(
+                    'leads',
+                    view='dead' if lead.status == 'Dead' else 'active'
+                ) }}"
+                   class="btn btn-secondary">
+                    Back to Leads
+                </a>
+
+            </div>
+
+        </form>
+
     </div>
-</div>
 
-<!-- SALES PROCESS -->
+    <!-- ========================================
+         AI SALES COACH
+         ======================================== -->
 
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>Sales Process</h3>
-            <p>
-                Document what has been learned at each stage and
-                move the opportunity forward intentionally.
-            </p>
-        </div>
-    </div>
+    <div class="panel-card">
 
-    <form method="POST"
-          action="{{ url_for('update_lead_process', lead_id=lead.id) }}">
+        <div class="panel-top">
 
-        <div style="
-            display:grid;
-            grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-            gap:18px;
-            margin-bottom:26px;
-        ">
+            <div>
+                <h3>AI Sales Coach</h3>
 
-            <div class="form-row">
-                <label for="current_stage">Current Stage</label>
-                <select id="current_stage" name="current_stage">
-
-                    {% for stage in [
-                        'Homework',
-                        'Rapport',
-                        'Pain Point',
-                        'Buying Process',
-                        'Solve Pain Points',
-                        'Proposal',
-                        'Close',
-                        'Lost'
-                    ] %}
-
-                    <option value="{{ stage }}"
-                        {% if lead.current_stage == stage %}selected{% endif %}>
-                        {{ stage }}
-                    </option>
-
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-row">
-                <label for="next_action">Next Action</label>
-                <input type="text"
-                       id="next_action"
-                       name="next_action"
-                       value="{{ lead.next_action or '' }}"
-                       placeholder="What needs to happen next?">
-            </div>
-
-            <div class="form-row">
-                <label for="next_action_date">Next Action Date</label>
-                <input type="date"
-                       id="next_action_date"
-                       name="next_action_date"
-                       value="{{ lead.next_action_date or '' }}">
+                <p>
+                    Get a recommendation based on
+                    the information already entered
+                    for this lead and its current stage.
+                </p>
             </div>
 
         </div>
 
-        <!-- 1. HOMEWORK -->
+        <form method="POST"
+              action="{{ url_for(
+                  'lead_ai_coach',
+                  lead_id=lead.id
+              ) }}">
 
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">1. Homework</div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    Research the company, operation, contacts,
-                    facility, fleet, project, and anything else
-                    needed before engaging.
-                </div>
-
-                {% if lead.sales_process.homework_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.homework_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="homework"
-                          rows="5"
-                          placeholder="What do we know about this company and opportunity?">{{ lead.sales_process.homework or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Homework"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Homework Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 2. RAPPORT -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">2. Rapport</div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    Who have we connected with and how are we
-                    building trust and credibility?
-                </div>
-
-                {% if lead.sales_process.rapport_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.rapport_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="rapport"
-                          rows="5"
-                          placeholder="Relationships, contacts, conversations, credibility gained...">{{ lead.sales_process.rapport or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Rapport"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Rapport Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 3. PAIN POINT -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">3. Pain Point</div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    What problems, frustrations, costs,
-                    risks, or operational issues does the
-                    customer need solved?
-                </div>
-
-                {% if lead.sales_process.pain_point_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.pain_point_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="pain_point"
-                          rows="5"
-                          placeholder="Document the customer's actual pain points...">{{ lead.sales_process.pain_point or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Pain Point"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Pain Point Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 4. BUYING PROCESS -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">
-                    4. What Is the Buying Process?
-                </div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    Who decides, who influences, what approvals
-                    are required, and when can a purchase happen?
-                </div>
-
-                {% if lead.sales_process.buying_process_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.buying_process_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="buying_process"
-                          rows="5"
-                          placeholder="Decision makers, budget process, approval path, timing...">{{ lead.sales_process.buying_process or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Buying Process"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Buying Process Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 5. SOLVE PAIN POINTS -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">
-                    5. How Do We Solve the Pain Points?
-                </div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    How can Tynan, HELI, service, parts,
-                    financing, or another solution address
-                    the customer's needs?
-                </div>
-
-                {% if lead.sales_process.solve_pain_points_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.solve_pain_points_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="solve_pain_points"
-                          rows="5"
-                          placeholder="Explain how we solve the customer's problems...">{{ lead.sales_process.solve_pain_points or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Solve Pain Points"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Solution Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 6. PROPOSAL -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">
-                    6. What Is Our Proposal?
-                </div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    What exactly are we proposing and how
-                    does it connect back to what the customer told us?
-                </div>
-
-                {% if lead.sales_process.proposal_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.proposal_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="proposal"
-                          rows="5"
-                          placeholder="Equipment, service, financial structure, pricing, differentiators...">{{ lead.sales_process.proposal or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Proposal"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Proposal Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 7. CLOSE -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">
-                    7. How Do We Close?
-                </div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    What still needs to happen before the
-                    customer can make a final commitment?
-                </div>
-
-                {% if lead.sales_process.close_completed_at %}
-                    <div class="list-meta" style="margin-bottom:10px;">
-                        Completed:
-                        {{ lead.sales_process.close_completed_at.strftime('%m/%d/%Y') }}
-                    </div>
-                {% endif %}
-
-                <textarea name="close_plan"
-                          rows="5"
-                          placeholder="Remaining objections, decision date, approval needs, next closing step...">{{ lead.sales_process.close_plan or '' }}</textarea>
-
-                <div style="margin-top:10px;">
-                    <button type="submit"
-                            name="completed_stage"
-                            value="Close"
-                            class="btn btn-secondary btn-sm">
-                        Save & Mark Close Step Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 8. LOST -->
-
-        <div class="list-item" style="margin-bottom:16px;">
-            <div class="list-item-main">
-                <div class="list-title">
-                    8. If Lost, Why Did We Lose?
-                </div>
-
-                <div class="list-meta" style="margin-bottom:10px;">
-                    Capture the real reason the opportunity
-                    was lost so the rep and team can learn from it.
-                </div>
-
-                <textarea name="lost_reason"
-                          rows="5"
-                          placeholder="Price, competitor relationship, timing, product fit, financing, lack of access, other...">{{ lead.sales_process.lost_reason or '' }}</textarea>
-            </div>
-        </div>
-
-        <div class="hero-actions" style="margin-top:22px;">
-            <button type="submit" class="btn btn-primary">
-                Save Sales Process
+            <button type="submit"
+                    class="btn btn-primary">
+                Generate AI Recommendation
             </button>
 
-            <a href="{{ url_for('leads', view='dead' if lead.status == 'Dead' else 'active') }}"
-               class="btn btn-secondary">
-                Back to Leads
-            </a>
-        </div>
+        </form>
 
-    </form>
-</div>
+        {% if ai_advice %}
 
-<!-- AI SALES COACH -->
+            <div class="list-item"
+                 style="margin-top:22px;">
 
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>AI Sales Coach</h3>
+                <div class="list-item-main">
 
-            <p>
-                Get a recommendation based on the information
-                already entered for this lead and its current stage.
-            </p>
-        </div>
-    </div>
+                    <div class="list-title">
+                        Sales Coach Recommendation
+                    </div>
 
-    <form method="POST"
-          action="{{ url_for('lead_ai_coach', lead_id=lead.id) }}">
+                    <div class="list-text"
+                         style="
+                            margin-top:12px;
+                            white-space:pre-wrap;
+                            line-height:1.7;
+                         ">{{ ai_advice }}</div>
 
-        <button type="submit" class="btn btn-primary">
-            Generate AI Recommendation
-        </button>
-    </form>
-
-    {% if ai_advice %}
-        <div class="list-item" style="margin-top:22px;">
-            <div class="list-item-main">
-                <div class="list-title">
-                    Sales Coach Recommendation
                 </div>
 
-                <div class="list-text" style="
-                    margin-top:12px;
-                    white-space:pre-wrap;
-                    line-height:1.7;
-                ">{{ ai_advice }}</div>
             </div>
-        </div>
-    {% else %}
-        <div class="empty-state" style="margin-top:22px;">
-            Generate a recommendation to see what information
-            is missing, what questions the rep should ask,
-            and what action should happen next.
-        </div>
-    {% endif %}
+
+        {% else %}
+
+            <div class="empty-state"
+                 style="margin-top:22px;">
+
+                Generate a recommendation to see
+                what information is missing,
+                what questions the rep should ask,
+                and what action should happen next.
+
+            </div>
+
+        {% endif %}
+
+    </div>
+
 </div>
 
 {% endblock %}
