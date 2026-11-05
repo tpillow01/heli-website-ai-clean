@@ -3086,13 +3086,9 @@ def add_activity():
             "follow_up_date", ""
         ).strip()
 
-        follow_up_action = request.form.get(
-            "follow_up_action", "complete"
-        ).strip().lower()
+        follow_up_action = "keep"
 
-        customer_outcome = request.form.get(
-            "customer_outcome", ""
-        ).strip().lower()
+        customer_outcome = ""
 
         # ----------------------------------------
         # SALES REP ATTRIBUTION
@@ -3314,15 +3310,9 @@ def add_activity_for_customer(customer_id):
             "",
         ).strip()
 
-        follow_up_action = request.form.get(
-            "follow_up_action",
-            "complete",
-        ).strip().lower()
+        follow_up_action = "keep"
 
-        customer_outcome = request.form.get(
-            "customer_outcome",
-            "",
-        ).strip().lower()
+        customer_outcome = ""
 
         rep_name = current_rep_name()
 

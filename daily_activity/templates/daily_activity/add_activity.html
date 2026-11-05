@@ -1,10 +1,10 @@
 
 {% extends "daily_activity/base.html" %}
 
-{% block title %}Add Activity | Daily Activity App{% endblock %}
-{% block page_title %}Add Activity{% endblock %}
+{% block title %}Log Activity | Daily Activity App{% endblock %}
+{% block page_title %}Log Sales Activity{% endblock %}
 {% block page_subtitle %}
-Log rep activity, update customer history, and keep follow-up reminders accurate
+Quickly record customer interactions and plan your next step
 {% endblock %}
 
 {% set selected_id = selected_customer_id|default(None) %}
@@ -13,14 +13,14 @@ Log rep activity, update customer history, and keep follow-up reminders accurate
 
 <div class="hero-panel">
     <div class="hero-panel-left">
-        <div class="hero-eyebrow">Activity Logging</div>
+        <div class="hero-eyebrow">Sales Activity</div>
 
-        <h3>Record what happened and what should happen next</h3>
+        <h3>Log Customer Activity</h3>
 
         <p>
-            Log cold calls, phone calls, emails, meetings,
-            quotes, and sales. Select multiple activity types
-            when more than one occurred during the same interaction.
+            Record calls, meetings, emails, quotes, and sales
+            in one simple form. Select multiple activity types
+            when more than one occurred.
         </p>
 
         <div class="hero-actions">
@@ -28,223 +28,82 @@ Log rep activity, update customer history, and keep follow-up reminders accurate
                class="btn btn-secondary">
                 Back to Activity
             </a>
-
-            <a href="{{ url_for('planner') }}"
-               class="btn btn-secondary">
-                Open Planner
-            </a>
         </div>
     </div>
 
     <div class="hero-panel-right">
         <div class="mini-stat-card">
-            <span>Purpose</span>
+            <span>Activity</span>
             <strong>Track</strong>
         </div>
 
         <div class="mini-stat-card">
-            <span>Updates</span>
-            <strong>Touch</strong>
+            <span>Customer</span>
+            <strong>Update</strong>
         </div>
 
         <div class="mini-stat-card">
-            <span>Updates</span>
-            <strong>Contact</strong>
-        </div>
-
-        <div class="mini-stat-card">
-            <span>Updates</span>
-            <strong>Metrics</strong>
+            <span>Follow-Up</span>
+            <strong>Plan</strong>
         </div>
     </div>
 </div>
 
 <div class="panel-card form-shell">
+
     <div class="panel-top">
         <div>
             <h3>Activity Details</h3>
-
             <p>
-                Capture each activity, its outcome, and
-                what should happen to the current follow-up.
+                Tell us who you contacted, what happened,
+                and what needs to happen next.
             </p>
         </div>
     </div>
 
     <form method="POST"
+          id="activity-form"
           class="main-form"
-          autocomplete="on"
-          id="activity-form">
+          autocomplete="on">
 
-        <div class="form-grid">
+        <!-- CUSTOMER -->
 
-            <!-- CUSTOMER -->
+        <div class="form-row">
+            <label for="customer_id">Customer *</label>
 
-            <div class="form-row">
-                <label for="customer_id">
-                    Customer *
-                </label>
+            <select id="customer_id"
+                    name="customer_id"
+                    {% if selected_id %}disabled{% else %}required{% endif %}>
 
-                <select id="customer_id"
-                        name="customer_id"
-                        {% if selected_id %}
-                            disabled
-                        {% else %}
-                            required
-                        {% endif %}>
+                <option value="">Select Customer</option>
 
-                    <option value="">Select Customer</option>
+                {% for customer in customers %}
+                    <option value="{{ customer.id }}"
+                        {% if selected_id == customer.id %}selected{% endif %}>
+                        {{ customer.company_name }}
+                    </option>
+                {% endfor %}
+            </select>
 
-                    {% for customer in customers %}
-                        <option value="{{ customer.id }}"
-                            {% if selected_id == customer.id %}selected{% endif %}>
-                            {{ customer.company_name }}
-                        </option>
-                    {% endfor %}
-                </select>
-
-                {% if selected_id %}
-                    <input type="hidden"
-                           name="customer_id"
-                           value="{{ selected_id }}">
-                {% endif %}
-            </div>
-
-            <!-- SALES REP -->
-
-            {% if current_rep_name %}
-                <div class="form-row">
-                    <label>Sales Rep</label>
-
-                    <input type="text"
-                           value="{{ current_rep_name }}"
-                           readonly>
-
-                    <small class="form-help">
-                        Your activity is automatically
-                        credited to your account.
-                    </small>
-                </div>
-            {% else %}
-                <div class="form-row">
-                    <label>Sales Rep</label>
-
-                    <input type="text"
-                           value="Current Logged-In User"
-                           readonly>
-
-                    <small class="form-help">
-                        Activity is credited to the
-                        account submitting the form.
-                    </small>
-                </div>
+            {% if selected_id %}
+                <input type="hidden"
+                       name="customer_id"
+                       value="{{ selected_id }}">
             {% endif %}
-
-            <!-- ACTIVITY DATE -->
-
-            <div class="form-row">
-                <label for="activity_date">
-                    Activity Date *
-                </label>
-
-                <input type="date"
-                       id="activity_date"
-                       name="activity_date"
-                       value="{{ today|default('', true) }}"
-                       required>
-
-                <small class="form-help">
-                    Automatically set to today's date
-                    in Indiana. Change it when logging
-                    an earlier activity.
-                </small>
-            </div>
-
-            <!-- CUSTOMER OUTCOME -->
-
-            <div class="form-row">
-                <label for="customer_outcome">
-                    Customer Outcome
-                </label>
-
-                <select id="customer_outcome"
-                        name="customer_outcome">
-
-                    <option value="">
-                        No Status Change
-                    </option>
-
-                    <option value="happy_current_provider">
-                        Happy With Current Provider
-                    </option>
-                </select>
-
-                <small class="form-help">
-                    Use Happy With Current Provider when
-                    the account is not ready to move forward
-                    but should remain available for follow-up.
-                </small>
-            </div>
-
-            <!-- CURRENT FOLLOW-UP -->
-
-            <div class="form-row">
-                <label for="follow_up_action">
-                    Current Follow-Up
-                </label>
-
-                <select id="follow_up_action"
-                        name="follow_up_action">
-
-                    <option value="complete" selected>
-                        Mark Current Follow-Up Complete
-                    </option>
-
-                    <option value="keep">
-                        Keep Existing Follow-Up
-                    </option>
-                </select>
-
-                <small class="form-help">
-                    If you enter a new date below, it
-                    replaces the current follow-up
-                    regardless of this selection.
-                </small>
-            </div>
-
-            <!-- NEXT FOLLOW-UP -->
-
-            <div class="form-row">
-                <label for="follow_up_date">
-                    Next Follow-Up Date
-                </label>
-
-                <input type="date"
-                       id="follow_up_date"
-                       name="follow_up_date">
-            </div>
-
         </div>
 
-        <!-- MULTIPLE ACTIVITY TYPES -->
+        <!-- ACTIVITY TYPES -->
 
-        <div class="form-row" style="margin-top:22px;">
+        <div class="form-row" style="margin-top:24px;">
 
-            <label>
-                Activity Types *
-            </label>
+            <label>What Did You Do? *</label>
 
-            <small class="form-help" style="display:block;margin-bottom:12px;">
-                Select all activities that occurred.
-                For example, select Phone Call and Meeting
-                if you called a customer and later met with them.
-            </small>
+            <p class="form-help" style="margin-bottom:14px;">
+                Select all activities that apply.
+                Each selected activity counts separately.
+            </p>
 
-            <div style="
-                display:grid;
-                grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
-                gap:12px;
-            ">
+            <div class="activity-type-grid">
 
                 {% for activity_type in [
                     'Cold Call',
@@ -255,76 +114,104 @@ Log rep activity, update customer history, and keep follow-up reminders accurate
                     'Sale'
                 ] %}
 
-                <label style="
-                    display:flex;
-                    align-items:center;
-                    gap:10px;
-                    padding:13px 15px;
-                    border:1px solid rgba(128,128,128,.3);
-                    border-radius:10px;
-                    cursor:pointer;
-                    font-weight:600;
-                ">
+                    <label class="activity-option">
+                        <input
+                            type="checkbox"
+                            name="activity_type"
+                            value="{{ activity_type }}"
+                            class="activity-checkbox"
+                        >
 
-                    <input type="checkbox"
-                           name="activity_type"
-                           value="{{ activity_type }}"
-                           class="activity-type-checkbox"
-                           style="
-                               width:18px;
-                               height:18px;
-                               flex-shrink:0;
-                               margin:0;
-                           ">
-
-                    <span>{{ activity_type }}</span>
-                </label>
+                        <span>{{ activity_type }}</span>
+                    </label>
 
                 {% endfor %}
 
             </div>
 
-            <small class="form-help" style="display:block;margin-top:12px;">
-                Each selected activity counts separately
-                toward your activity metrics, but they
-                all share one summary and one follow-up update.
+        </div>
+
+        <!-- ACTIVITY DATE -->
+
+        <div class="form-row" style="margin-top:24px;">
+            <label for="activity_date">Activity Date *</label>
+
+            <input
+                type="date"
+                id="activity_date"
+                name="activity_date"
+                value="{{ today|default('', true) }}"
+                required
+            >
+
+            <small class="form-help">
+                Defaults to today's date. You can change
+                it when recording a previous activity.
             </small>
         </div>
 
         <!-- SUMMARY -->
 
         <div class="form-row" style="margin-top:24px;">
-            <label for="summary">
-                Summary *
-            </label>
 
-            <textarea id="summary"
-                      name="summary"
-                      rows="5"
-                      required
-                      placeholder="Example: Called operations manager in the morning and scheduled a meeting. Met with the team that afternoon to review their forklift needs."></textarea>
+            <label for="summary">What Happened? *</label>
+
+            <textarea
+                id="summary"
+                name="summary"
+                rows="5"
+                required
+                placeholder="Example: Called the operations manager and met with the team to discuss replacing their forklifts."
+            ></textarea>
+
         </div>
 
         <!-- NEXT STEP -->
 
         <div class="form-row">
-            <label for="next_step">
-                Next Step
-            </label>
 
-            <input type="text"
-                   id="next_step"
-                   name="next_step"
-                   placeholder="Example: Send quote, call next Tuesday, schedule demo">
+            <label for="next_step">Next Step</label>
+
+            <input
+                type="text"
+                id="next_step"
+                name="next_step"
+                placeholder="Example: Send quote, schedule demo, call next week"
+            >
+
         </div>
 
-        <!-- SAVE BUTTONS -->
+        <!-- FOLLOW-UP DATE -->
 
-        <div class="hero-actions" style="margin-top:22px;">
+        <div class="form-row">
 
-            <button type="submit"
-                    id="save-activity-button"
-                    class="btn btn-primary">
+            <label for="follow_up_date">
+                Next Follow-Up Date (Optional)
+            </label>
+
+            <input
+                type="date"
+                id="follow_up_date"
+                name="follow_up_date"
+            >
+
+            <small class="form-help">
+                Enter a new date to update the customer's
+                follow-up reminder. Leave blank to keep
+                the existing follow-up date.
+            </small>
+
+        </div>
+
+        <!-- SAVE -->
+
+        <div class="hero-actions" style="margin-top:26px;">
+
+            <button
+                type="submit"
+                id="save-button"
+                class="btn btn-primary"
+            >
                 Save Activity
             </button>
 
@@ -338,98 +225,127 @@ Log rep activity, update customer history, and keep follow-up reminders accurate
     </form>
 </div>
 
-<!-- FORM VALIDATION / INDIANA DATE -->
+<style>
+
+.activity-type-grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(165px,1fr));
+    gap:12px;
+}
+
+.activity-option {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:16px;
+    border:1px solid rgba(128,128,128,.25);
+    border-radius:12px;
+    cursor:pointer;
+    font-weight:600;
+    transition:all .15s ease;
+}
+
+.activity-option:hover {
+    border-color:rgba(128,128,128,.65);
+}
+
+.activity-option:has(input:checked) {
+    border-color:#c33225;
+    background:rgba(195,50,37,.09);
+}
+
+.activity-option input {
+    width:19px;
+    height:19px;
+    margin:0;
+    flex-shrink:0;
+    accent-color:#c33225;
+}
+
+@media(max-width:480px) {
+    .activity-type-grid {
+        grid-template-columns:1fr 1fr;
+    }
+
+    .activity-option {
+        padding:12px;
+        font-size:.85rem;
+    }
+}
+
+</style>
 
 <script>
+
 document.addEventListener("DOMContentLoaded", function () {
 
     const activityDate = document.getElementById("activity_date");
-    const activityForm = document.getElementById("activity-form");
-    const saveButton = document.getElementById("save-activity-button");
-
-    const activityCheckboxes = document.querySelectorAll(
-        ".activity-type-checkbox"
-    );
+    const form = document.getElementById("activity-form");
+    const saveButton = document.getElementById("save-button");
 
     let dateManuallyChanged = false;
 
-    // Indiana uses Eastern Time.
     function getIndianaToday() {
 
         const parts = new Intl.DateTimeFormat("en-US", {
-            timeZone: "America/Indiana/Indianapolis",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit"
+            timeZone:"America/Indiana/Indianapolis",
+            year:"numeric",
+            month:"2-digit",
+            day:"2-digit"
         }).formatToParts(new Date());
 
-        const dateParts = Object.fromEntries(
-            parts.map(part => [part.type, part.value])
+        const values = Object.fromEntries(
+            parts.map(p => [p.type,p.value])
         );
 
-        return (
-            dateParts.year + "-" +
-            dateParts.month + "-" +
-            dateParts.day
-        );
+        return values.year + "-" +
+               values.month + "-" +
+               values.day;
     }
 
-    function setDefaultActivityDate() {
-
+    function setDefaultDate() {
         if (activityDate && !dateManuallyChanged) {
             activityDate.value = getIndianaToday();
         }
     }
 
-    setDefaultActivityDate();
-
     if (activityDate) {
+        setDefaultDate();
 
         activityDate.addEventListener("input", function () {
             dateManuallyChanged = true;
         });
-
-        document.addEventListener("visibilitychange", function () {
-
-            if (!document.hidden) {
-                setDefaultActivityDate();
-            }
-        });
-
-        window.addEventListener("pageshow", function () {
-            setDefaultActivityDate();
-        });
     }
 
-    // Make sure at least one activity is selected.
-    if (activityForm) {
+    if (form) {
 
-        activityForm.addEventListener("submit", function (event) {
+        form.addEventListener("submit", function (event) {
 
-            const selectedActivities = Array.from(
-                activityCheckboxes
-            ).filter(checkbox => checkbox.checked);
+            const selected = document.querySelectorAll(
+                ".activity-checkbox:checked"
+            );
 
-            if (selectedActivities.length === 0) {
-
+            if (selected.length === 0) {
                 event.preventDefault();
-
-                alert(
-                    "Please select at least one activity type."
-                );
-
+                alert("Please select at least one activity type.");
                 return;
             }
 
-            // Prevent accidental double submission.
+            if (!form.checkValidity()) {
+                return;
+            }
+
             if (saveButton) {
                 saveButton.disabled = true;
                 saveButton.textContent = "Saving...";
             }
+
         });
+
     }
 
 });
+
 </script>
 
 {% endblock %}
