@@ -3,393 +3,1020 @@
 
 {% block title %}Leads | Daily Activity App{% endblock %}
 {% block page_title %}Sales Leads{% endblock %}
-{% block page_subtitle %}
-Track assigned leads, sales-process progress, next actions, and opportunities
-{% endblock %}
+{% block page_subtitle %}Manage opportunities and next actions{% endblock %}
 
 {% block content %}
 
 {% set current_view = lead_view|default('active') %}
 
-<div class="hero-panel">
-    <div class="hero-panel-left">
-        <div class="hero-eyebrow">Sales Pipeline</div>
+<style>
+/* LEADS DASHBOARD */
 
-        <h3>
-            {% if is_manager %}
-                Team Leads
-            {% else %}
-                My Leads
-            {% endif %}
-        </h3>
+.leads-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
 
-        <p>
-            Track leads from initial homework through close,
-            including the next action required to move
-            each opportunity forward.
-        </p>
+.leads-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
 
-        <div class="hero-actions">
-            {% if is_manager %}
-                <a href="{{ url_for('add_lead') }}"
-                   class="btn btn-primary">
-                    + Add Lead
-                </a>
-            {% endif %}
-        </div>
-    </div>
+.leads-header h2 {
+    font-size: 1.45rem;
+    font-weight: 800;
+    margin: 0 0 4px;
+}
 
-    <div class="hero-panel-right">
-        <div class="mini-stat-card">
-            <span>Leads Shown</span>
-            <strong>{{ leads|length }}</strong>
-        </div>
+.leads-header p {
+    font-size: .88rem;
+    opacity: .7;
+    margin: 0;
+}
 
-        <div class="mini-stat-card">
-            <span>Active</span>
-            <strong>
-                {{ leads|selectattr('status', 'equalto', 'Active')|list|length }}
-            </strong>
-        </div>
+/* STATS */
 
-        <div class="mini-stat-card">
-            <span>Proposal</span>
-            <strong>
-                {{ leads|selectattr('current_stage', 'equalto', 'Proposal')|list|length }}
-            </strong>
-        </div>
+.leads-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0,1fr));
+    gap: 10px;
+}
 
-        <div class="mini-stat-card">
-            <span>
-                {% if current_view == 'dead' %}
-                    Dead
-                {% else %}
-                    Won
-                {% endif %}
-            </span>
-            <strong>
-                {% if current_view == 'dead' %}
-                    {{ leads|selectattr('status', 'equalto', 'Dead')|list|length }}
-                {% else %}
-                    {{ leads|selectattr('status', 'equalto', 'Won')|list|length }}
-                {% endif %}
-            </strong>
-        </div>
-    </div>
-</div>
+.leads-stat {
+    text-align: center;
+    padding: 14px 12px;
+    border: 1px solid rgba(128,128,128,.22);
+    background: rgba(128,128,128,.055);
+    border-radius: 12px;
+}
 
-<!-- ACTIVE / DEAD LEADS TOGGLE -->
+.leads-stat-number {
+    font-size: 1.7rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
 
-<div class="panel-card">
-    <div class="panel-top">
+.leads-stat-label {
+    font-size: .76rem;
+    opacity: .75;
+    margin-top: 5px;
+}
+
+/* MAIN CONTAINER */
+
+.leads-main {
+    border: 1px solid rgba(128,128,128,.22);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* TABS */
+
+.leads-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(128,128,128,.2);
+}
+
+.leads-tab {
+    text-decoration: none;
+    padding: 9px 18px;
+    border-radius: 9px;
+    border: 1px solid rgba(128,128,128,.25);
+    font-size: .86rem;
+    font-weight: 750;
+    color: inherit;
+}
+
+.leads-tab.active {
+    background: #bd3026;
+    border-color: #bd3026;
+    color: #fff;
+}
+
+/* FILTERS */
+
+.leads-filters {
+    padding: 15px 16px;
+    border-bottom: 1px solid rgba(128,128,128,.2);
+}
+
+.leads-filter-title {
+    font-size: .92rem;
+    font-weight: 800;
+    margin-bottom: 12px;
+}
+
+.leads-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3,minmax(0,1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.leads-field label {
+    display: block;
+    font-size: .78rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.leads-field select,
+.leads-field input {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding: 8px 10px;
+    border-radius: 8px;
+}
+
+.leads-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* PIPELINE HEADER */
+
+.leads-list-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 16px;
+}
+
+.leads-list-head h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.leads-list-head p {
+    margin: 4px 0 0;
+    opacity: .7;
+    font-size: .8rem;
+}
+
+/* TABLE */
+
+.leads-table-wrap {
+    overflow-x: auto;
+    width: 100%;
+}
+
+.leads-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.leads-table th {
+    text-align: left;
+    padding: 11px 12px;
+    font-size: .76rem;
+    font-weight: 800;
+    background: rgba(128,128,128,.055);
+    border-bottom: 1px solid rgba(128,128,128,.2);
+}
+
+.leads-table td {
+    padding: 12px;
+    font-size: .84rem;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(128,128,128,.12);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.leads-table tbody tr:hover {
+    background: rgba(128,128,128,.055);
+}
+
+.leads-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.leads-company {
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.leads-muted {
+    font-size: .77rem;
+    opacity: .68;
+}
+
+.leads-stage {
+    display: inline-block;
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: rgba(128,128,128,.13);
+    font-size: .74rem;
+    font-weight: 750;
+}
+
+.leads-status {
+    display: inline-block;
+    font-size: .75rem;
+    font-weight: 800;
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: rgba(128,128,128,.12);
+}
+
+.leads-status-active {
+    background: rgba(34,150,83,.13);
+    color: #238b4d;
+}
+
+.leads-status-won {
+    background: rgba(34,150,83,.13);
+    color: #238b4d;
+}
+
+.leads-status-dead {
+    background: rgba(128,128,128,.19);
+}
+
+.leads-status-lost {
+    background: rgba(190,50,40,.12);
+    color: #c64638;
+}
+
+.leads-next-action {
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* PAGINATION */
+
+.leads-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(128,128,128,.2);
+}
+
+.leads-page-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.leads-page-buttons button {
+    padding: 8px 13px;
+    border: 1px solid rgba(128,128,128,.3);
+    border-radius: 8px;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+}
+
+.leads-page-buttons button:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+}
+
+.leads-empty {
+    padding: 32px 18px;
+    text-align: center;
+}
+
+/* MOBILE */
+
+@media (max-width: 1050px) {
+    .leads-filter-grid {
+        grid-template-columns: repeat(2,minmax(0,1fr));
+    }
+}
+
+@media (max-width: 650px) {
+    .leads-stats {
+        grid-template-columns: repeat(2,1fr);
+    }
+
+    .leads-stat-number {
+        font-size: 1.4rem;
+    }
+
+    .leads-filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .leads-tabs {
+        flex-wrap: wrap;
+    }
+
+    .leads-table,
+    .leads-table tbody,
+    .leads-table tr,
+    .leads-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .leads-table thead {
+        display: none;
+    }
+
+    .leads-table tbody tr {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(128,128,128,.2);
+    }
+
+    .leads-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 5px 0;
+        border: none;
+        text-align: right;
+    }
+
+    .leads-table td::before {
+        content: attr(data-label);
+        flex: 0 0 85px;
+        text-align: left;
+        font-size: .75rem;
+        font-weight: 750;
+        opacity: .7;
+    }
+
+    .leads-table td > div {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .leads-pagination {
+        justify-content: center;
+    }
+}
+</style>
+
+<div class="leads-page">
+
+    <!-- HEADER -->
+
+    <div class="leads-header">
         <div>
-            <h3>Lead Management</h3>
-            <p>
-                Switch between active pipeline leads
-                and leads marked dead.
-            </p>
-        </div>
-    </div>
-
-    <div class="hero-actions">
-        <a href="{{ url_for('leads', view='active') }}"
-           class="btn {{ 'btn-primary' if current_view == 'active' else 'btn-secondary' }}">
-            Active Leads
-        </a>
-
-        <a href="{{ url_for('leads', view='dead') }}"
-           class="btn {{ 'btn-primary' if current_view == 'dead' else 'btn-secondary' }}">
-            Dead Leads
-        </a>
-    </div>
-
-    {% if current_view == 'dead' %}
-        <p class="list-meta" style="margin-top:12px;">
-            Dead leads are archived from active prospecting,
-            not deleted. You can reactivate them at any time.
-        </p>
-    {% endif %}
-</div>
-
-<!-- FILTERS -->
-
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>Lead Filters</h3>
-            <p>
-                Narrow the list by sales rep, sales stage,
-                status, lead source, or county.
-            </p>
-        </div>
-    </div>
-
-    <form method="GET" action="{{ url_for('leads') }}">
-
-        <input type="hidden"
-               name="view"
-               value="{{ current_view }}">
-
-        <div style="
-            display:grid;
-            grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
-            gap:14px;
-            align-items:end;
-        ">
-
-            {% if is_manager %}
-            <div class="form-row">
-                <label for="rep">Sales Rep</label>
-
-                <select id="rep" name="rep">
-                    <option value="">All Reps</option>
-
-                    {% for user_id, rep_name in tracked_reps.items() %}
-                        <option value="{{ user_id }}"
-                            {% if selected_rep == user_id|string %}selected{% endif %}>
-                            {{ rep_name }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-            {% endif %}
-
-            <div class="form-row">
-                <label for="stage">Sales Stage</label>
-
-                <select id="stage" name="stage">
-                    <option value="">All Stages</option>
-
-                    {% for stage in stages %}
-                        <option value="{{ stage }}"
-                            {% if selected_stage == stage %}selected{% endif %}>
-                            {{ stage }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            {% if current_view != 'dead' %}
-            <div class="form-row">
-                <label for="status">Status</label>
-
-                <select id="status" name="status">
-                    <option value="">All Statuses</option>
-
-                    {% for status in statuses %}
-                        {% if status != 'Dead' %}
-                            <option value="{{ status }}"
-                                {% if selected_status == status %}selected{% endif %}>
-                                {{ status }}
-                            </option>
-                        {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
-            {% else %}
-                <input type="hidden" name="status" value="Dead">
-            {% endif %}
-
-            <div class="form-row">
-                <label for="source">Lead Source</label>
-
-                <select id="source" name="source">
-                    <option value="">All Sources</option>
-
-                    {% for source in lead_sources %}
-                        <option value="{{ source }}"
-                            {% if selected_source == source %}selected{% endif %}>
-                            {{ source }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-row">
-                <label for="county">County</label>
-
-                <select id="county" name="county">
-                    <option value="">All Counties</option>
-
-                    {% for county in counties %}
-                        <option value="{{ county }}"
-                            {% if selected_county == county %}selected{% endif %}>
-                            {{ county }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="hero-actions">
-                <button type="submit" class="btn btn-primary">
-                    Apply Filters
-                </button>
-
-                <a href="{{ url_for('leads', clear=1, view=current_view) }}"
-                   class="btn btn-secondary">
-                    Clear Filters
-                </a>
-            </div>
-
-        </div>
-    </form>
-</div>
-
-<!-- LEAD LIST -->
-
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>
-                {% if current_view == 'dead' %}
-                    Dead Leads
+            <h2>
+                {% if is_manager %}
+                    Team Leads
                 {% else %}
-                    Lead Pipeline
+                    My Leads
                 {% endif %}
-            </h3>
+            </h2>
 
             <p>
-                Open a company to review its full sales process,
-                update its next action, or change its status.
+                Manage opportunities, track pipeline progress,
+                and stay on top of next actions.
             </p>
         </div>
 
         {% if is_manager %}
             <a href="{{ url_for('add_lead') }}"
-               class="btn btn-primary btn-sm">
+               class="btn btn-primary">
                 + Add Lead
             </a>
         {% endif %}
     </div>
 
-    {% if leads %}
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Company</th>
-                        <th>Source</th>
-                        <th>City</th>
-                        <th>County</th>
+    <!-- SUMMARY -->
 
-                        {% if is_manager %}
-                            <th>Rep</th>
-                        {% endif %}
+    <div class="leads-stats">
 
-                        <th>Stage</th>
-                        <th>Next Action</th>
-                        <th>Due</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                    {% for lead in leads %}
-                    <tr>
-                        <td>
-                            <a href="{{ url_for('lead_detail', lead_id=lead.id) }}"
-                               style="font-weight:800;text-decoration:none;">
-                                {{ lead.company_name }}
-                            </a>
-
-                            {% if lead.address %}
-                                <div class="list-meta" style="margin-top:4px;">
-                                    {{ lead.address }}
-                                </div>
-                            {% endif %}
-                        </td>
-
-                        <td>{{ lead.lead_source or '—' }}</td>
-                        <td>{{ lead.city or '—' }}</td>
-                        <td>{{ lead.county or '—' }}</td>
-
-                        {% if is_manager %}
-                            <td>
-                                <strong>{{ lead.assigned_rep }}</strong>
-                            </td>
-                        {% endif %}
-
-                        <td>
-                            <span style="
-                                display:inline-block;
-                                padding:5px 10px;
-                                border-radius:999px;
-                                border:1px solid rgba(128,128,128,.25);
-                                font-size:.82rem;
-                                font-weight:700;
-                            ">
-                                {{ lead.current_stage }}
-                            </span>
-                        </td>
-
-                        <td>
-                            {% if lead.next_action %}
-                                {{ lead.next_action }}
-                            {% else %}
-                                <span class="list-meta">
-                                    No next action
-                                </span>
-                            {% endif %}
-                        </td>
-
-                        <td>{{ lead.next_action_date or '—' }}</td>
-
-                        <td>
-                            <strong>
-                                {{ lead.status or 'Active' }}
-                            </strong>
-                        </td>
-
-                        <td>
-                            {% if lead.status == 'Dead' %}
-                                <form method="POST"
-                                      action="{{ url_for('reactivate_lead', lead_id=lead.id) }}">
-                                    <button type="submit"
-                                            class="btn btn-primary btn-sm">
-                                        Reactivate
-                                    </button>
-                                </form>
-                            {% elif not lead.converted_customer_id %}
-                                <form method="POST"
-                                      action="{{ url_for('set_lead_dead', lead_id=lead.id) }}"
-                                      onsubmit="return confirm('Mark this lead as Dead?');">
-                                    <button type="submit"
-                                            class="btn btn-secondary btn-sm">
-                                        Mark Dead
-                                    </button>
-                                </form>
-                            {% else %}
-                                <a href="{{ url_for('customer_detail', customer_id=lead.converted_customer_id) }}"
-                                   class="btn btn-secondary btn-sm">
-                                    View Customer
-                                </a>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="leads-stat">
+            <div class="leads-stat-number">
+                {{ leads|length }}
+            </div>
+            <div class="leads-stat-label">
+                Leads Shown
+            </div>
         </div>
 
-    {% else %}
-        <div class="empty-state">
-            {% if current_view == 'dead' %}
-                No dead leads match your current filters.
-            {% else %}
-                No active leads match your current filters.
-            {% endif %}
+        <div class="leads-stat">
+            <div class="leads-stat-number">
+                {{ leads|selectattr('status','equalto','Active')|list|length }}
+            </div>
+            <div class="leads-stat-label">
+                Active
+            </div>
+        </div>
 
-            {% if is_manager and current_view != 'dead' %}
+        <div class="leads-stat">
+            <div class="leads-stat-number">
+                {{ leads|selectattr('current_stage','equalto','Proposal')|list|length }}
+            </div>
+            <div class="leads-stat-label">
+                Proposals
+            </div>
+        </div>
+
+        <div class="leads-stat">
+            <div class="leads-stat-number">
+                {% if current_view == 'dead' %}
+                    {{ leads|selectattr('status','equalto','Dead')|list|length }}
+                {% else %}
+                    {{ leads|selectattr('status','equalto','Won')|list|length }}
+                {% endif %}
+            </div>
+
+            <div class="leads-stat-label">
+                {{ 'Dead' if current_view == 'dead' else 'Won' }}
+            </div>
+        </div>
+
+    </div>
+
+    <!-- MAIN PANEL -->
+
+    <div class="leads-main">
+
+        <!-- ACTIVE / DEAD TABS -->
+
+        <div class="leads-tabs">
+
+            <a href="{{ url_for('leads', view='active') }}"
+               class="leads-tab {{ 'active' if current_view == 'active' else '' }}">
+                Active Leads
+            </a>
+
+            <a href="{{ url_for('leads', view='dead') }}"
+               class="leads-tab {{ 'active' if current_view == 'dead' else '' }}">
+                Dead Leads
+            </a>
+
+        </div>
+
+        <!-- FILTERS -->
+
+        <div class="leads-filters">
+
+            <div class="leads-filter-title">
+                Filter Leads
+            </div>
+
+            <form method="GET"
+                  action="{{ url_for('leads') }}"
+                  id="leads-filter-form">
+
+                <input type="hidden"
+                       name="view"
+                       value="{{ current_view }}">
+
+                {% if current_view == 'dead' %}
+                    <input type="hidden"
+                           name="status"
+                           value="Dead">
+                {% endif %}
+
+                <div class="leads-filter-grid">
+
+                    <!-- LOCAL SEARCH -->
+
+                    <div class="leads-field">
+                        <label for="leads-search">
+                            Search Leads
+                        </label>
+
+                        <input type="search"
+                               id="leads-search"
+                               placeholder="Company, city, next action..."
+                               autocomplete="off">
+                    </div>
+
+                    <!-- REP -->
+
+                    {% if is_manager %}
+                        <div class="leads-field">
+                            <label for="rep">
+                                Sales Rep
+                            </label>
+
+                            <select id="rep" name="rep">
+                                <option value="">All Reps</option>
+
+                                {% for user_id, rep_name in tracked_reps.items() %}
+                                    <option value="{{ user_id }}"
+                                        {% if selected_rep == user_id|string %}
+                                            selected
+                                        {% endif %}>
+                                        {{ rep_name }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    {% endif %}
+
+                    <!-- STAGE -->
+
+                    <div class="leads-field">
+                        <label for="stage">
+                            Sales Stage
+                        </label>
+
+                        <select id="stage" name="stage">
+                            <option value="">All Stages</option>
+
+                            {% for stage in stages %}
+                                <option value="{{ stage }}"
+                                    {% if selected_stage == stage %}selected{% endif %}>
+                                    {{ stage }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- COUNTY -->
+
+                    <div class="leads-field">
+                        <label for="county">
+                            County
+                        </label>
+
+                        <select id="county" name="county">
+                            <option value="">All Counties</option>
+
+                            {% for county in counties %}
+                                <option value="{{ county }}"
+                                    {% if selected_county == county %}selected{% endif %}>
+                                    {{ county }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- SOURCE -->
+
+                    <div class="leads-field">
+                        <label for="source">
+                            Lead Source
+                        </label>
+
+                        <select id="source" name="source">
+                            <option value="">All Sources</option>
+
+                            {% for source in lead_sources %}
+                                <option value="{{ source }}"
+                                    {% if selected_source == source %}selected{% endif %}>
+                                    {{ source }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- STATUS -->
+
+                    {% if current_view != 'dead' %}
+                        <div class="leads-field">
+                            <label for="status">
+                                Status
+                            </label>
+
+                            <select id="status" name="status">
+                                <option value="">All Statuses</option>
+
+                                {% for status in statuses %}
+                                    {% if status != 'Dead' %}
+                                        <option value="{{ status }}"
+                                            {% if selected_status == status %}selected{% endif %}>
+                                            {{ status }}
+                                        </option>
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                    {% endif %}
+
+                    <!-- BUTTONS -->
+
+                    <div class="leads-filter-actions">
+
+                        <button type="submit"
+                                class="btn btn-primary">
+                            Apply
+                        </button>
+
+                        <a href="{{ url_for('leads', clear=1, view=current_view) }}"
+                           class="btn btn-secondary">
+                            Clear
+                        </a>
+
+                    </div>
+
+                </div>
+
+            </form>
+
+        </div>
+
+        <!-- TABLE HEADER -->
+
+        <div class="leads-list-head">
+            <div>
+                <h3>
+                    {% if current_view == 'dead' %}
+                        Dead Leads
+                    {% else %}
+                        Lead Pipeline
+                    {% endif %}
+                </h3>
+
+                <p>
+                    {% if current_view == 'dead' %}
+                        Archived prospects that can be reactivated.
+                    {% else %}
+                        Select a company to review its opportunity.
+                    {% endif %}
+                </p>
+            </div>
+
+            <span class="leads-muted"
+                  id="leads-result-count">
+                {{ leads|length }} records
+            </span>
+        </div>
+
+        <!-- TABLE -->
+
+        {% if leads %}
+
+            <div class="leads-table-wrap">
+
+                <table class="leads-table">
+
+                    <colgroup>
+                        <col style="width:22%;">
+                        {% if is_manager %}
+                            <col style="width:11%;">
+                        {% endif %}
+                        <col style="width:13%;">
+                        <col style="width:13%;">
+                        <col style="width:21%;">
+                        <col style="width:11%;">
+                        <col style="width:9%;">
+                    </colgroup>
+
+                    <thead>
+                        <tr>
+                            <th>Company</th>
+
+                            {% if is_manager %}
+                                <th>Rep</th>
+                            {% endif %}
+
+                            <th>County</th>
+                            <th>Stage</th>
+                            <th>Next Action</th>
+                            <th>Due</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="leads-table-body">
+
+                        {% for lead in leads %}
+
+                        <tr class="lead-row"
+                            data-search="{{ (
+                                (lead.company_name or '') ~ ' ' ~
+                                (lead.assigned_rep or '') ~ ' ' ~
+                                (lead.address or '') ~ ' ' ~
+                                (lead.city or '') ~ ' ' ~
+                                (lead.county or '') ~ ' ' ~
+                                (lead.lead_source or '') ~ ' ' ~
+                                (lead.current_stage or '') ~ ' ' ~
+                                (lead.next_action or '') ~ ' ' ~
+                                (lead.status or '')
+                            )|lower|e }}">
+
+                            <!-- COMPANY -->
+
+                            <td data-label="Company">
+                                <div>
+                                    <a class="leads-company"
+                                       href="{{ url_for('lead_detail', lead_id=lead.id) }}">
+                                        {{ lead.company_name }}
+                                    </a>
+
+                                    {% if lead.city %}
+                                        <div class="leads-muted">
+                                            {{ lead.city }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </td>
+
+                            <!-- REP -->
+
+                            {% if is_manager %}
+                                <td data-label="Rep">
+                                    <div>
+                                        {{ lead.assigned_rep }}
+                                    </div>
+                                </td>
+                            {% endif %}
+
+                            <!-- COUNTY -->
+
+                            <td data-label="County">
+                                <div>
+                                    {{ lead.county or '—' }}
+                                </div>
+                            </td>
+
+                            <!-- STAGE -->
+
+                            <td data-label="Stage">
+                                <div>
+                                    <span class="leads-stage">
+                                        {{ lead.current_stage }}
+                                    </span>
+                                </div>
+                            </td>
+
+                            <!-- NEXT ACTION -->
+
+                            <td data-label="Next Action">
+                                <div>
+                                    <span class="leads-next-action">
+                                        {{ lead.next_action or '—' }}
+                                    </span>
+                                </div>
+                            </td>
+
+                            <!-- DUE -->
+
+                            <td data-label="Due">
+                                <div>
+                                    {{ lead.next_action_date or '—' }}
+                                </div>
+                            </td>
+
+                            <!-- STATUS -->
+
+                            <td data-label="Status">
+                                <div>
+                                    <span class="leads-status
+                                        {% if lead.status == 'Active' %}
+                                            leads-status-active
+                                        {% elif lead.status == 'Won' %}
+                                            leads-status-won
+                                        {% elif lead.status == 'Lost' %}
+                                            leads-status-lost
+                                        {% elif lead.status == 'Dead' %}
+                                            leads-status-dead
+                                        {% endif %}
+                                    ">
+                                        {{ lead.status or 'Active' }}
+                                    </span>
+                                </div>
+                            </td>
+
+                        </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+                </table>
+
+            </div>
+
+            <div class="leads-empty"
+                 id="leads-no-results"
+                 hidden>
+                No leads match your search.
+            </div>
+
+            <!-- PAGINATION -->
+
+            <div class="leads-pagination">
+
+                <span class="leads-muted"
+                      id="leads-page-label">
+                    Showing lead records
+                </span>
+
+                <div class="leads-page-buttons">
+
+                    <button type="button"
+                            id="leads-prev">
+                        Previous
+                    </button>
+
+                    <button type="button"
+                            id="leads-next">
+                        Next
+                    </button>
+
+                </div>
+
+            </div>
+
+        {% else %}
+
+            <div class="leads-empty">
+                No leads match the current filters.
+
                 <div style="margin-top:14px;">
-                    <a href="{{ url_for('add_lead') }}"
-                       class="btn btn-primary">
-                        Add First Lead
+                    <a href="{{ url_for('leads', clear=1, view=current_view) }}"
+                       class="btn btn-secondary">
+                        Clear Filters
                     </a>
                 </div>
-            {% endif %}
-        </div>
-    {% endif %}
+            </div>
+
+        {% endif %}
+
+    </div>
+
 </div>
+
+<!-- SEARCH AND PAGINATION -->
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const rows = Array.from(
+        document.querySelectorAll(".lead-row")
+    );
+
+    const searchInput =
+        document.getElementById("leads-search");
+
+    const previousButton =
+        document.getElementById("leads-prev");
+
+    const nextButton =
+        document.getElementById("leads-next");
+
+    const pageLabel =
+        document.getElementById("leads-page-label");
+
+    const resultCount =
+        document.getElementById("leads-result-count");
+
+    const noResults =
+        document.getElementById("leads-no-results");
+
+    const pageSize = 20;
+
+    let currentPage = 1;
+    let filteredRows = [...rows];
+
+    // Keep the search term when navigating back
+    // within the same browser tab.
+
+    const storageKey =
+        "daily_activity_lead_search_{{ current_view }}";
+
+    try {
+        const savedSearch =
+            sessionStorage.getItem(storageKey);
+
+        if (savedSearch && searchInput) {
+            searchInput.value = savedSearch;
+        }
+    } catch (error) {
+        // Search continues to work if storage is unavailable.
+    }
+
+    function renderPage() {
+
+        const total = filteredRows.length;
+
+        const totalPages = Math.max(
+            1,
+            Math.ceil(total / pageSize)
+        );
+
+        currentPage = Math.min(
+            Math.max(1, currentPage),
+            totalPages
+        );
+
+        const start = (currentPage - 1) * pageSize;
+        const end = Math.min(start + pageSize, total);
+
+        rows.forEach(function (row) {
+            row.hidden = true;
+            row.style.display = "none";
+        });
+
+        filteredRows
+            .slice(start, end)
+            .forEach(function (row) {
+                row.hidden = false;
+                row.style.display = "";
+            });
+
+        if (pageLabel) {
+            pageLabel.textContent = total
+                ? `Showing ${start + 1}–${end} of ${total}`
+                : "Showing 0 leads";
+        }
+
+        if (resultCount) {
+            resultCount.textContent =
+                `${total} lead${total === 1 ? "" : "s"}`;
+        }
+
+        if (previousButton) {
+            previousButton.disabled = currentPage <= 1;
+        }
+
+        if (nextButton) {
+            nextButton.disabled =
+                currentPage >= totalPages;
+        }
+
+        if (noResults) {
+            noResults.hidden = total !== 0;
+            noResults.style.display =
+                total === 0 ? "block" : "none";
+        }
+    }
+
+    function updateSearch() {
+
+        const term = searchInput
+            ? searchInput.value.trim().toLowerCase()
+            : "";
+
+        filteredRows = rows.filter(function (row) {
+
+            const searchableText =
+                row.getAttribute("data-search") || "";
+
+            return searchableText.includes(term);
+        });
+
+        try {
+            sessionStorage.setItem(storageKey, term);
+        } catch (error) {
+            // Ignore storage errors.
+        }
+
+        currentPage = 1;
+        renderPage();
+    }
+
+    if (searchInput) {
+
+        searchInput.addEventListener(
+            "input",
+            updateSearch
+        );
+    }
+
+    if (previousButton) {
+
+        previousButton.addEventListener(
+            "click",
+            function () {
+
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderPage();
+                }
+            }
+        );
+    }
+
+    if (nextButton) {
+
+        nextButton.addEventListener(
+            "click",
+            function () {
+
+                const totalPages = Math.ceil(
+                    filteredRows.length / pageSize
+                );
+
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderPage();
+                }
+            }
+        );
+    }
+
+    updateSearch();
+
+});
+</script>
 
 {% endblock %}

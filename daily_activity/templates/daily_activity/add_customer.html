@@ -2,9 +2,7 @@
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Add Customer | Daily Activity App{% endblock %}
-
 {% block page_title %}Add Customer{% endblock %}
-
 {% block page_subtitle %}
 Create a new customer account and optionally log your first sales activity
 {% endblock %}
@@ -55,7 +53,7 @@ Create a new customer account and optionally log your first sales activity
 
         <div class="mini-stat-card">
             <span>Step 3</span>
-            <strong>Contact</strong>
+            <strong>Contacts</strong>
         </div>
 
         <div class="mini-stat-card">
@@ -69,7 +67,9 @@ Create a new customer account and optionally log your first sales activity
       class="form-stack"
       id="addCustomerForm">
 
-    <!-- CUSTOMER INFORMATION -->
+    <!-- ========================================
+         CUSTOMER INFORMATION
+         ======================================== -->
 
     <div class="panel-card form-shell">
         <div class="panel-top">
@@ -84,10 +84,7 @@ Create a new customer account and optionally log your first sales activity
         <div class="form-grid">
 
             <div class="form-row">
-                <label for="company_name">
-                    Company Name
-                </label>
-
+                <label for="company_name">Company Name</label>
                 <input type="text"
                        id="company_name"
                        name="company_name"
@@ -95,18 +92,13 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="assigned_rep">
-                    Assigned Sales Rep
-                </label>
-
+                <label for="assigned_rep">Assigned Sales Rep</label>
                 <select id="assigned_rep"
                         name="assigned_rep"
                         required>
 
                     {% if is_manager %}
-                        <option value="">
-                            Select Sales Rep
-                        </option>
+                        <option value="">Select Sales Rep</option>
                     {% endif %}
 
                     {% for rep_id, rep_name in tracked_reps.items() %}
@@ -123,60 +115,42 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="address">
-                    Street Address
-                </label>
-
+                <label for="address">Street Address</label>
                 <input type="text"
                        id="address"
                        name="address">
             </div>
 
             <div class="form-row">
-                <label for="city">
-                    City
-                </label>
-
+                <label for="city">City</label>
                 <input type="text"
                        id="city"
                        name="city">
             </div>
 
             <div class="form-row">
-                <label for="state">
-                    State
-                </label>
-
+                <label for="state">State</label>
                 <input type="text"
                        id="state"
                        name="state">
             </div>
 
             <div class="form-row">
-                <label for="zip_code">
-                    ZIP Code
-                </label>
-
+                <label for="zip_code">ZIP Code</label>
                 <input type="text"
                        id="zip_code"
                        name="zip_code">
             </div>
 
             <div class="form-row">
-                <label for="county">
-                    County
-                </label>
-
+                <label for="county">County</label>
                 <input type="text"
                        id="county"
                        name="county">
             </div>
 
             <div class="form-row">
-                <label for="relationship_type">
-                    Relationship Type
-                </label>
-
+                <label for="relationship_type">Relationship Type</label>
                 <select id="relationship_type"
                         name="relationship_type">
 
@@ -224,17 +198,9 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="status">
-                    Legacy Status
-                </label>
-
-                <select id="status"
-                        name="status">
-
-                    <option value="">
-                        Select Status
-                    </option>
-
+                <label for="status">Legacy Status</label>
+                <select id="status" name="status">
+                    <option value="">Select Status</option>
                     <option value="Prospect">Prospect</option>
                     <option value="Active">Active</option>
                     <option value="Quoted">Quoted</option>
@@ -250,24 +216,19 @@ Create a new customer account and optionally log your first sales activity
 
                 <select id="priority_level"
                         name="priority_level">
-
-                    <option value="">
-                        Select Priority
-                    </option>
-
+                    <option value="">Select Priority</option>
                     <option value="High">High</option>
                     <option value="Medium">Medium</option>
                     <option value="Low">Low</option>
                 </select>
             </div>
+
         </div>
 
         <!-- CUSTOMER NOTES -->
 
         <div class="form-row">
-            <label for="notes">
-                Customer Notes
-            </label>
+            <label for="notes">Customer Notes</label>
 
             <textarea id="notes"
                       name="notes"
@@ -277,9 +238,7 @@ Create a new customer account and optionally log your first sales activity
         <div class="form-grid">
 
             <div class="form-row">
-                <label for="quote_notes">
-                    Quote Notes
-                </label>
+                <label for="quote_notes">Quote Notes</label>
 
                 <textarea id="quote_notes"
                           name="quote_notes"
@@ -287,9 +246,7 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="service_notes">
-                    Service Notes
-                </label>
+                <label for="service_notes">Service Notes</label>
 
                 <textarea id="service_notes"
                           name="service_notes"
@@ -297,9 +254,7 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="rental_notes">
-                    Rental Notes
-                </label>
+                <label for="rental_notes">Rental Notes</label>
 
                 <textarea id="rental_notes"
                           name="rental_notes"
@@ -307,9 +262,7 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="pm_notes">
-                    PM Notes
-                </label>
+                <label for="pm_notes">PM Notes</label>
 
                 <textarea id="pm_notes"
                           name="pm_notes"
@@ -319,7 +272,9 @@ Create a new customer account and optionally log your first sales activity
         </div>
     </div>
 
-    <!-- INITIAL SALES ACTIVITY -->
+    <!-- ========================================
+         INITIAL SALES ACTIVITY
+         ======================================== -->
 
     <div class="panel-card form-shell">
         <div class="panel-top">
@@ -348,8 +303,8 @@ Create a new customer account and optionally log your first sales activity
                 </strong>
 
                 <small>
-                    Optional — enable this if you have
-                    already completed a sales activity.
+                    Optional — enable this if you have already
+                    completed a sales activity.
                 </small>
             </span>
         </label>
@@ -396,6 +351,7 @@ Create a new customer account and optionally log your first sales activity
                         <option value="Sale">
                             Sale
                         </option>
+
                     </select>
                 </div>
 
@@ -474,7 +430,9 @@ Create a new customer account and optionally log your first sales activity
         </div>
     </div>
 
-    <!-- PRIMARY CONTACT -->
+    <!-- ========================================
+         PRIMARY CONTACT
+         ======================================== -->
 
     <div class="panel-card form-shell">
         <div class="panel-top">
@@ -482,8 +440,8 @@ Create a new customer account and optionally log your first sales activity
                 <h3>Primary Contact</h3>
 
                 <p>
-                    Optional contact information for
-                    the main person at the account.
+                    Optional information for the main
+                    person at this customer.
                 </p>
             </div>
         </div>
@@ -497,35 +455,135 @@ Create a new customer account and optionally log your first sales activity
 
                 <input type="text"
                        id="contact_name"
-                       name="contact_name">
+                       name="contact_name"
+                       placeholder="First and Last Name">
             </div>
 
             <div class="form-row">
-                <label for="contact_phone">
-                    Phone
-                </label>
+                <label for="contact_phone">Phone</label>
 
-                <input type="text"
+                <input type="tel"
                        id="contact_phone"
-                       name="contact_phone">
+                       name="contact_phone"
+                       placeholder="(317) 555-1234">
             </div>
 
             <div class="form-row">
-                <label for="contact_email">
-                    Email
-                </label>
+                <label for="contact_email">Email</label>
 
                 <input type="email"
                        id="contact_email"
-                       name="contact_email">
+                       name="contact_email"
+                       placeholder="contact@company.com">
             </div>
 
         </div>
     </div>
 
-    <!-- FLEET INFORMATION -->
+    <!-- ========================================
+         ADDITIONAL CUSTOMER CONTACTS - NEW
+         ======================================== -->
 
     <div class="panel-card form-shell">
+
+        <div class="panel-top">
+            <div>
+                <h3>Additional Contacts</h3>
+
+                <p>
+                    Add maintenance managers, operations managers,
+                    purchasing contacts, or anyone else you
+                    work with at this customer.
+                </p>
+            </div>
+        </div>
+
+        <div id="additional-contacts-container"></div>
+
+        <button type="button"
+                id="add-another-contact"
+                class="btn btn-secondary">
+            + Add Another Contact
+        </button>
+
+        <p class="form-help-text">
+            You can add up to 20 additional contacts.
+            Leave this section empty if you only have
+            one primary contact.
+        </p>
+
+    </div>
+
+    <!-- TEMPLATE USED TO CREATE NEW CONTACTS -->
+
+    <template id="additional-contact-template">
+
+        <div class="additional-contact-card">
+
+            <div class="additional-contact-header">
+
+                <strong class="additional-contact-heading">
+                    Additional Contact
+                </strong>
+
+                <button type="button"
+                        class="btn btn-secondary remove-extra-contact">
+                    Remove
+                </button>
+
+            </div>
+
+            <div class="form-grid">
+
+                <div class="form-row">
+                    <label>Contact Name *</label>
+
+                    <input type="text"
+                           name="extra_contact_name"
+                           maxlength="120"
+                           placeholder="First and Last Name"
+                           required>
+                </div>
+
+                <div class="form-row">
+                    <label>Job Title</label>
+
+                    <input type="text"
+                           name="extra_contact_title"
+                           maxlength="120"
+                           placeholder="Maintenance Manager">
+                </div>
+
+                <div class="form-row">
+                    <label>Phone Number</label>
+
+                    <input type="tel"
+                           name="extra_contact_phone"
+                           maxlength="50"
+                           placeholder="(317) 555-1234">
+                </div>
+
+                <div class="form-row">
+                    <label>Email Address</label>
+
+                    <input type="email"
+                           name="extra_contact_email"
+                           maxlength="120"
+                           placeholder="contact@company.com">
+                </div>
+
+            </div>
+
+        </div>
+
+    </template>
+
+    <!-- ========================================
+         FLEET INFORMATION
+         ======================================== -->
+
+    <div class="panel-card form-shell">
+
         <div class="panel-top">
             <div>
                 <h3>Fleet Information</h3>
@@ -540,9 +598,7 @@ Create a new customer account and optionally log your first sales activity
         <div class="form-grid">
 
             <div class="form-row">
-                <label for="fleet_make">
-                    Fleet Make
-                </label>
+                <label for="fleet_make">Fleet Make</label>
 
                 <input type="text"
                        id="fleet_make"
@@ -551,9 +607,7 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="fleet_model">
-                    Fleet Model
-                </label>
+                <label for="fleet_model">Fleet Model</label>
 
                 <input type="text"
                        id="fleet_model"
@@ -562,9 +616,7 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="fleet_capacity">
-                    Capacity
-                </label>
+                <label for="fleet_capacity">Capacity</label>
 
                 <input type="text"
                        id="fleet_capacity"
@@ -573,9 +625,7 @@ Create a new customer account and optionally log your first sales activity
             </div>
 
             <div class="form-row">
-                <label for="fleet_fuel_type">
-                    Fuel Type
-                </label>
+                <label for="fleet_fuel_type">Fuel Type</label>
 
                 <select id="fleet_fuel_type"
                         name="fleet_fuel_type">
@@ -584,32 +634,16 @@ Create a new customer account and optionally log your first sales activity
                         Select Fuel Type
                     </option>
 
-                    <option value="Electric">
-                        Electric
-                    </option>
-
-                    <option value="LP">
-                        LP
-                    </option>
-
-                    <option value="Diesel">
-                        Diesel
-                    </option>
-
-                    <option value="Gas">
-                        Gas
-                    </option>
-
-                    <option value="Other">
-                        Other
-                    </option>
+                    <option value="Electric">Electric</option>
+                    <option value="LP">LP</option>
+                    <option value="Diesel">Diesel</option>
+                    <option value="Gas">Gas</option>
+                    <option value="Other">Other</option>
                 </select>
             </div>
 
             <div class="form-row">
-                <label for="fleet_quantity">
-                    Quantity
-                </label>
+                <label for="fleet_quantity">Quantity</label>
 
                 <input type="number"
                        id="fleet_quantity"
@@ -621,19 +655,21 @@ Create a new customer account and optionally log your first sales activity
         </div>
 
         <div class="form-row">
-            <label for="fleet_notes">
-                Fleet Notes
-            </label>
+            <label for="fleet_notes">Fleet Notes</label>
 
             <textarea id="fleet_notes"
                       name="fleet_notes"
                       placeholder="Equipment condition, age, service concerns, or replacement opportunities..."></textarea>
         </div>
+
     </div>
 
-    <!-- SAVE ACTIONS -->
+    <!-- ========================================
+         SAVE ACTIONS
+         ======================================== -->
 
     <div class="hero-actions">
+
         <button type="submit"
                 class="btn btn-primary"
                 id="saveCustomerButton">
@@ -644,78 +680,126 @@ Create a new customer account and optionally log your first sales activity
            class="btn btn-secondary">
             Cancel
         </a>
+
     </div>
 
 </form>
 
-<!-- PAGE STYLING -->
+<!-- ==========================================
+     PAGE STYLING
+     ========================================== -->
 
 <style>
-    .activity-toggle-label {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        padding: 16px;
-        border: 1px solid rgba(128, 128, 128, 0.3);
-        border-radius: 10px;
-        cursor: pointer;
-    }
 
-    .activity-toggle-label input {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-        accent-color: #cc0000;
-        cursor: pointer;
-    }
+.activity-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid rgba(128,128,128,0.3);
+    border-radius: 10px;
+    cursor: pointer;
+}
 
-    .activity-toggle-label span {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
+.activity-toggle-label input {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    accent-color: #cc0000;
+    cursor: pointer;
+}
 
-    .activity-toggle-label small,
-    .form-help-text {
-        font-size: 12px;
-        opacity: 0.75;
-    }
+.activity-toggle-label span {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
 
-    .initial-activity-fields {
-        margin-top: 20px;
-    }
+.activity-toggle-label small,
+.form-help-text {
+    font-size: 12px;
+    opacity: 0.75;
+}
 
-    .initial-activity-fields[hidden],
-    #opposingCompanyRow[hidden] {
-        display: none !important;
-    }
+.initial-activity-fields {
+    margin-top: 20px;
+}
 
-    .initial-activity-fields .form-row {
-        margin-bottom: 15px;
-    }
+.initial-activity-fields[hidden],
+#opposingCompanyRow[hidden] {
+    display: none !important;
+}
 
-    .form-help-text {
-        display: block;
-        margin-top: 6px;
-    }
+.initial-activity-fields .form-row {
+    margin-bottom: 15px;
+}
 
-    .activity-info-note {
-        padding: 16px;
-        margin-top: 15px;
-        border: 1px solid rgba(128, 128, 128, 0.25);
-        border-left: 3px solid #cc0000;
-        border-radius: 8px;
-    }
+.form-help-text {
+    display: block;
+    margin-top: 10px;
+}
 
-    .activity-info-note p {
-        margin: 7px 0 0;
-        font-size: 13px;
-        line-height: 1.6;
-        opacity: 0.8;
-    }
+.activity-info-note {
+    padding: 16px;
+    margin-top: 15px;
+    border: 1px solid rgba(128,128,128,0.25);
+    border-left: 3px solid #cc0000;
+    border-radius: 8px;
+}
+
+.activity-info-note p {
+    margin: 7px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    opacity: 0.8;
+}
+
+/* ADDITIONAL CONTACTS */
+
+.additional-contact-card {
+    padding: 18px;
+    margin-bottom: 14px;
+    background: #fffaf3;
+    border: 1px solid #ded0bd;
+    border-radius: 10px;
+}
+
+.additional-contact-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.additional-contact-heading {
+    font-size: 0.95rem;
+    font-weight: 800;
+}
+
+.additional-contact-card .form-grid {
+    margin-bottom: 0;
+}
+
+.additional-contact-card .form-row {
+    margin-bottom: 0;
+}
+
+#add-another-contact {
+    margin-top: 6px;
+}
+
+#add-another-contact:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 </style>
 
-<!-- PAGE JAVASCRIPT -->
+<!-- ==========================================
+     PAGE JAVASCRIPT
+     ========================================== -->
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -760,9 +844,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     let activityDateManuallyChanged = false;
 
-    // -----------------------------------------
+    // ==========================================
     // CURRENT INDIANA DATE
-    // -----------------------------------------
+    // ==========================================
 
     function getIndianaToday() {
 
@@ -790,9 +874,9 @@ document.addEventListener("DOMContentLoaded", function () {
         );
     }
 
-    // -----------------------------------------
+    // ==========================================
     // AUTOMATIC ACTIVITY DATE
-    // -----------------------------------------
+    // ==========================================
 
     function populateActivityDate() {
 
@@ -801,13 +885,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    // Always use the current Indiana date
-    // when first opening the form.
-
     populateActivityDate();
-
-    // Reps can change the date for an
-    // activity completed on a previous day.
 
     activityDate.addEventListener(
         "input",
@@ -815,9 +893,6 @@ document.addEventListener("DOMContentLoaded", function () {
             activityDateManuallyChanged = true;
         }
     );
-
-    // Refresh the default date when returning
-    // to a previously opened browser tab.
 
     document.addEventListener(
         "visibilitychange",
@@ -828,9 +903,9 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     );
 
-    // -----------------------------------------
+    // ==========================================
     // COMPETITOR-OWNED RELATIONSHIP
-    // -----------------------------------------
+    // ==========================================
 
     function toggleOpposingCompany() {
 
@@ -838,7 +913,6 @@ document.addEventListener("DOMContentLoaded", function () {
             relationshipType.value === "competitor_owned";
 
         opposingRow.hidden = !show;
-
         opposingInput.disabled = !show;
 
         if (!show) {
@@ -846,9 +920,9 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    // -----------------------------------------
+    // ==========================================
     // ENABLE / DISABLE INITIAL ACTIVITY
-    // -----------------------------------------
+    // ==========================================
 
     function toggleInitialActivity() {
 
@@ -864,22 +938,18 @@ document.addEventListener("DOMContentLoaded", function () {
         activityDate.required = enabled;
 
         if (enabled) {
-
             populateActivityDate();
-
             saveButton.textContent =
                 "Save Customer & Activity";
-
         } else {
-
             saveButton.textContent =
                 "Save Customer";
         }
     }
 
-    // -----------------------------------------
+    // ==========================================
     // SYNCHRONIZE FOLLOW-UP DATES
-    // -----------------------------------------
+    // ==========================================
 
     function syncActivityFollowUp() {
 
@@ -900,17 +970,119 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    // -----------------------------------------
+    // ==========================================
+    // ADDITIONAL CUSTOMER CONTACTS
+    // ==========================================
+
+    const addContactButton =
+        document.getElementById("add-another-contact");
+
+    const contactContainer =
+        document.getElementById(
+            "additional-contacts-container"
+        );
+
+    const contactTemplate =
+        document.getElementById(
+            "additional-contact-template"
+        );
+
+    const maxAdditionalContacts = 20;
+
+    function updateAdditionalContactNumbers() {
+
+        const cards = contactContainer.querySelectorAll(
+            ".additional-contact-card"
+        );
+
+        cards.forEach(function (card, index) {
+
+            const heading = card.querySelector(
+                ".additional-contact-heading"
+            );
+
+            if (heading) {
+                heading.textContent =
+                    "Additional Contact " + (index + 1);
+            }
+        });
+
+        addContactButton.disabled =
+            cards.length >= maxAdditionalContacts;
+    }
+
+    addContactButton.addEventListener(
+        "click",
+        function () {
+
+            const currentCount = contactContainer.querySelectorAll(
+                ".additional-contact-card"
+            ).length;
+
+            if (currentCount >= maxAdditionalContacts) {
+                return;
+            }
+
+            const fragment =
+                contactTemplate.content.cloneNode(true);
+
+            contactContainer.appendChild(fragment);
+
+            updateAdditionalContactNumbers();
+
+            const cards = contactContainer.querySelectorAll(
+                ".additional-contact-card"
+            );
+
+            const newestCard = cards[cards.length - 1];
+
+            if (newestCard) {
+
+                const nameInput = newestCard.querySelector(
+                    'input[name="extra_contact_name"]'
+                );
+
+                if (nameInput) {
+                    nameInput.focus();
+                }
+            }
+        }
+    );
+
+    contactContainer.addEventListener(
+        "click",
+        function (event) {
+
+            const removeButton = event.target.closest(
+                ".remove-extra-contact"
+            );
+
+            if (!removeButton) {
+                return;
+            }
+
+            const card = removeButton.closest(
+                ".additional-contact-card"
+            );
+
+            if (card) {
+                card.remove();
+                updateAdditionalContactNumbers();
+            }
+        }
+    );
+
+    // ==========================================
     // INITIALIZE PAGE
-    // -----------------------------------------
+    // ==========================================
 
     toggleOpposingCompany();
-
     toggleInitialActivity();
+    updateAdditionalContactNumbers();
 
-    // -----------------------------------------
+    // ==========================================
     // EVENT LISTENERS
-    // -----------------------------------------
+    // ==========================================
 
     relationshipType.addEventListener(
         "change",
@@ -932,9 +1104,9 @@ document.addEventListener("DOMContentLoaded", function () {
         syncCustomerFollowUp
     );
 
-    // -----------------------------------------
+    // ==========================================
     // PREVENT DUPLICATE SUBMISSIONS
-    // -----------------------------------------
+    // ==========================================
 
     form.addEventListener("submit", function (event) {
 
@@ -945,7 +1117,6 @@ document.addEventListener("DOMContentLoaded", function () {
         syncActivityFollowUp();
 
         saveButton.disabled = true;
-
         saveButton.textContent = "Saving...";
     });
 

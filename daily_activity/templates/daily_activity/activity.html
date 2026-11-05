@@ -1,366 +1,550 @@
 
-
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Activity | Daily Activity App{% endblock %}
 {% block page_title %}Sales Activity{% endblock %}
-{% block page_subtitle %}Monitor customer interactions and sales activity{% endblock %}
+{% block page_subtitle %}Review and manage sales activity{% endblock %}
 
 {% block content %}
 
 <style>
-/* COMPACT ACTIVITY DASHBOARD */
+/* =========================================
+   TYNAN ACTIVITY DASHBOARD
+   ========================================= */
 
-.act-page {
+.ty-activity {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+    color: #302a25;
 }
 
-.act-header {
+.ty-activity *,
+.ty-activity *::before,
+.ty-activity *::after {
+    box-sizing: border-box;
+}
+
+/* HEADER */
+
+.ty-head {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+    gap: 15px;
     flex-wrap: wrap;
-    gap: 12px;
+    padding: 4px 0;
 }
 
-.act-header h2 {
-    font-size: 1.45rem;
-    font-weight: 800;
+.ty-head h2 {
     margin: 0 0 4px;
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #29231f;
 }
 
-.act-header p {
+.ty-head p {
     margin: 0;
-    opacity: .7;
-    font-size: .88rem;
+    font-size: .85rem;
+    color: #75695e;
 }
 
-.act-actions {
+.ty-head-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
     flex-wrap: wrap;
 }
 
-/* STATISTICS */
+/* SUMMARY CARDS */
 
-.act-stats {
+.ty-stats {
     display: grid;
     grid-template-columns: repeat(6, minmax(0,1fr));
     gap: 10px;
 }
 
-.act-stat {
-    padding: 14px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(128,128,128,.22);
-    background: rgba(128,128,128,.055);
+.ty-stat {
+    background: #fffaf4;
+    border: 1px solid #ddd0bf;
+    border-radius: 10px;
+    padding: 13px 8px;
     text-align: center;
+    box-shadow: 0 1px 3px rgba(55,35,15,.04);
 }
 
-.act-stat .number {
-    font-size: 1.7rem;
+.ty-stat-number {
+    font-size: 1.55rem;
     font-weight: 800;
     line-height: 1.2;
+    color: #302820;
 }
 
-.act-stat .label {
-    font-size: .76rem;
-    opacity: .75;
-    margin-top: 5px;
+.ty-stat-label {
+    margin-top: 4px;
+    font-size: .74rem;
+    font-weight: 600;
+    color: #75695e;
 }
 
-/* FILTER BAR */
+/* MAIN PANEL */
 
-.act-filter-card {
-    padding: 16px;
-    border-radius: 12px;
-    border: 1px solid rgba(128,128,128,.22);
-}
-
-.act-filter-title {
-    font-size: .98rem;
-    font-weight: 800;
-    margin-bottom: 12px;
-}
-
-.act-filter-grid {
-    display: grid;
-    grid-template-columns: repeat(3,minmax(0,1fr)) auto;
-    gap: 10px;
-    align-items: end;
-}
-
-.act-field label {
-    display: block;
-    font-size: .79rem;
-    font-weight: 700;
-    margin-bottom: 5px;
-}
-
-.act-field input,
-.act-field select {
+.ty-panel {
     width: 100%;
     min-width: 0;
-    min-height: 40px;
-    padding: 8px 10px;
-    border-radius: 8px;
+    background: #fffaf4;
+    border: 1px solid #ddd0bf;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(55,35,15,.045);
 }
 
-.act-filter-buttons {
-    display: flex;
-    gap: 7px;
-    flex-wrap: wrap;
+/* FILTERS */
+
+.ty-filter-section {
+    padding: 16px 18px;
+    background: #fffaf4;
+}
+
+.ty-filter-heading {
+    font-size: .95rem;
+    font-weight: 800;
+    margin-bottom: 12px;
+    color: #342b24;
+}
+
+.ty-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3,minmax(0,1fr)) auto;
     align-items: end;
+    gap: 12px;
 }
 
-.act-filter-buttons .btn {
-    white-space: nowrap;
+.ty-filter-field {
+    min-width: 0;
+}
+
+.ty-filter-field label {
+    display: block;
+    font-size: .76rem;
+    font-weight: 750;
+    margin-bottom: 6px;
+    color: #504237;
+}
+
+.ty-filter-field select,
+.ty-filter-field input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+    padding: 8px 11px;
+    font-size: .86rem;
+    color: #302820;
+    background: #ffffff;
+    border: 1px solid #d8cbbb;
+    border-radius: 8px;
+    box-shadow: none;
+}
+
+.ty-filter-field select:focus,
+.ty-filter-field input:focus {
+    outline: 2px solid rgba(151,35,27,.22);
+    border-color: #a42d24;
+}
+
+.ty-filter-actions {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    min-width: max-content;
+}
+
+.ty-filter-actions .btn {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ACTIVITY HISTORY HEADER */
+
+.ty-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    background: #f4ebdf;
+    border-top: 1px solid #ddd0bf;
+    border-bottom: 1px solid #ddd0bf;
+}
+
+.ty-history-head h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #302820;
+}
+
+.ty-history-count {
+    font-size: .78rem;
+    font-weight: 650;
+    color: #6e6054;
 }
 
 /* ACTIVITY TABLE */
 
-.act-list-card {
-    border: 1px solid rgba(128,128,128,.22);
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-.act-list-head {
-    padding: 14px 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    border-bottom: 1px solid rgba(128,128,128,.2);
-}
-
-.act-list-head h3 {
-    margin: 0;
-    font-size: 1rem;
-}
-
-.act-list-head span {
-    font-size: .8rem;
-    opacity: .72;
-}
-
-.act-table-wrap {
+.ty-table-wrap {
     width: 100%;
+    max-width: 100%;
     overflow-x: auto;
+    background: #ffffff;
 }
 
-.act-table {
+.ty-table {
     width: 100%;
     border-collapse: collapse;
+    border-spacing: 0;
     table-layout: fixed;
+    background: #ffffff;
+    margin: 0;
 }
 
-.act-table th {
-    text-align: left;
-    font-size: .76rem;
-    font-weight: 800;
-    opacity: .75;
-    padding: 11px 13px;
-    border-bottom: 1px solid rgba(128,128,128,.2);
-    background: rgba(128,128,128,.055);
+.ty-table thead,
+.ty-table tbody,
+.ty-table tr {
+    background: transparent;
 }
 
-.act-table td {
-    vertical-align: top;
+.ty-table thead th {
     padding: 12px 13px;
-    font-size: .85rem;
+    text-align: left;
+    vertical-align: middle;
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .035em;
+    text-transform: uppercase;
+    color: #55483b;
+    background: #f5eee5;
+    border: 0;
+    border-bottom: 1px solid #e2d7c9;
+}
+
+.ty-table tbody tr {
+    height: auto;
+    background: #ffffff;
+}
+
+.ty-table tbody tr:nth-child(even) {
+    background: #fcf9f5;
+}
+
+.ty-table tbody tr:hover {
+    background: #f7eee4;
+}
+
+.ty-table tbody td {
+    padding: 12px 13px;
+    vertical-align: top !important;
+    text-align: left;
+    font-size: .82rem;
+    font-weight: 400;
     line-height: 1.45;
-    border-bottom: 1px solid rgba(128,128,128,.12);
+    color: #302820;
+    border: 0;
+    border-bottom: 1px solid #ede6dd;
+    height: auto;
     overflow-wrap: anywhere;
 }
 
-.act-table tbody tr:hover {
-    background: rgba(128,128,128,.055);
+.ty-table tbody td > div {
+    margin: 0;
+    padding: 0;
+    text-align: left;
+    vertical-align: top;
 }
 
-.act-table tbody tr:last-child td {
-    border-bottom: none;
+.ty-table tbody tr:last-child td {
+    border-bottom: 0;
 }
 
-.act-company {
-    font-weight: 750;
+/* REP */
+
+.ty-rep {
+    color: #50443a;
+    font-weight: 650;
+}
+
+/* CUSTOMER */
+
+.ty-customer {
+    display: inline-block;
+    color: #912a22;
+    font-weight: 800;
+    font-size: .83rem;
+    line-height: 1.4;
     text-decoration: none;
 }
 
-.act-muted {
-    opacity: .67;
-    font-size: .78rem;
+.ty-customer:hover {
+    color: #c33c2c;
+    text-decoration: underline;
 }
 
-.act-type {
+.ty-small {
+    font-size: .73rem;
+    color: #817469;
+    line-height: 1.4;
+}
+
+.ty-customer-meta {
+    display: block;
+    margin-top: 3px;
+}
+
+/* ACTIVITY BADGES */
+
+.ty-type {
     display: inline-block;
-    padding: 4px 9px;
-    border-radius: 7px;
-    background: rgba(128,128,128,.12);
-    font-size: .76rem;
+    padding: 5px 9px;
+    border-radius: 6px;
     font-weight: 750;
+    font-size: .72rem;
+    line-height: 1.3;
     white-space: nowrap;
+    color: #55483d;
+    background: #eee6dc;
 }
 
-.act-summary {
-    display: -webkit-box;
-    line-clamp: 2;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    white-space: pre-wrap;
+.ty-type-call {
+    color: #7b351b;
+    background: #f8e4d4;
 }
 
-.act-details summary {
-    cursor: pointer;
-    font-size: .76rem;
-    font-weight: 700;
+.ty-type-meeting {
+    color: #50368f;
+    background: #eee6fa;
+}
+
+.ty-type-email {
+    color: #285985;
+    background: #e3edf9;
+}
+
+.ty-type-quote {
+    color: #805419;
+    background: #f8eed3;
+}
+
+.ty-type-sale {
+    color: #22603c;
+    background: #e0f1e5;
+}
+
+/* NOTES */
+
+.ty-note-preview {
+    max-width: 100%;
+    color: #39312a;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.ty-note-details {
     margin-top: 5px;
+    font-size: .77rem;
 }
 
-.act-full-notes {
-    padding-top: 7px;
-    font-size: .82rem;
+.ty-note-details summary {
+    width: fit-content;
+    cursor: pointer;
+    font-weight: 750;
+    color: #962b22;
+    list-style-position: inside;
+}
+
+.ty-note-details summary:hover {
+    text-decoration: underline;
+}
+
+.ty-note-full {
+    margin-top: 9px !important;
+    padding: 10px !important;
+    border-radius: 7px;
+    background: #f8f1e9;
+    border: 1px solid #e5d9c9;
+    font-size: .8rem;
+    line-height: 1.55;
     white-space: pre-wrap;
+    color: #302820;
 }
 
-.act-next-step {
-    font-size: .82rem;
+/* NEXT STEP */
+
+.ty-next-step {
+    color: #55483c;
+    font-size: .81rem;
+    line-height: 1.5;
 }
 
-.act-pagination {
+/* DATE */
+
+.ty-date {
+    white-space: nowrap;
+    font-size: .78rem;
+    font-weight: 650;
+    color: #66584c;
+}
+
+/* EMPTY STATE */
+
+.ty-empty {
+    padding: 35px 18px;
+    text-align: center;
+    background: #ffffff;
+    color: #75695e;
+    font-size: .9rem;
+}
+
+/* PAGINATION */
+
+.ty-pagination {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
-    padding: 12px 16px;
-    border-top: 1px solid rgba(128,128,128,.2);
+    padding: 13px 18px;
+    background: #fffaf4;
+    border-top: 1px solid #e0d4c5;
 }
 
-.act-page-buttons {
+.ty-pagination-label {
+    font-size: .79rem;
+    font-weight: 600;
+    color: #6c6055;
+}
+
+.ty-pagination-actions {
     display: flex;
-    gap: 7px;
+    align-items: center;
+    gap: 8px;
 }
 
-.act-page-buttons button {
-    padding: 7px 12px;
-    border: 1px solid rgba(128,128,128,.3);
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
+.ty-page-button {
+    padding: 8px 14px;
+    border-radius: 7px;
+    border: 1px solid #d5c6b4;
+    background: #ffffff;
+    color: #40352b;
+    font-size: .8rem;
+    font-weight: 750;
     cursor: pointer;
 }
 
-.act-page-buttons button:disabled {
-    opacity: .35;
+.ty-page-button:hover:not(:disabled) {
+    background: #f5ebe0;
+}
+
+.ty-page-button:disabled {
+    opacity: .4;
     cursor: not-allowed;
 }
 
-.act-empty {
-    padding: 35px 18px;
-    text-align: center;
-    opacity: .75;
-}
+/* RESPONSIVE */
 
-@media(max-width:1050px) {
-    .act-stats {
-        grid-template-columns: repeat(3,1fr);
+@media (max-width: 1100px) {
+    .ty-stats {
+        grid-template-columns: repeat(3,minmax(0,1fr));
     }
 
-    .act-filter-grid {
+    .ty-filter-grid {
         grid-template-columns: repeat(2,minmax(0,1fr));
     }
+
+    .ty-filter-actions {
+        grid-column: span 2;
+    }
 }
 
-@media(max-width:650px) {
-    .act-header {
-        align-items: flex-start;
+@media (max-width: 700px) {
+    .ty-head h2 {
+        font-size: 1.2rem;
     }
 
-    .act-header h2 {
-        font-size: 1.25rem;
-    }
-
-    .act-stats {
-        grid-template-columns: repeat(3,1fr);
+    .ty-stats {
+        grid-template-columns: repeat(3,minmax(0,1fr));
         gap: 7px;
     }
 
-    .act-stat {
-        padding: 11px 6px;
+    .ty-stat {
+        padding: 11px 5px;
     }
 
-    .act-stat .number {
-        font-size: 1.35rem;
+    .ty-stat-number {
+        font-size: 1.3rem;
     }
 
-    .act-stat .label {
-        font-size: .68rem;
+    .ty-stat-label {
+        font-size: .67rem;
     }
 
-    .act-filter-grid {
+    .ty-filter-grid {
         grid-template-columns: 1fr;
     }
 
-    .act-table,
-    .act-table tbody,
-    .act-table tr,
-    .act-table td {
+    .ty-filter-actions {
+        grid-column: auto;
+    }
+
+    .ty-table,
+    .ty-table tbody,
+    .ty-table tr,
+    .ty-table td {
         display: block;
         width: 100%;
     }
 
-    .act-table thead {
+    .ty-table thead {
         display: none;
     }
 
-    .act-table tbody tr {
+    .ty-table tbody tr {
         padding: 12px 14px;
-        border-bottom: 1px solid rgba(128,128,128,.2);
+        border-bottom: 1px solid #e2d7c9;
     }
 
-    .act-table td {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 12px;
+    .ty-table tbody td {
+        display: grid;
+        grid-template-columns: 82px minmax(0,1fr);
+        gap: 10px;
         padding: 5px 0;
-        border: none;
-        text-align: right;
+        border: 0;
+        width: 100%;
     }
 
-    .act-table td::before {
+    .ty-table tbody td::before {
         content: attr(data-label);
-        font-size: .75rem;
-        font-weight: 750;
-        opacity: .7;
-        text-align: left;
-        flex: 0 0 85px;
+        font-size: .72rem;
+        font-weight: 800;
+        color: #77685b;
+        text-transform: uppercase;
     }
 
-    .act-table td > div {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .act-table td .act-summary {
-        text-align: right;
-    }
-
-    .act-pagination {
-        flex-wrap: wrap;
+    .ty-pagination {
+        justify-content: center;
     }
 }
 </style>
 
-<div class="act-page">
+<div class="ty-activity">
 
-    <!-- COMPACT HEADER -->
+    <!-- HEADER -->
 
-    <div class="act-header">
+    <div class="ty-head">
         <div>
             <h2>
                 {% if is_manager %}
@@ -369,13 +553,10 @@
                     My Activity
                 {% endif %}
             </h2>
-
-            <p>
-                Review customer interactions and follow-ups.
-            </p>
+            <p>Customer interactions and follow-up history</p>
         </div>
 
-        <div class="act-actions">
+        <div class="ty-head-actions">
             <a href="{{ url_for('customers') }}"
                class="btn btn-secondary">
                 Customers
@@ -388,69 +569,70 @@
         </div>
     </div>
 
-    <!-- ACTIVITY STATS -->
+    <!-- SUMMARY -->
 
-    <div class="act-stats">
+    <div class="ty-stats">
 
-        <div class="act-stat">
-            <div class="number">{{ logs|length }}</div>
-            <div class="label">Total</div>
+        <div class="ty-stat">
+            <div class="ty-stat-number">{{ logs|length }}</div>
+            <div class="ty-stat-label">Total</div>
         </div>
 
-        <div class="act-stat">
-            <div class="number">
+        <div class="ty-stat">
+            <div class="ty-stat-number">
                 {{ logs|selectattr('activity_type','equalto','Cold Call')|list|length }}
             </div>
-            <div class="label">Cold Calls</div>
+            <div class="ty-stat-label">Cold Calls</div>
         </div>
 
-        <div class="act-stat">
-            <div class="number">
+        <div class="ty-stat">
+            <div class="ty-stat-number">
                 {{ logs|selectattr('activity_type','equalto','Phone Call')|list|length }}
             </div>
-            <div class="label">Phone Calls</div>
+            <div class="ty-stat-label">Phone Calls</div>
         </div>
 
-        <div class="act-stat">
-            <div class="number">
+        <div class="ty-stat">
+            <div class="ty-stat-number">
+                {{ logs|selectattr('activity_type','equalto','Email')|list|length }}
+            </div>
+            <div class="ty-stat-label">Emails</div>
+        </div>
+
+        <div class="ty-stat">
+            <div class="ty-stat-number">
                 {{ logs|selectattr('activity_type','equalto','Meeting')|list|length }}
             </div>
-            <div class="label">Meetings</div>
+            <div class="ty-stat-label">Meetings</div>
         </div>
 
-        <div class="act-stat">
-            <div class="number">
+        <div class="ty-stat">
+            <div class="ty-stat-number">
                 {{ logs|selectattr('activity_type','equalto','Quote')|list|length }}
             </div>
-            <div class="label">Quotes</div>
-        </div>
-
-        <div class="act-stat">
-            <div class="number">
-                {{ logs|selectattr('activity_type','equalto','Sale')|list|length }}
-            </div>
-            <div class="label">Sales</div>
+            <div class="ty-stat-label">Quotes</div>
         </div>
 
     </div>
 
-    <!-- FILTERS -->
+    <!-- FILTER PANEL -->
 
-    <div class="act-filter-card">
+    <div class="ty-panel">
+        <div class="ty-filter-section">
 
-        <div class="act-filter-title">
-            Filter Activity
-        </div>
+            <div class="ty-filter-heading">
+                Filter Activity
+            </div>
 
-        <form method="GET"
-              action="{{ url_for('activity') }}"
-              class="act-filter-grid">
+            <form method="GET"
+                  action="{{ url_for('activity') }}"
+                  class="ty-filter-grid">
 
-            {% if is_manager %}
-                <div class="act-field">
+                {% if is_manager %}
+                <div class="ty-filter-field">
                     <label for="rep">Sales Rep</label>
 
-                    <select name="rep" id="rep">
+                    <select id="rep" name="rep">
                         <option value="">All Reps</option>
 
                         {% for user_id, rep_name in tracked_reps.items() %}
@@ -463,220 +645,241 @@
                         {% endfor %}
                     </select>
                 </div>
-            {% endif %}
+                {% endif %}
 
-            <div class="act-field">
-                <label for="type">Activity Type</label>
+                <div class="ty-filter-field">
+                    <label for="type">Activity Type</label>
 
-                <select name="type" id="type">
-                    <option value="">All Activities</option>
+                    <select id="type" name="type">
+                        <option value="">All Activities</option>
 
-                    {% for activity_type in activity_types %}
-                        <option value="{{ activity_type }}"
-                            {% if selected_type == activity_type %}
-                                selected
-                            {% endif %}>
-                            {{ activity_type }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
+                        {% for activity_type in activity_types %}
+                            <option value="{{ activity_type }}"
+                                {% if selected_type == activity_type %}
+                                    selected
+                                {% endif %}>
+                                {{ activity_type }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-            <div class="act-field">
-                <label for="customer-search">
-                    Search Customer / Notes
-                </label>
+                <div class="ty-filter-field">
+                    <label for="activity-search">
+                        Search Customer / Notes
+                    </label>
 
-                <input type="search"
-                       id="customer-search"
-                       placeholder="Search activity..."
-                       autocomplete="off">
-            </div>
+                    <input type="search"
+                           id="activity-search"
+                           placeholder="Search activity..."
+                           autocomplete="off">
+                </div>
 
-            <div class="act-filter-buttons">
-                <button type="submit"
-                        class="btn btn-primary">
-                    Apply
-                </button>
+                <div class="ty-filter-actions">
+                    <button type="submit"
+                            class="btn btn-primary">
+                        Apply
+                    </button>
 
-                <a href="{{ url_for('activity', clear=1) }}"
-                   class="btn btn-secondary">
-                    Clear
-                </a>
-            </div>
+                    <a href="{{ url_for('activity', clear=1) }}"
+                       class="btn btn-secondary"
+                       id="activity-clear">
+                        Clear
+                    </a>
+                </div>
 
-        </form>
-
+            </form>
+        </div>
     </div>
 
-    <!-- LOG LIST -->
+    <!-- ACTIVITY HISTORY -->
 
-    <div class="act-list-card">
+    <div class="ty-panel">
 
-        <div class="act-list-head">
+        <div class="ty-history-head">
             <h3>Activity History</h3>
 
-            <span id="activity-result-count">
+            <span class="ty-history-count"
+                  id="activity-result-count">
                 {{ logs|length }} records
             </span>
         </div>
 
         {% if logs %}
 
-            <div class="act-table-wrap">
-                <table class="act-table">
-                    <colgroup>
-                        <col style="width:12%;">
-                        <col style="width:19%;">
-                        <col style="width:12%;">
-                        <col style="width:28%;">
-                        <col style="width:18%;">
-                        <col style="width:11%;">
-                    </colgroup>
+        <div class="ty-table-wrap">
+            <table class="ty-table">
 
-                    <thead>
-                        <tr>
-                            <th>Rep</th>
-                            <th>Customer</th>
-                            <th>Activity</th>
-                            <th>Summary</th>
-                            <th>Next Step</th>
-                            <th>Date</th>
-                        </tr>
-                    </thead>
+                <colgroup>
+                    <col style="width:11%;">
+                    <col style="width:23%;">
+                    <col style="width:12%;">
+                    <col style="width:28%;">
+                    <col style="width:17%;">
+                    <col style="width:9%;">
+                </colgroup>
 
-                    <tbody id="activity-table-body">
+                <thead>
+                    <tr>
+                        <th>Rep</th>
+                        <th>Customer</th>
+                        <th>Activity</th>
+                        <th>Summary</th>
+                        <th>Next Step</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
 
-                        {% for log in logs %}
-                        <tr class="activity-row"
-                            data-search="{{ (
-                                (log.rep_name or '') ~ ' ' ~
-                                (log.customer.company_name if log.customer else '') ~ ' ' ~
-                                (log.activity_type or '') ~ ' ' ~
-                                (log.summary or '') ~ ' ' ~
-                                (log.next_step or '') ~ ' ' ~
-                                (log.activity_date or '')
-                            )|lower|e }}">
+                <tbody id="activity-table-body">
 
-                            <td data-label="Rep">
-                                <div>
-                                    {{ log.rep_name or '—' }}
-                                </div>
-                            </td>
+                    {% for log in logs %}
 
-                            <td data-label="Customer">
-                                <div>
-                                    {% if log.customer %}
-                                        <a class="act-company"
-                                           href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
-                                            {{ log.customer.company_name }}
-                                        </a>
+                    <tr class="ty-activity-row"
+                        data-search="{{ (
+                            (log.rep_name or '') ~ ' ' ~
+                            (log.customer.company_name if log.customer else '') ~ ' ' ~
+                            (log.activity_type or '') ~ ' ' ~
+                            (log.summary or '') ~ ' ' ~
+                            (log.next_step or '') ~ ' ' ~
+                            (log.activity_date or '')
+                        )|lower|e }}">
 
-                                        {% if log.customer.contacts %}
-                                            {% for contact in log.customer.contacts %}
-                                                {% if contact.email %}
-                                                    <div class="act-muted">
-                                                        <a href="mailto:{{ contact.email|e }}">
-                                                            {{ contact.email }}
-                                                        </a>
-                                                    </div>
-                                                {% endif %}
-                                            {% endfor %}
-                                        {% endif %}
-                                    {% else %}
-                                        —
+                        <!-- REP -->
+
+                        <td data-label="Rep">
+                            <div class="ty-rep">
+                                {{ log.rep_name or '—' }}
+                            </div>
+                        </td>
+
+                        <!-- CUSTOMER -->
+
+                        <td data-label="Customer">
+                            <div>
+                                {% if log.customer %}
+                                    <a class="ty-customer"
+                                       href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
+                                        {{ log.customer.company_name }}
+                                    </a>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <!-- ACTIVITY TYPE -->
+
+                        <td data-label="Activity">
+                            <div>
+                                {% set activity_class = '' %}
+
+                                {% if log.activity_type in ['Cold Call','Phone Call'] %}
+                                    {% set activity_class = 'ty-type-call' %}
+                                {% elif log.activity_type == 'Meeting' %}
+                                    {% set activity_class = 'ty-type-meeting' %}
+                                {% elif log.activity_type == 'Email' %}
+                                    {% set activity_class = 'ty-type-email' %}
+                                {% elif log.activity_type == 'Quote' %}
+                                    {% set activity_class = 'ty-type-quote' %}
+                                {% elif log.activity_type == 'Sale' %}
+                                    {% set activity_class = 'ty-type-sale' %}
+                                {% endif %}
+
+                                <span class="ty-type {{ activity_class }}">
+                                    {{ log.activity_type or '—' }}
+                                </span>
+                            </div>
+                        </td>
+
+                        <!-- SUMMARY -->
+
+                        <td data-label="Summary">
+                            <div>
+                                {% if log.summary %}
+
+                                    <div class="ty-note-preview">
+                                        {{ log.summary[:100] }}{% if log.summary|length > 100 %}...{% endif %}
+                                    </div>
+
+                                    {% if log.summary|length > 100 %}
+                                        <details class="ty-note-details">
+                                            <summary>View Full Notes</summary>
+                                            <div class="ty-note-full">{{ log.summary }}</div>
+                                        </details>
                                     {% endif %}
-                                </div>
-                            </td>
 
-                            <td data-label="Activity">
-                                <div>
-                                    <span class="act-type">
-                                        {{ log.activity_type }}
-                                    </span>
-                                </div>
-                            </td>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </div>
+                        </td>
 
-                            <td data-label="Summary">
-                                <div>
-                                    {% if log.summary %}
-                                        <div class="act-summary">
-                                            {{ log.summary }}
-                                        </div>
+                        <!-- NEXT STEP -->
 
-                                        {% if log.summary|length > 110 %}
-                                            <details class="act-details">
-                                                <summary>
-                                                    Read Full Notes
-                                                </summary>
+                        <td data-label="Next Step">
+                            <div class="ty-next-step">
+                                {{ log.next_step or '—' }}
+                            </div>
+                        </td>
 
-                                                <div class="act-full-notes">{{ log.summary }}</div>
-                                            </details>
-                                        {% endif %}
-                                    {% else %}
-                                        —
-                                    {% endif %}
-                                </div>
-                            </td>
+                        <!-- DATE -->
 
-                            <td data-label="Next Step">
-                                <div class="act-next-step">
-                                    {{ log.next_step or '—' }}
-                                </div>
-                            </td>
+                        <td data-label="Date">
+                            <div class="ty-date">
+                                {{ log.activity_date or '—' }}
+                            </div>
+                        </td>
 
-                            <td data-label="Date">
-                                <div>
-                                    {{ log.activity_date or '—' }}
-                                </div>
-                            </td>
+                    </tr>
 
-                        </tr>
-                        {% endfor %}
+                    {% endfor %}
 
-                    </tbody>
-                </table>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="ty-empty"
+             id="activity-no-results"
+             hidden>
+            No activities match your search.
+        </div>
+
+        <!-- PAGINATION -->
+
+        <div class="ty-pagination">
+
+            <span class="ty-pagination-label"
+                  id="activity-page-label">
+                Showing activity records
+            </span>
+
+            <div class="ty-pagination-actions">
+                <button type="button"
+                        class="ty-page-button"
+                        id="activity-prev">
+                    Previous
+                </button>
+
+                <button type="button"
+                        class="ty-page-button"
+                        id="activity-next">
+                    Next
+                </button>
             </div>
-
-            <div class="act-empty"
-                 id="activity-no-results"
-                 hidden>
-                No activities match your search.
-            </div>
-
-            <!-- PAGINATION -->
-
-            <div class="act-pagination">
-                <span class="act-muted"
-                      id="activity-page-label">
-                    Showing activity records
-                </span>
-
-                <div class="act-page-buttons">
-                    <button type="button"
-                            id="activity-prev">
-                        Previous
-                    </button>
-
-                    <button type="button"
-                            id="activity-next">
-                        Next
-                    </button>
-                </div>
-            </div>
+        </div>
 
         {% else %}
 
-            <div class="act-empty">
-                No activities match your current filters.
+        <div class="ty-empty">
+            No activities match your current filters.
 
-                <div style="margin-top:12px;">
-                    <a href="{{ url_for('activity', clear=1) }}"
-                       class="btn btn-secondary">
-                        Clear Filters
-                    </a>
-                </div>
+            <div style="margin-top:12px;">
+                <a href="{{ url_for('activity', clear=1) }}"
+                   class="btn btn-secondary">
+                    Clear Filters
+                </a>
             </div>
+        </div>
 
         {% endif %}
 
@@ -684,44 +887,55 @@
 
 </div>
 
-<!-- CLIENT SEARCH AND PAGINATION -->
+<!-- SEARCH / PAGINATION -->
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
 
     const rows = Array.from(
-        document.querySelectorAll(".activity-row")
+        document.querySelectorAll(".ty-activity-row")
     );
 
-    const searchInput = document.getElementById(
-        "customer-search"
-    );
+    const searchInput =
+        document.getElementById("activity-search");
 
-    const previousButton = document.getElementById(
-        "activity-prev"
-    );
+    const prevButton =
+        document.getElementById("activity-prev");
 
-    const nextButton = document.getElementById(
-        "activity-next"
-    );
+    const nextButton =
+        document.getElementById("activity-next");
 
-    const pageLabel = document.getElementById(
-        "activity-page-label"
-    );
+    const pageLabel =
+        document.getElementById("activity-page-label");
 
-    const resultCount = document.getElementById(
-        "activity-result-count"
-    );
+    const resultCount =
+        document.getElementById("activity-result-count");
 
-    const noResults = document.getElementById(
-        "activity-no-results"
-    );
+    const noResults =
+        document.getElementById("activity-no-results");
 
-    const pageSize = 20;
+    const clearLink =
+        document.getElementById("activity-clear");
+
+    const pageSize = 15;
+
     let currentPage = 1;
     let filteredRows = [...rows];
 
-    function renderActivityPage() {
+    // Restore search when returning to the page.
+    const storageKey = "daily_activity_history_search";
+
+    try {
+        const saved = sessionStorage.getItem(storageKey);
+
+        if (searchInput && saved) {
+            searchInput.value = saved;
+        }
+    } catch (error) {
+        // Storage may be unavailable.
+    }
+
+    function renderPage() {
 
         const total = filteredRows.length;
 
@@ -731,24 +945,22 @@ document.addEventListener("DOMContentLoaded", function () {
         );
 
         currentPage = Math.min(
-            Math.max(1, currentPage),
+            Math.max(currentPage, 1),
             totalPages
         );
 
         const start = (currentPage - 1) * pageSize;
         const end = Math.min(start + pageSize, total);
 
-        rows.forEach(function (row) {
+        rows.forEach(row => {
             row.hidden = true;
             row.style.display = "none";
         });
 
-        filteredRows
-            .slice(start, end)
-            .forEach(function (row) {
-                row.hidden = false;
-                row.style.display = "";
-            });
+        filteredRows.slice(start, end).forEach(row => {
+            row.hidden = false;
+            row.style.display = "";
+        });
 
         if (pageLabel) {
             pageLabel.textContent = total
@@ -761,13 +973,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 `${total} record${total === 1 ? "" : "s"}`;
         }
 
-        if (previousButton) {
-            previousButton.disabled = currentPage <= 1;
+        if (prevButton) {
+            prevButton.disabled = currentPage <= 1;
         }
 
         if (nextButton) {
-            nextButton.disabled =
-                currentPage >= totalPages;
+            nextButton.disabled = currentPage >= totalPages;
         }
 
         if (noResults) {
@@ -777,61 +988,63 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    function updateSearch() {
+    function applySearch() {
 
-        const term = searchInput
+        const searchTerm = searchInput
             ? searchInput.value.trim().toLowerCase()
             : "";
 
-        filteredRows = rows.filter(function (row) {
-
-            const searchableText =
-                row.getAttribute("data-search") || "";
-
-            return searchableText.includes(term);
+        filteredRows = rows.filter(row => {
+            const text = row.getAttribute("data-search") || "";
+            return text.includes(searchTerm);
         });
 
+        try {
+            sessionStorage.setItem(storageKey, searchTerm);
+        } catch (error) {
+            // Ignore storage errors.
+        }
+
         currentPage = 1;
-        renderActivityPage();
+        renderPage();
     }
 
     if (searchInput) {
-        searchInput.addEventListener(
-            "input",
-            updateSearch
-        );
+        searchInput.addEventListener("input", applySearch);
     }
 
-    if (previousButton) {
-        previousButton.addEventListener(
-            "click",
-            function () {
-                if (currentPage > 1) {
-                    currentPage--;
-                    renderActivityPage();
-                }
+    if (prevButton) {
+        prevButton.addEventListener("click", function () {
+            if (currentPage > 1) {
+                currentPage--;
+                renderPage();
             }
-        );
+        });
     }
 
     if (nextButton) {
-        nextButton.addEventListener(
-            "click",
-            function () {
+        nextButton.addEventListener("click", function () {
+            const totalPages =
+                Math.ceil(filteredRows.length / pageSize);
 
-                const totalPages = Math.ceil(
-                    filteredRows.length / pageSize
-                );
-
-                if (currentPage < totalPages) {
-                    currentPage++;
-                    renderActivityPage();
-                }
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderPage();
             }
-        );
+        });
     }
 
-    renderActivityPage();
+    if (clearLink) {
+        clearLink.addEventListener("click", function () {
+            try {
+                sessionStorage.removeItem(storageKey);
+            } catch (error) {
+                // Ignore storage errors.
+            }
+        });
+    }
+
+    applySearch();
 
 });
 </script>

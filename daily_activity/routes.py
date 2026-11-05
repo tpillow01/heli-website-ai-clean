@@ -35,6 +35,7 @@ from .models import (
     SalesLead,
     LeadSalesProcess,
     ContactRequest,
+    WeeklyActivityGoal,
 )
 
 
@@ -116,6 +117,7 @@ DA_ENDPOINTS = {
     "set_lead_dead",
     "reactivate_lead",
     "lead_ai_coach",
+    "update_weekly_goals",
 }
 
 
@@ -1356,6 +1358,75 @@ def add_customer():
                 )
 
                 db.session.add(contact)
+
+            
+            # ----------------------------------------
+            # ADDITIONAL CUSTOMER CONTACTS
+            # ----------------------------------------
+
+            extra_names = request.form.getlist(
+                "extra_contact_name"
+            )
+
+            extra_titles = request.form.getlist(
+                "extra_contact_title"
+            )
+
+            extra_phones = request.form.getlist(
+                "extra_contact_phone"
+            )
+
+            extra_emails = request.form.getlist(
+                "extra_contact_email"
+            )
+
+            if len(extra_names) > 20:
+                raise ValueError(
+                    "Too many additional contacts submitted."
+                )
+
+            for index, raw_name in enumerate(extra_names):
+
+                name = raw_name.strip()
+
+                title = (
+                    extra_titles[index].strip()
+                    if index < len(extra_titles)
+                    else ""
+                )
+
+                phone = (
+                    extra_phones[index].strip()
+                    if index < len(extra_phones)
+                    else ""
+                )
+
+                email = (
+                    extra_emails[index].strip()
+                    if index < len(extra_emails)
+                    else ""
+                )
+
+                # Ignore completely empty contact rows.
+                if not any([name, title, phone, email]):
+                    continue
+
+                # Require a name for populated contacts.
+                if not name:
+                    raise ValueError(
+                        "Each additional contact must have a name."
+                    )
+
+                extra_contact = Contact(
+                    user_id=assigned_user_id,
+                    customer_id=customer.id,
+                    name=name,
+                    title=title,
+                    phone=format_phone_number(phone),
+                    email=email,
+                )
+
+                db.session.add(extra_contact)
 
             # ----------------------------------------
             # FLEET INFORMATION
@@ -3900,30 +3971,125 @@ def calendar_page():
         is_manager=user_is_manager(),
     )
 
-@daily_activity_bp.route("/metrics")
-def metrics():
-    today = date.today()
 
-    week_offset_raw = request.args.get("week_offset", "0")
+@daily_activity_bp.route(
+    "/metrics/goals/update",
+    methods=["POST"],
+)
+def update_weekly_goals():
+
+    if not user_is_manager():
+        abort(403)
 
     try:
-        week_offset = int(week_offset_raw)
+        user_id = int(
+            request.form.get("user_id", "")
+        )
+    except (ValueError, TypeError):
+        abort(400)
+
+    if user_id not in TRACKED_REPS:
+        abort(400)
+
+    fields = (
+        "cold_calls",
+        "calls_emails",
+        "meetings",
+        "quotes",
+    )
+
+    values = {}
+
+    for field in fields:
+        try:
+            value = int(
+                request.form.get(field, "")
+            )
+        except (ValueError, TypeError):
+            flash(
+                "All goals must be whole numbers.",
+                "error"
+            )
+            return redirect(da_url("metrics"))
+
+        if value < 0 or value > 10000:
+            flash(
+                "Goals must be between 0 and 10,000.",
+                "error"
+            )
+            return redirect(da_url("metrics"))
+
+        values[field] = value
+
+    # Create the goal table if it does not yet exist.
+    WeeklyActivityGoal.__table__.create(
+        bind=db.engine,
+        checkfirst=True
+    )
+
+    goal = WeeklyActivityGoal.query.filter_by(
+        user_id=user_id
+    ).first()
+
+    if goal is None:
+        goal = WeeklyActivityGoal(user_id=user_id)
+        db.session.add(goal)
+
+    for field, value in values.items():
+        setattr(goal, field, value)
+
+    goal.updated_by = current_user_id()
+    goal.updated_at = datetime.utcnow()
+
+    db.session.commit()
+
+    flash(
+        f"{TRACKED_REPS[user_id]}'s weekly goals were updated.",
+        "success"
+    )
+
+    return redirect(da_url("metrics"))
+
+
+@daily_activity_bp.route("/metrics")
+def metrics():
+
+    today = date.today()
+
+    # ----------------------------------------
+    # REPORT DATE NAVIGATION
+    # ----------------------------------------
+
+    try:
+        week_offset = int(
+            request.args.get("week_offset", "0")
+        )
     except ValueError:
         week_offset = 0
 
-    current_monday = today - timedelta(days=today.weekday())
-
-    week_start = current_monday + timedelta(weeks=week_offset)
-    week_end = week_start + timedelta(days=6)
-
-    month_offset_raw = request.args.get("month_offset", "0")
-
     try:
-        month_offset = int(month_offset_raw)
+        month_offset = int(
+            request.args.get("month_offset", "0")
+        )
     except ValueError:
         month_offset = 0
 
-    month_index = today.year * 12 + today.month - 1 + month_offset
+    current_monday = (
+        today - timedelta(days=today.weekday())
+    )
+
+    week_start = (
+        current_monday
+        + timedelta(weeks=week_offset)
+    )
+
+    week_end = week_start + timedelta(days=6)
+
+    month_index = (
+        today.year * 12
+        + today.month - 1
+        + month_offset
+    )
 
     month_year = month_index // 12
     month_number = month_index % 12 + 1
@@ -3931,23 +4097,21 @@ def metrics():
     month_start = date(
         month_year,
         month_number,
-        1,
+        1
     )
 
     if month_number == 12:
         next_month = date(
-            month_year + 1,
-            1,
-            1,
+            month_year + 1, 1, 1
         )
     else:
         next_month = date(
-            month_year,
-            month_number + 1,
-            1,
+            month_year, month_number + 1, 1
         )
 
-    month_end = next_month - timedelta(days=1)
+    month_end = (
+        next_month - timedelta(days=1)
+    )
 
     categories = [
         "Cold Call",
@@ -3959,21 +4123,119 @@ def metrics():
     ]
 
     def blank_metrics():
-        metrics = {
+        result = {
             category: 0
             for category in categories
         }
+        result["Total"] = 0
+        return result
 
-        metrics["Total"] = 0
+    # ----------------------------------------
+    # INITIAL GOALS
+    # ----------------------------------------
 
-        return metrics
+    initial_goals = {
+        2: {
+            "cold_calls": 20,
+            "calls_emails": 80,
+            "meetings": 10,
+            "quotes": 7,
+        },
+        10: {
+            "cold_calls": 40,
+            "calls_emails": 50,
+            "meetings": 4,
+            "quotes": 2,
+        },
+        14: {
+            "cold_calls": 50,
+            "calls_emails": 100,
+            "meetings": 10,
+            "quotes": 2,
+        },
+        19: {
+            "cold_calls": 100,
+            "calls_emails": 200,
+            "meetings": 1,
+            "quotes": 2,
+        },
+    }
+
+    # Creates only the missing goal table.
+    # Existing tables and records are not recreated.
+    WeeklyActivityGoal.__table__.create(
+        bind=db.engine,
+        checkfirst=True
+    )
+
+    existing_goals = {
+        goal.user_id: goal
+        for goal in WeeklyActivityGoal.query.all()
+    }
+
+    new_goals_added = False
+
+    for user_id in TRACKED_REPS:
+
+        if user_id not in existing_goals:
+            defaults = initial_goals.get(
+                user_id, {}
+            )
+
+            goal = WeeklyActivityGoal(
+                user_id=user_id,
+                cold_calls=defaults.get(
+                    "cold_calls", 0
+                ),
+                calls_emails=defaults.get(
+                    "calls_emails", 0
+                ),
+                meetings=defaults.get(
+                    "meetings", 0
+                ),
+                quotes=defaults.get(
+                    "quotes", 0
+                ),
+            )
+
+            db.session.add(goal)
+            existing_goals[user_id] = goal
+            new_goals_added = True
+
+    if new_goals_added:
+        db.session.commit()
+
+    # ----------------------------------------
+    # ACTIVITY COUNTS
+    # ----------------------------------------
 
     rep_metrics = {}
+    goal_progress = {}
+
+    # Current week's Monday through Sunday.
+    current_week_start = current_monday
+    current_week_end = (
+        current_monday + timedelta(days=6)
+    )
+
+    # Monday - Friday only.
+    if today.weekday() <= 4:
+        remaining_workdays = 5 - today.weekday()
+    else:
+        remaining_workdays = 0
+
+    # Expected progress at the start of today.
+    completed_workdays = min(
+        today.weekday(), 5
+    )
 
     for user_id, rep_name in TRACKED_REPS.items():
+
         weekly = blank_metrics()
         monthly = blank_metrics()
+        current_weekly = blank_metrics()
 
+        # Keep the existing activity tracking logic.
         logs = (
             ActivityLog.query
             .filter(ActivityLog.user_id == user_id)
@@ -3981,6 +4243,7 @@ def metrics():
         )
 
         for log in logs:
+
             activity_day = parse_date_safe(
                 log.activity_date
             )
@@ -4007,36 +4270,149 @@ def metrics():
                 if activity_type in categories:
                     monthly[activity_type] += 1
 
+            if (
+                current_week_start
+                <= activity_day
+                <= current_week_end
+            ):
+                current_weekly["Total"] += 1
+
+                if activity_type in categories:
+                    current_weekly[activity_type] += 1
+
         rep_metrics[rep_name] = {
             "weekly": weekly,
             "monthly": monthly,
         }
 
-    logged_in_rep = current_rep_name()
+        # ----------------------------------------
+        # GOAL PROGRESS
+        # ----------------------------------------
+
+        goal_record = existing_goals[user_id]
+
+        goal_targets = {
+            "Cold Calls": goal_record.cold_calls,
+            "Calls + Emails": goal_record.calls_emails,
+            "Meetings": goal_record.meetings,
+            "Quotes": goal_record.quotes,
+        }
+
+        completed = {
+            "Cold Calls": current_weekly["Cold Call"],
+            "Calls + Emails": (
+                current_weekly["Phone Call"]
+                + current_weekly["Email"]
+            ),
+            "Meetings": current_weekly["Meeting"],
+            "Quotes": current_weekly["Quote"],
+        }
+
+        goal_rows = []
+        completion_percentages = []
+
+        for label, target in goal_targets.items():
+
+            actual = completed[label]
+            remaining = max(0, target - actual)
+
+            if target > 0:
+                percent = round(
+                    actual / target * 100
+                )
+                completion_percentages.append(
+                    min(100, actual / target * 100)
+                )
+            else:
+                percent = 100 if actual == 0 else 100
+
+            if remaining_workdays > 0:
+                # Ceiling division.
+                daily_needed = (
+                    remaining + remaining_workdays - 1
+                ) // remaining_workdays
+            else:
+                daily_needed = 0
+
+            goal_rows.append({
+                "label": label,
+                "target": target,
+                "actual": actual,
+                "remaining": remaining,
+                "percent": percent,
+                "bar_percent": min(100, percent),
+                "daily_needed": daily_needed,
+                "complete": remaining == 0,
+            })
+
+        overall_percent = (
+            round(
+                sum(completion_percentages)
+                / len(completion_percentages)
+            )
+            if completion_percentages
+            else 100
+        )
+
+        expected_percent = (
+            completed_workdays / 5 * 100
+        )
+
+        if all(
+            row["complete"] for row in goal_rows
+        ):
+            pace_status = "Complete"
+        elif overall_percent >= expected_percent:
+            pace_status = "On Track"
+        else:
+            pace_status = "Behind"
+
+        goal_progress[rep_name] = {
+            "rows": goal_rows,
+            "overall_percent": overall_percent,
+            "pace_status": pace_status,
+            "record": goal_record,
+            "user_id": user_id,
+        }
+
+    # ----------------------------------------
+    # MANAGER / REP VISIBILITY
+    # ----------------------------------------
 
     if user_is_manager():
         visible_reps = list(
             TRACKED_REPS.values()
         )
-
-    elif logged_in_rep:
-        visible_reps = [
-            logged_in_rep
-        ]
-
     else:
-        visible_reps = []
+        logged_in_rep = current_rep_name()
+
+        visible_reps = (
+            [logged_in_rep]
+            if logged_in_rep
+            else []
+        )
 
     return render_template(
         "daily_activity/metrics.html",
+
         categories=categories,
         rep_metrics=rep_metrics,
         visible_reps=visible_reps,
+
         week_start=week_start,
         week_end=week_end,
         week_offset=week_offset,
+
         month_start=month_start,
         month_end=month_end,
         month_offset=month_offset,
+
+        goal_progress=goal_progress,
+        tracked_reps=TRACKED_REPS,
+        remaining_workdays=remaining_workdays,
+        today=today,
+        current_week_start=current_week_start,
+        current_week_end=current_week_end,
+
         is_manager=user_is_manager(),
     )

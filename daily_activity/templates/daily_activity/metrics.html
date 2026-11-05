@@ -1,291 +1,1029 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Sales Metrics | Daily Activity App{% endblock %}
-{% block page_title %}Sales Metrics{% endblock %}
-{% block page_subtitle %}Track weekly and monthly sales activity by representative{% endblock %}
+{% block page_title %}Sales Performance{% endblock %}
+{% block page_subtitle %}
+Weekly goals, daily targets, and activity reporting
+{% endblock %}
 
 {% block content %}
 
-<div class="hero-panel">
-    <div class="hero-panel-left">
-        <div class="hero-eyebrow">Activity Metrics</div>
+<style>
+/* ==========================================
+   TYNAN SALES PERFORMANCE DASHBOARD
+   ========================================== */
 
-        {% if is_manager %}
-            <h3>Team Sales Activity</h3>
-            <p>
-                Review individual rep activity for the current week and month.
-                Metrics are calculated automatically from logged Daily Activity entries.
-            </p>
-        {% else %}
-            <h3>My Sales Activity</h3>
-            <p>
-                Track your cold calls, phone calls, emails, meetings,
-                quotes, sales, and overall activity.
-            </p>
-        {% endif %}
-    </div>
+.metrics-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    width: 100%;
+    min-width: 0;
+    color: #302820;
+}
 
-    <div class="hero-panel-right">
-        <div class="mini-stat-card">
-            <span>Week</span>
-            <strong>
-                {{ week_start.strftime("%m/%d") }}
-                -
-                {{ week_end.strftime("%m/%d") }}
-            </strong>
-        </div>
+.metrics-page *,
+.metrics-page *::before,
+.metrics-page *::after {
+    box-sizing: border-box;
+}
 
-        <div class="mini-stat-card">
-            <span>Month</span>
-            <strong>
-                {{ month_start.strftime("%B %Y") }}
-            </strong>
-        </div>
+/* PANELS */
 
-        <div class="mini-stat-card">
-            <span>Tracked Reps</span>
-            <strong>
-                {{ visible_reps|length }}
-            </strong>
-        </div>
+.metrics-panel {
+    background: #fffaf3;
+    border: 1px solid #ded0bd;
+    border-radius: 12px;
+    padding: 20px;
+    min-width: 0;
+    box-shadow: 0 2px 6px rgba(50, 35, 20, 0.04);
+}
 
-        <div class="mini-stat-card">
-            <span>Tracking</span>
-            <strong>Automatic</strong>
-        </div>
-    </div>
-</div>
+.metrics-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
 
+.metrics-header h2 {
+    margin: 0 0 5px;
+    font-size: 1.4rem;
+    font-weight: 800;
+}
 
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>Weekly Activity</h3>
+.metrics-header p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #75695e;
+}
 
-            <p>
-                {{ week_start.strftime("%B %d, %Y") }}
-                through
-                {{ week_end.strftime("%B %d, %Y") }}
-            </p>
-        </div>
+.metrics-section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 17px;
+}
 
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <a
-                href="{{ url_for(
-                    'metrics',
-                    week_offset=week_offset - 1,
-                    month_offset=month_offset
-                ) }}"
-                class="btn btn-secondary btn-small"
-            >
-                ← Previous Week
+.metrics-section-head h3 {
+    margin: 0 0 5px;
+    font-size: 1.1rem;
+    font-weight: 800;
+}
+
+.metrics-subtitle {
+    font-size: 0.82rem;
+    color: #75695e;
+    margin: 0;
+}
+
+.metrics-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* MANAGEMENT TEAM SUMMARY */
+
+.team-goal-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.team-goal-card {
+    background: #ffffff;
+    border: 1px solid #e3d7c8;
+    border-radius: 10px;
+    padding: 16px;
+    min-width: 0;
+}
+
+.team-goal-name {
+    font-weight: 800;
+    font-size: 0.92rem;
+    margin-bottom: 9px;
+}
+
+.team-goal-percent {
+    font-size: 1.7rem;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+.team-goal-status {
+    font-size: 0.78rem;
+    color: #75695e;
+    margin-top: 10px;
+}
+
+/* PROGRESS BARS */
+
+.goal-progress {
+    display: block;
+    width: 100%;
+    height: 10px;
+    border: 0;
+    border-radius: 20px;
+    overflow: hidden;
+    appearance: none;
+    -webkit-appearance: none;
+    background: #e9e0d5;
+}
+
+.goal-progress::-webkit-progress-bar {
+    background: #e9e0d5;
+    border-radius: 20px;
+}
+
+.goal-progress::-webkit-progress-value {
+    background: #b33429;
+    border-radius: 20px;
+}
+
+.goal-progress::-moz-progress-bar {
+    background: #b33429;
+    border-radius: 20px;
+}
+
+.goal-progress.goal-complete::-webkit-progress-value {
+    background: #328259;
+}
+
+.goal-progress.goal-complete::-moz-progress-bar {
+    background: #328259;
+}
+
+/* INDIVIDUAL REP PROGRESS */
+
+.rep-goal-section {
+    padding: 18px 0;
+    border-bottom: 1px solid #e3d8ca;
+}
+
+.rep-goal-section:first-of-type {
+    padding-top: 0;
+}
+
+.rep-goal-section:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.rep-goal-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.rep-goal-heading h4 {
+    font-size: 1rem;
+    font-weight: 800;
+    margin: 0;
+}
+
+.rep-goal-heading span {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #716255;
+}
+
+.goal-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.goal-card {
+    background: #ffffff;
+    border: 1px solid #e5d9cb;
+    border-radius: 10px;
+    padding: 15px;
+    min-width: 0;
+}
+
+.goal-card-label {
+    font-size: 0.78rem;
+    font-weight: 750;
+    color: #75695e;
+    margin-bottom: 10px;
+}
+
+.goal-card-values {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    margin-bottom: 13px;
+}
+
+.goal-card-actual {
+    font-size: 1.65rem;
+    font-weight: 800;
+}
+
+.goal-card-target {
+    font-size: 0.91rem;
+    color: #85776a;
+}
+
+.goal-card-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 9px;
+    font-size: 0.73rem;
+    color: #786a5c;
+}
+
+/* DAILY ACTION PLAN */
+
+.daily-plan {
+    margin-top: 17px;
+    padding: 17px;
+    background: #f4e9dc;
+    border: 1px solid #e3d3c0;
+    border-radius: 10px;
+}
+
+.daily-plan h4 {
+    margin: 0 0 5px;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.daily-plan-subtitle {
+    font-size: 0.8rem;
+    color: #766859;
+    margin: 0 0 15px;
+}
+
+.daily-plan-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.daily-target {
+    background: #ffffff;
+    border: 1px solid #e5d7c5;
+    border-radius: 9px;
+    padding: 16px 8px;
+    text-align: center;
+}
+
+.daily-target-number {
+    font-size: 1.85rem;
+    line-height: 1.15;
+    font-weight: 800;
+    color: #a62b22;
+}
+
+.daily-target-label {
+    font-size: 0.76rem;
+    color: #65574b;
+    margin-top: 7px;
+    font-weight: 600;
+}
+
+.daily-plan-note {
+    font-size: 0.79rem;
+    color: #716356;
+    line-height: 1.5;
+    margin: 14px 0 0;
+}
+
+/* MANAGER GOAL EDITOR */
+
+.goal-editor {
+    margin-top: 16px;
+    border-top: 1px solid #e3d8ca;
+    padding-top: 14px;
+}
+
+.goal-editor summary {
+    cursor: pointer;
+    color: #9c2b23;
+    font-size: 0.85rem;
+    font-weight: 800;
+}
+
+.goal-edit-form {
+    background: #ffffff;
+    border: 1px solid #e4d8cb;
+    border-radius: 10px;
+    padding: 17px;
+    margin-top: 14px;
+}
+
+.goal-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.goal-edit-field label {
+    display: block;
+    font-size: 0.77rem;
+    font-weight: 750;
+    margin-bottom: 7px;
+}
+
+.goal-edit-field input {
+    display: block;
+    width: 100%;
+    height: 42px;
+    padding: 9px;
+    background: #ffffff;
+    color: #302820;
+    border: 1px solid #d9cabb;
+    border-radius: 8px;
+}
+
+.goal-save {
+    margin-top: 15px;
+}
+
+/* WEEKLY AND MONTHLY REPORTS */
+
+.metrics-table-wrap {
+    overflow-x: auto;
+    width: 100%;
+    border: 1px solid #e3d6c7;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    margin: 0;
+}
+
+.metrics-table th {
+    background: #f1e5d4;
+    text-align: left;
+    font-size: 0.73rem;
+    font-weight: 800;
+    color: #514437;
+    padding: 13px 12px;
+    white-space: nowrap;
+    border-bottom: 1px solid #e0d3c3;
+}
+
+.metrics-table td {
+    padding: 13px 12px;
+    font-size: 0.84rem;
+    color: #302820;
+    border-bottom: 1px solid #e9ded0;
+}
+
+.metrics-table tbody tr:nth-child(even) {
+    background: #fcf8f2;
+}
+
+.metrics-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.metrics-total {
+    font-weight: 800;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 1050px) {
+    .team-goal-grid,
+    .goal-grid,
+    .daily-plan-grid,
+    .goal-edit-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .metrics-panel {
+        padding: 14px;
+    }
+
+    .metrics-header h2 {
+        font-size: 1.2rem;
+    }
+
+    .team-goal-grid,
+    .goal-grid,
+    .daily-plan-grid {
+        gap: 8px;
+    }
+
+    .goal-card {
+        padding: 12px;
+    }
+
+    .goal-card-actual {
+        font-size: 1.4rem;
+    }
+
+    .daily-target-number {
+        font-size: 1.45rem;
+    }
+
+    .goal-edit-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .metrics-actions .btn {
+        font-size: 0.74rem;
+    }
+}
+</style>
+
+<div class="metrics-page">
+
+    <!-- ======================================
+         PAGE HEADER
+         ====================================== -->
+
+    <div class="metrics-panel">
+
+        <div class="metrics-header">
+            <div>
+                <h2>
+                    {% if is_manager %}
+                        Team Sales Performance
+                    {% else %}
+                        My Sales Performance
+                    {% endif %}
+                </h2>
+
+                <p>
+                    Weekly goals, daily planning,
+                    and automatic activity tracking.
+                </p>
+            </div>
+
+            <a href="{{ url_for('add_activity') }}"
+               class="btn btn-primary">
+                + Log Activity
             </a>
+        </div>
 
-            {% if week_offset != 0 %}
+    </div>
+
+    <!-- ======================================
+         TEAM PERFORMANCE - MANAGER ONLY
+         ====================================== -->
+
+    {% if is_manager %}
+
+    <div class="metrics-panel">
+
+        <div class="metrics-section-head">
+            <div>
+                <h3>Team Goal Performance</h3>
+
+                <p class="metrics-subtitle">
+                    Current week - Each representative
+                    compared to their own weekly goals.
+                </p>
+            </div>
+        </div>
+
+        <div class="team-goal-grid">
+
+            {% for rep in visible_reps %}
+
+                {% set progress = goal_progress[rep] %}
+
+                <div class="team-goal-card">
+
+                    <div class="team-goal-name">
+                        {{ rep }}
+                    </div>
+
+                    <div class="team-goal-percent">
+                        {{ progress.overall_percent }}%
+                    </div>
+
+                    <progress
+                        class="goal-progress {% if progress.overall_percent >= 100 %}goal-complete{% endif %}"
+                        value="{{ [progress.overall_percent, 100]|min }}"
+                        max="100">
+                    </progress>
+
+                    <div class="team-goal-status">
+                        {{ progress.pace_status }}
+                    </div>
+
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+    </div>
+
+    {% endif %}
+
+    <!-- ======================================
+         INDIVIDUAL WEEKLY GOALS
+         ====================================== -->
+
+    <div class="metrics-panel">
+
+        <div class="metrics-section-head">
+            <div>
+                <h3>
+                    {% if is_manager %}
+                        Individual Weekly Goals
+                    {% else %}
+                        My Weekly Goals
+                    {% endif %}
+                </h3>
+
+                <p class="metrics-subtitle">
+                    {{ current_week_start.strftime("%B %d, %Y") }}
+                    through
+                    {{ current_week_end.strftime("%B %d, %Y") }}
+                </p>
+            </div>
+        </div>
+
+        {% if visible_reps %}
+
+            {% for rep in visible_reps %}
+
+                {% set progress = goal_progress[rep] %}
+
+                <div class="rep-goal-section">
+
+                    <div class="rep-goal-heading">
+                        <h4>{{ rep }}</h4>
+
+                        <span>
+                            {{ progress.overall_percent }}% Complete
+                        </span>
+                    </div>
+
+                    <!-- GOAL PROGRESS CARDS -->
+
+                    <div class="goal-grid">
+
+                        {% for item in progress.rows %}
+
+                            <div class="goal-card">
+
+                                <div class="goal-card-label">
+                                    {{ item.label }}
+                                </div>
+
+                                <div class="goal-card-values">
+                                    <span class="goal-card-actual">
+                                        {{ item.actual }}
+                                    </span>
+
+                                    <span class="goal-card-target">
+                                        / {{ item.target }}
+                                    </span>
+                                </div>
+
+                                <progress
+                                    class="goal-progress {% if item.complete %}goal-complete{% endif %}"
+                                    value="{{ item.bar_percent }}"
+                                    max="100">
+                                </progress>
+
+                                <div class="goal-card-footer">
+                                    <span>
+                                        {{ item.percent }}%
+                                    </span>
+
+                                    <span>
+                                        {{ item.remaining }} remaining
+                                    </span>
+                                </div>
+
+                            </div>
+
+                        {% endfor %}
+
+                    </div>
+
+                    <!-- DAILY GAME PLAN -->
+
+                    <div class="daily-plan">
+
+                        <h4>Today's Game Plan</h4>
+
+                        {% if remaining_workdays > 0 %}
+
+                            <p class="daily-plan-subtitle">
+                                Recommended activity per remaining workday.
+                            </p>
+
+                            <div class="daily-plan-grid">
+
+                                {% for item in progress.rows %}
+
+                                    <div class="daily-target">
+
+                                        <div class="daily-target-number">
+                                            {{ item.daily_needed }}
+                                        </div>
+
+                                        <div class="daily-target-label">
+                                            {{ item.label }}
+                                        </div>
+
+                                    </div>
+
+                                {% endfor %}
+
+                            </div>
+
+                            <p class="daily-plan-note">
+                                You have
+                                <strong>{{ remaining_workdays }}</strong>
+                                workday(s) remaining, including today.
+
+                                These targets automatically adjust
+                                as activities are logged.
+
+                                Meetings and quotes are planning
+                                targets and depend on customer opportunities.
+                            </p>
+
+                        {% else %}
+
+                            <p class="daily-plan-note">
+                                The Monday-Friday workweek is complete.
+
+                                Review your weekly results and prepare
+                                for next week's activity goals.
+                            </p>
+
+                        {% endif %}
+
+                    </div>
+
+                    <!-- MANAGER GOAL EDITOR -->
+
+                    {% if is_manager %}
+
+                        <div class="goal-editor">
+
+                            <details>
+
+                                <summary>
+                                    Edit {{ rep }}'s Weekly Goals
+                                </summary>
+
+                                <form
+                                    method="POST"
+                                    action="{{ url_for('update_weekly_goals') }}"
+                                    class="goal-edit-form">
+
+                                    <input
+                                        type="hidden"
+                                        name="user_id"
+                                        value="{{ progress.user_id }}">
+
+                                    <div class="goal-edit-grid">
+
+                                        <div class="goal-edit-field">
+                                            <label for="cold_{{ progress.user_id }}">
+                                                Cold Calls
+                                            </label>
+
+                                            <input
+                                                type="number"
+                                                id="cold_{{ progress.user_id }}"
+                                                name="cold_calls"
+                                                min="0"
+                                                max="10000"
+                                                required
+                                                value="{{ progress.record.cold_calls }}">
+                                        </div>
+
+                                        <div class="goal-edit-field">
+                                            <label for="calls_{{ progress.user_id }}">
+                                                Phone Calls + Emails
+                                            </label>
+
+                                            <input
+                                                type="number"
+                                                id="calls_{{ progress.user_id }}"
+                                                name="calls_emails"
+                                                min="0"
+                                                max="10000"
+                                                required
+                                                value="{{ progress.record.calls_emails }}">
+                                        </div>
+
+                                        <div class="goal-edit-field">
+                                            <label for="meetings_{{ progress.user_id }}">
+                                                Meetings
+                                            </label>
+
+                                            <input
+                                                type="number"
+                                                id="meetings_{{ progress.user_id }}"
+                                                name="meetings"
+                                                min="0"
+                                                max="10000"
+                                                required
+                                                value="{{ progress.record.meetings }}">
+                                        </div>
+
+                                        <div class="goal-edit-field">
+                                            <label for="quotes_{{ progress.user_id }}">
+                                                Quotes
+                                            </label>
+
+                                            <input
+                                                type="number"
+                                                id="quotes_{{ progress.user_id }}"
+                                                name="quotes"
+                                                min="0"
+                                                max="10000"
+                                                required
+                                                value="{{ progress.record.quotes }}">
+                                        </div>
+
+                                    </div>
+
+                                    <div class="goal-save">
+                                        <button
+                                            type="submit"
+                                            class="btn btn-primary">
+                                            Save Goals
+                                        </button>
+                                    </div>
+
+                                </form>
+
+                            </details>
+
+                        </div>
+
+                    {% endif %}
+
+                </div>
+
+            {% endfor %}
+
+        {% else %}
+
+            <div class="empty-state">
+                No tracked representative is associated
+                with this account.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+    <!-- ======================================
+         WEEKLY ACTIVITY REPORT
+         ====================================== -->
+
+    <div class="metrics-panel">
+
+        <div class="metrics-section-head">
+
+            <div>
+                <h3>Weekly Activity</h3>
+
+                <p class="metrics-subtitle">
+                    {{ week_start.strftime("%B %d, %Y") }}
+                    through
+                    {{ week_end.strftime("%B %d, %Y") }}
+                </p>
+            </div>
+
+            <div class="metrics-actions">
+
                 <a
                     href="{{ url_for(
                         'metrics',
-                        week_offset=0,
+                        week_offset=week_offset - 1,
                         month_offset=month_offset
                     ) }}"
-                    class="btn btn-secondary btn-small"
-                >
-                    Current Week
+                    class="btn btn-secondary btn-small">
+                    &larr; Previous Week
                 </a>
-            {% endif %}
 
-            <a
-                href="{{ url_for(
-                    'metrics',
-                    week_offset=week_offset + 1,
-                    month_offset=month_offset
-                ) }}"
-                class="btn btn-secondary btn-small"
-            >
-                Next Week →
-            </a>
+                {% if week_offset != 0 %}
+
+                    <a
+                        href="{{ url_for(
+                            'metrics',
+                            week_offset=0,
+                            month_offset=month_offset
+                        ) }}"
+                        class="btn btn-secondary btn-small">
+                        Current Week
+                    </a>
+
+                {% endif %}
+
+                <a
+                    href="{{ url_for(
+                        'metrics',
+                        week_offset=week_offset + 1,
+                        month_offset=month_offset
+                    ) }}"
+                    class="btn btn-secondary btn-small">
+                    Next Week &rarr;
+                </a>
+
+            </div>
+
         </div>
+
+        {% if visible_reps %}
+
+            <div class="metrics-table-wrap">
+
+                <table class="metrics-table">
+
+                    <thead>
+                        <tr>
+                            <th>Rep</th>
+                            <th>Cold Calls</th>
+                            <th>Phone Calls</th>
+                            <th>Emails</th>
+                            <th>Meetings</th>
+                            <th>Quotes</th>
+                            <th>Sales</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% for rep in visible_reps %}
+
+                            {% set data = rep_metrics[rep]["weekly"] %}
+
+                            <tr>
+                                <td>
+                                    <strong>{{ rep }}</strong>
+                                </td>
+
+                                <td>{{ data["Cold Call"] }}</td>
+                                <td>{{ data["Phone Call"] }}</td>
+                                <td>{{ data["Email"] }}</td>
+                                <td>{{ data["Meeting"] }}</td>
+                                <td>{{ data["Quote"] }}</td>
+                                <td>{{ data["Sale"] }}</td>
+
+                                <td class="metrics-total">
+                                    {{ data["Total"] }}
+                                </td>
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        {% else %}
+
+            <div class="empty-state">
+                No tracked sales representatives found.
+            </div>
+
+        {% endif %}
+
     </div>
 
-    {% if visible_reps %}
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Rep</th>
-                        <th>Cold Calls</th>
-                        <th>Phone Calls</th>
-                        <th>Emails</th>
-                        <th>Meetings</th>
-                        <th>Quotes</th>
-                        <th>Sales</th>
-                        <th>Total</th>
-                    </tr>
-                </thead>
+    <!-- ======================================
+         MONTHLY ACTIVITY REPORT
+         ====================================== -->
 
-                <tbody>
-                    {% for rep in visible_reps %}
-                        {% set metrics = rep_metrics[rep]["weekly"] %}
+    <div class="metrics-panel">
 
-                        <tr>
-                            <td>
-                                <strong>{{ rep }}</strong>
-                            </td>
+        <div class="metrics-section-head">
 
-                            <td>
-                                {{ metrics["Cold Call"] }}
-                            </td>
+            <div>
+                <h3>Monthly Activity</h3>
 
-                            <td>
-                                {{ metrics["Phone Call"] }}
-                            </td>
+                <p class="metrics-subtitle">
+                    {{ month_start.strftime("%B %Y") }}
+                </p>
+            </div>
 
-                            <td>
-                                {{ metrics["Email"] }}
-                            </td>
+            <div class="metrics-actions">
 
-                            <td>
-                                {{ metrics["Meeting"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Quote"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Sale"] }}
-                            </td>
-
-                            <td>
-                                <strong>
-                                    {{ metrics["Total"] }}
-                                </strong>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    {% else %}
-        <div class="empty-state">
-            This account is not currently included in sales activity tracking.
-        </div>
-    {% endif %}
-</div>
-
-
-<div class="panel-card">
-    <div class="panel-top">
-        <div>
-            <h3>Monthly Activity</h3>
-
-            <p>
-                {{ month_start.strftime("%B %Y") }}
-            </p>
-        </div>
-
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <a
-                href="{{ url_for(
-                    'metrics',
-                    week_offset=week_offset,
-                    month_offset=month_offset - 1
-                ) }}"
-                class="btn btn-secondary btn-small"
-            >
-                ← Previous Month
-            </a>
-
-            {% if month_offset != 0 %}
                 <a
                     href="{{ url_for(
                         'metrics',
                         week_offset=week_offset,
-                        month_offset=0
+                        month_offset=month_offset - 1
                     ) }}"
-                    class="btn btn-secondary btn-small"
-                >
-                    Current Month
+                    class="btn btn-secondary btn-small">
+                    &larr; Previous Month
                 </a>
-            {% endif %}
 
-            <a
-                href="{{ url_for(
-                    'metrics',
-                    week_offset=week_offset,
-                    month_offset=month_offset + 1
-                ) }}"
-                class="btn btn-secondary btn-small"
-            >
-                Next Month →
-            </a>
+                {% if month_offset != 0 %}
+
+                    <a
+                        href="{{ url_for(
+                            'metrics',
+                            week_offset=week_offset,
+                            month_offset=0
+                        ) }}"
+                        class="btn btn-secondary btn-small">
+                        Current Month
+                    </a>
+
+                {% endif %}
+
+                <a
+                    href="{{ url_for(
+                        'metrics',
+                        week_offset=week_offset,
+                        month_offset=month_offset + 1
+                    ) }}"
+                    class="btn btn-secondary btn-small">
+                    Next Month &rarr;
+                </a>
+
+            </div>
+
         </div>
+
+        {% if visible_reps %}
+
+            <div class="metrics-table-wrap">
+
+                <table class="metrics-table">
+
+                    <thead>
+                        <tr>
+                            <th>Rep</th>
+                            <th>Cold Calls</th>
+                            <th>Phone Calls</th>
+                            <th>Emails</th>
+                            <th>Meetings</th>
+                            <th>Quotes</th>
+                            <th>Sales</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% for rep in visible_reps %}
+
+                            {% set data = rep_metrics[rep]["monthly"] %}
+
+                            <tr>
+                                <td>
+                                    <strong>{{ rep }}</strong>
+                                </td>
+
+                                <td>{{ data["Cold Call"] }}</td>
+                                <td>{{ data["Phone Call"] }}</td>
+                                <td>{{ data["Email"] }}</td>
+                                <td>{{ data["Meeting"] }}</td>
+                                <td>{{ data["Quote"] }}</td>
+                                <td>{{ data["Sale"] }}</td>
+
+                                <td class="metrics-total">
+                                    {{ data["Total"] }}
+                                </td>
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        {% else %}
+
+            <div class="empty-state">
+                No tracked sales representatives found.
+            </div>
+
+        {% endif %}
+
     </div>
 
-    {% if visible_reps %}
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Rep</th>
-                        <th>Cold Calls</th>
-                        <th>Phone Calls</th>
-                        <th>Emails</th>
-                        <th>Meetings</th>
-                        <th>Quotes</th>
-                        <th>Sales</th>
-                        <th>Total</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                    {% for rep in visible_reps %}
-                        {% set metrics = rep_metrics[rep]["monthly"] %}
-
-                        <tr>
-                            <td>
-                                <strong>{{ rep }}</strong>
-                            </td>
-
-                            <td>
-                                {{ metrics["Cold Call"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Phone Call"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Email"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Meeting"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Quote"] }}
-                            </td>
-
-                            <td>
-                                {{ metrics["Sale"] }}
-                            </td>
-
-                            <td>
-                                <strong>
-                                    {{ metrics["Total"] }}
-                                </strong>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    {% else %}
-        <div class="empty-state">
-            No tracked sales representative is associated with this account.
-        </div>
-    {% endif %}
 </div>
 
 {% endblock %}

@@ -746,3 +746,55 @@ class LeadSalesProcess(db.Model):
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
+
+
+# ==========================================
+# WEEKLY SALES ACTIVITY GOALS
+# ==========================================
+
+class WeeklyActivityGoal(db.Model):
+    __tablename__ = "weekly_activity_goals"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    cold_calls = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0
+    )
+
+    calls_emails = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0
+    )
+
+    meetings = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0
+    )
+
+    quotes = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+
+    updated_by = db.Column(
+        db.Integer,
+        nullable=True
+    )
