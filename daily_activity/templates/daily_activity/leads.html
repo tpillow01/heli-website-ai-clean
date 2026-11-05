@@ -1,3 +1,4 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Leads | Daily Activity App{% endblock %}
@@ -8,13 +9,11 @@ Track assigned leads, sales-process progress, next actions, and opportunities
 
 {% block content %}
 
+{% set current_view = lead_view|default('active') %}
+
 <div class="hero-panel">
-
     <div class="hero-panel-left">
-
-        <div class="hero-eyebrow">
-            Sales Pipeline
-        </div>
+        <div class="hero-eyebrow">Sales Pipeline</div>
 
         <h3>
             {% if is_manager %}
@@ -25,341 +24,248 @@ Track assigned leads, sales-process progress, next actions, and opportunities
         </h3>
 
         <p>
-            Track every lead from initial homework through close,
-            including the next action required to move the opportunity forward.
+            Track leads from initial homework through close,
+            including the next action required to move
+            each opportunity forward.
         </p>
 
         <div class="hero-actions">
-
             {% if is_manager %}
-
-                <a
-                    href="{{ url_for('add_lead') }}"
-                    class="btn btn-primary"
-                >
+                <a href="{{ url_for('add_lead') }}"
+                   class="btn btn-primary">
                     + Add Lead
                 </a>
-
             {% endif %}
-
         </div>
-
     </div>
 
-
     <div class="hero-panel-right">
-
         <div class="mini-stat-card">
             <span>Leads Shown</span>
             <strong>{{ leads|length }}</strong>
         </div>
 
-
         <div class="mini-stat-card">
             <span>Active</span>
-
             <strong>
-                {{ leads|selectattr("status", "equalto", "Active")|list|length }}
+                {{ leads|selectattr('status', 'equalto', 'Active')|list|length }}
             </strong>
         </div>
-
 
         <div class="mini-stat-card">
             <span>Proposal</span>
-
             <strong>
-                {{ leads|selectattr("current_stage", "equalto", "Proposal")|list|length }}
+                {{ leads|selectattr('current_stage', 'equalto', 'Proposal')|list|length }}
             </strong>
         </div>
-
 
         <div class="mini-stat-card">
-            <span>Won</span>
-
+            <span>
+                {% if current_view == 'dead' %}
+                    Dead
+                {% else %}
+                    Won
+                {% endif %}
+            </span>
             <strong>
-                {{ leads|selectattr("status", "equalto", "Won")|list|length }}
+                {% if current_view == 'dead' %}
+                    {{ leads|selectattr('status', 'equalto', 'Dead')|list|length }}
+                {% else %}
+                    {{ leads|selectattr('status', 'equalto', 'Won')|list|length }}
+                {% endif %}
             </strong>
         </div>
-
     </div>
-
 </div>
 
+<!-- ACTIVE / DEAD LEADS TOGGLE -->
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Lead Management</h3>
+            <p>
+                Switch between active pipeline leads
+                and leads marked dead.
+            </p>
+        </div>
+    </div>
+
+    <div class="hero-actions">
+        <a href="{{ url_for('leads', view='active') }}"
+           class="btn {{ 'btn-primary' if current_view == 'active' else 'btn-secondary' }}">
+            Active Leads
+        </a>
+
+        <a href="{{ url_for('leads', view='dead') }}"
+           class="btn {{ 'btn-primary' if current_view == 'dead' else 'btn-secondary' }}">
+            Dead Leads
+        </a>
+    </div>
+
+    {% if current_view == 'dead' %}
+        <p class="list-meta" style="margin-top:12px;">
+            Dead leads are archived from active prospecting,
+            not deleted. You can reactivate them at any time.
+        </p>
+    {% endif %}
+</div>
 
 <!-- FILTERS -->
 
 <div class="panel-card">
-
     <div class="panel-top">
-
         <div>
             <h3>Lead Filters</h3>
-
             <p>
-                Narrow the lead list by rep, sales stage,
-                source, county, or status.
+                Narrow the list by sales rep, sales stage,
+                status, lead source, or county.
             </p>
         </div>
-
     </div>
 
+    <form method="GET" action="{{ url_for('leads') }}">
 
-    <form
-        method="GET"
-        action="{{ url_for('leads') }}"
-    >
+        <input type="hidden"
+               name="view"
+               value="{{ current_view }}">
 
-        <div
-            style="
-                display:grid;
-                grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));
-                gap:14px;
-                align-items:end;
-            "
-        >
+        <div style="
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+            gap:14px;
+            align-items:end;
+        ">
 
             {% if is_manager %}
+            <div class="form-row">
+                <label for="rep">Sales Rep</label>
 
-                <div class="form-row">
+                <select id="rep" name="rep">
+                    <option value="">All Reps</option>
 
-                    <label for="rep">
-                        Sales Rep
-                    </label>
-
-                    <select
-                        id="rep"
-                        name="rep"
-                    >
-
-                        <option value="">
-                            All Reps
+                    {% for user_id, rep_name in tracked_reps.items() %}
+                        <option value="{{ user_id }}"
+                            {% if selected_rep == user_id|string %}selected{% endif %}>
+                            {{ rep_name }}
                         </option>
-
-                        {% for user_id, rep_name in tracked_reps.items() %}
-
-                            <option
-                                value="{{ user_id }}"
-                                {% if selected_rep == user_id|string %}
-                                    selected
-                                {% endif %}
-                            >
-                                {{ rep_name }}
-                            </option>
-
-                        {% endfor %}
-
-                    </select>
-
-                </div>
-
+                    {% endfor %}
+                </select>
+            </div>
             {% endif %}
 
-
             <div class="form-row">
+                <label for="stage">Sales Stage</label>
 
-                <label for="stage">
-                    Sales Stage
-                </label>
-
-                <select
-                    id="stage"
-                    name="stage"
-                >
-
-                    <option value="">
-                        All Stages
-                    </option>
+                <select id="stage" name="stage">
+                    <option value="">All Stages</option>
 
                     {% for stage in stages %}
-
-                        <option
-                            value="{{ stage }}"
-                            {% if selected_stage == stage %}
-                                selected
-                            {% endif %}
-                        >
+                        <option value="{{ stage }}"
+                            {% if selected_stage == stage %}selected{% endif %}>
                             {{ stage }}
                         </option>
-
                     {% endfor %}
-
                 </select>
-
             </div>
 
-
+            {% if current_view != 'dead' %}
             <div class="form-row">
+                <label for="status">Status</label>
 
-                <label for="status">
-                    Status
-                </label>
-
-                <select
-                    id="status"
-                    name="status"
-                >
-
-                    <option value="">
-                        All Statuses
-                    </option>
+                <select id="status" name="status">
+                    <option value="">All Statuses</option>
 
                     {% for status in statuses %}
-
-                        <option
-                            value="{{ status }}"
-                            {% if selected_status == status %}
-                                selected
-                            {% endif %}
-                        >
-                            {{ status }}
-                        </option>
-
+                        {% if status != 'Dead' %}
+                            <option value="{{ status }}"
+                                {% if selected_status == status %}selected{% endif %}>
+                                {{ status }}
+                            </option>
+                        {% endif %}
                     {% endfor %}
-
                 </select>
-
             </div>
-
+            {% else %}
+                <input type="hidden" name="status" value="Dead">
+            {% endif %}
 
             <div class="form-row">
+                <label for="source">Lead Source</label>
 
-                <label for="source">
-                    Lead Source
-                </label>
-
-                <select
-                    id="source"
-                    name="source"
-                >
-
-                    <option value="">
-                        All Sources
-                    </option>
+                <select id="source" name="source">
+                    <option value="">All Sources</option>
 
                     {% for source in lead_sources %}
-
-                        <option
-                            value="{{ source }}"
-                            {% if selected_source == source %}
-                                selected
-                            {% endif %}
-                        >
+                        <option value="{{ source }}"
+                            {% if selected_source == source %}selected{% endif %}>
                             {{ source }}
                         </option>
-
                     {% endfor %}
-
                 </select>
-
             </div>
-
 
             <div class="form-row">
+                <label for="county">County</label>
 
-                <label for="county">
-                    County
-                </label>
-
-                <select
-                    id="county"
-                    name="county"
-                >
-
-                    <option value="">
-                        All Counties
-                    </option>
+                <select id="county" name="county">
+                    <option value="">All Counties</option>
 
                     {% for county in counties %}
-
-                        <option
-                            value="{{ county }}"
-                            {% if selected_county == county %}
-                                selected
-                            {% endif %}
-                        >
+                        <option value="{{ county }}"
+                            {% if selected_county == county %}selected{% endif %}>
                             {{ county }}
                         </option>
-
                     {% endfor %}
-
                 </select>
-
             </div>
 
-
-            <div
-                style="
-                    display:flex;
-                    gap:8px;
-                    flex-wrap:wrap;
-                "
-            >
-
-                <button
-                    type="submit"
-                    class="btn btn-primary"
-                >
+            <div class="hero-actions">
+                <button type="submit" class="btn btn-primary">
                     Apply Filters
                 </button>
 
-                <a
-                    href="{{ url_for('leads') }}"
-                    class="btn btn-secondary"
-                >
-                    Clear
+                <a href="{{ url_for('leads', clear=1, view=current_view) }}"
+                   class="btn btn-secondary">
+                    Clear Filters
                 </a>
-
             </div>
 
         </div>
-
     </form>
-
 </div>
-
 
 <!-- LEAD LIST -->
 
 <div class="panel-card">
-
     <div class="panel-top">
-
         <div>
-            <h3>Lead Pipeline</h3>
+            <h3>
+                {% if current_view == 'dead' %}
+                    Dead Leads
+                {% else %}
+                    Lead Pipeline
+                {% endif %}
+            </h3>
 
             <p>
-                Open a company to review the full sales process
-                and update its next action.
+                Open a company to review its full sales process,
+                update its next action, or change its status.
             </p>
         </div>
 
-
         {% if is_manager %}
-
-            <div>
-
-                <a
-                    href="{{ url_for('add_lead') }}"
-                    class="btn btn-primary btn-sm"
-                >
-                    + Add Lead
-                </a>
-
-            </div>
-
+            <a href="{{ url_for('add_lead') }}"
+               class="btn btn-primary btn-sm">
+                + Add Lead
+            </a>
         {% endif %}
-
     </div>
 
-
     {% if leads %}
-
         <div class="table-wrap">
-
             <table>
-
                 <thead>
-
                     <tr>
                         <th>Company</th>
                         <th>Source</th>
@@ -374,190 +280,116 @@ Track assigned leads, sales-process progress, next actions, and opportunities
                         <th>Next Action</th>
                         <th>Due</th>
                         <th>Status</th>
+                        <th>Action</th>
                     </tr>
-
                 </thead>
 
-
                 <tbody>
-
                     {% for lead in leads %}
+                    <tr>
+                        <td>
+                            <a href="{{ url_for('lead_detail', lead_id=lead.id) }}"
+                               style="font-weight:800;text-decoration:none;">
+                                {{ lead.company_name }}
+                            </a>
 
-                        <tr>
-
-                            <td>
-
-                                <a
-                                    href="{{ url_for(
-                                        'lead_detail',
-                                        lead_id=lead.id
-                                    ) }}"
-                                    style="
-                                        font-weight:800;
-                                        text-decoration:none;
-                                    "
-                                >
-                                    {{ lead.company_name }}
-                                </a>
-
-                                {% if lead.address %}
-
-                                    <div
-                                        class="list-meta"
-                                        style="margin-top:4px;"
-                                    >
-                                        {{ lead.address }}
-                                    </div>
-
-                                {% endif %}
-
-                            </td>
-
-
-                            <td>
-                                {{ lead.lead_source or "—" }}
-                            </td>
-
-
-                            <td>
-                                {{ lead.city or "—" }}
-                            </td>
-
-
-                            <td>
-                                {{ lead.county or "—" }}
-                            </td>
-
-
-                            {% if is_manager %}
-
-                                <td>
-                                    <strong>
-                                        {{ lead.assigned_rep }}
-                                    </strong>
-                                </td>
-
+                            {% if lead.address %}
+                                <div class="list-meta" style="margin-top:4px;">
+                                    {{ lead.address }}
+                                </div>
                             {% endif %}
+                        </td>
 
+                        <td>{{ lead.lead_source or '—' }}</td>
+                        <td>{{ lead.city or '—' }}</td>
+                        <td>{{ lead.county or '—' }}</td>
 
+                        {% if is_manager %}
                             <td>
+                                <strong>{{ lead.assigned_rep }}</strong>
+                            </td>
+                        {% endif %}
 
-                                <span
-                                    style="
-                                        display:inline-block;
-                                        padding:5px 10px;
-                                        border-radius:999px;
-                                        border:1px solid rgba(255,255,255,.15);
-                                        font-size:.82rem;
-                                        font-weight:700;
-                                    "
-                                >
-                                    {{ lead.current_stage }}
+                        <td>
+                            <span style="
+                                display:inline-block;
+                                padding:5px 10px;
+                                border-radius:999px;
+                                border:1px solid rgba(128,128,128,.25);
+                                font-size:.82rem;
+                                font-weight:700;
+                            ">
+                                {{ lead.current_stage }}
+                            </span>
+                        </td>
+
+                        <td>
+                            {% if lead.next_action %}
+                                {{ lead.next_action }}
+                            {% else %}
+                                <span class="list-meta">
+                                    No next action
                                 </span>
+                            {% endif %}
+                        </td>
 
-                            </td>
+                        <td>{{ lead.next_action_date or '—' }}</td>
 
+                        <td>
+                            <strong>
+                                {{ lead.status or 'Active' }}
+                            </strong>
+                        </td>
 
-                            <td>
-
-                                {% if lead.next_action %}
-
-                                    {{ lead.next_action }}
-
-                                {% else %}
-
-                                    <span class="list-meta">
-                                        No next action
-                                    </span>
-
-                                {% endif %}
-
-                            </td>
-
-
-                            <td>
-                                {{ lead.next_action_date or "—" }}
-                            </td>
-
-
-                            <td>
-
-                                {% if lead.status == "Active" %}
-
-                                    <span
-                                        style="
-                                            font-weight:800;
-                                        "
-                                    >
-                                        Active
-                                    </span>
-
-                                {% elif lead.status == "Won" %}
-
-                                    <span
-                                        style="
-                                            font-weight:800;
-                                        "
-                                    >
-                                        Won
-                                    </span>
-
-                                {% elif lead.status == "Lost" %}
-
-                                    <span
-                                        style="
-                                            font-weight:800;
-                                            opacity:.75;
-                                        "
-                                    >
-                                        Lost
-                                    </span>
-
-                                {% else %}
-
-                                    {{ lead.status or "Active" }}
-
-                                {% endif %}
-
-                            </td>
-
-                        </tr>
-
+                        <td>
+                            {% if lead.status == 'Dead' %}
+                                <form method="POST"
+                                      action="{{ url_for('reactivate_lead', lead_id=lead.id) }}">
+                                    <button type="submit"
+                                            class="btn btn-primary btn-sm">
+                                        Reactivate
+                                    </button>
+                                </form>
+                            {% elif not lead.converted_customer_id %}
+                                <form method="POST"
+                                      action="{{ url_for('set_lead_dead', lead_id=lead.id) }}"
+                                      onsubmit="return confirm('Mark this lead as Dead?');">
+                                    <button type="submit"
+                                            class="btn btn-secondary btn-sm">
+                                        Mark Dead
+                                    </button>
+                                </form>
+                            {% else %}
+                                <a href="{{ url_for('customer_detail', customer_id=lead.converted_customer_id) }}"
+                                   class="btn btn-secondary btn-sm">
+                                    View Customer
+                                </a>
+                            {% endif %}
+                        </td>
+                    </tr>
                     {% endfor %}
-
                 </tbody>
-
             </table>
-
         </div>
 
     {% else %}
-
         <div class="empty-state">
-
-            <p>
-                No leads match the current filters.
-            </p>
-
-            {% if is_manager %}
-
-                <div style="margin-top:14px;">
-
-                    <a
-                        href="{{ url_for('add_lead') }}"
-                        class="btn btn-primary"
-                    >
-                        Add First Lead
-                    </a>
-
-                </div>
-
+            {% if current_view == 'dead' %}
+                No dead leads match your current filters.
+            {% else %}
+                No active leads match your current filters.
             {% endif %}
 
+            {% if is_manager and current_view != 'dead' %}
+                <div style="margin-top:14px;">
+                    <a href="{{ url_for('add_lead') }}"
+                       class="btn btn-primary">
+                        Add First Lead
+                    </a>
+                </div>
+            {% endif %}
         </div>
-
     {% endif %}
-
 </div>
 
 {% endblock %}

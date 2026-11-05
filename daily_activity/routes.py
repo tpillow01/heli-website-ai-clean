@@ -69,7 +69,15 @@ def allowed_document_file(filename):
     )
 
 
-openai_client = OpenAI()
+# Initialize OpenAI only when an API key is available.
+# Daily Activity can still operate without AI features.
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    openai_client = None
 
 
 DA_ENDPOINTS = {
@@ -105,6 +113,8 @@ DA_ENDPOINTS = {
     "edit_lead",
     "update_lead_process",
     "convert_lead_to_customer",
+    "set_lead_dead",
+    "reactivate_lead",
     "lead_ai_coach",
 }
 
@@ -823,6 +833,8 @@ def format_phone_number(value):
 
 
 def should_update_last_contact(activity_type):
+    if isinstance(activity_type, (list, tuple, set)):
+        return any(should_update_last_contact(t) for t in activity_type)
     value = (activity_type or "").strip().lower()
 
     customer_contact_types = {
@@ -1160,9 +1172,7 @@ def add_customer():
             ) == "1"
         )
 
-        activity_type = request.form.get(
-            "activity_type", ""
-        ).strip()
+        activity_type = request.form.get("activity_type", "").strip()
 
         activity_date = request.form.get(
             "activity_date", ""
@@ -1500,13 +1510,36 @@ def add_customer():
 
 @daily_activity_bp.route("/leads")
 def leads():
-    rep_filter = request.args.get("rep", "").strip()
-    stage_filter = request.args.get("stage", "").strip()
-    status_filter = request.args.get("status", "").strip()
-    source_filter = request.args.get("source", "").strip()
-    county_filter = request.args.get("county", "").strip()
+    if request.args.get("clear") == "1":
+        # Retain the selected Active/Dead tab when clearing the other filters.
+        view = request.args.get("view", "active")
+        session.pop("daily_activity_lead_filters", None)
+        return redirect(da_url("leads", view=view if view in {"active", "dead"} else "active"))
+
+    saved = dict(session.get("daily_activity_lead_filters", {}))
+    keys = ("rep", "stage", "status", "source", "county", "view")
+    if any(key in request.args for key in keys):
+        saved.update({key: request.args[key].strip() for key in keys if key in request.args})
+        session["daily_activity_lead_filters"] = saved
+
+    rep_filter = saved.get("rep", "") if user_is_manager() else ""
+    stage_filter = saved.get("stage", "")
+    status_filter = saved.get("status", "")
+    source_filter = saved.get("source", "")
+    county_filter = saved.get("county", "")
+    view = saved.get("view", "active")
+    if view not in {"active", "dead"}:
+        view = "active"
+    if view == "dead":
+        status_filter = "Dead"  # Dead view always contains dead records only.
+    elif status_filter == "Dead":
+        status_filter = ""
 
     query = scoped_lead_query()
+    if view == "dead":
+        query = query.filter(SalesLead.status == "Dead")
+    else:
+        query = query.filter(SalesLead.status != "Dead")
 
     if user_is_manager() and rep_filter:
         try:
@@ -1586,6 +1619,7 @@ def leads():
         "On Hold",
         "Won",
         "Lost",
+        "Dead",
     ]
 
     return render_template(
@@ -1601,8 +1635,31 @@ def leads():
         selected_status=status_filter,
         selected_source=source_filter,
         selected_county=county_filter,
+        lead_view=view,
         is_manager=user_is_manager(),
     )
+
+
+@daily_activity_bp.route("/leads/<int:lead_id>/set-dead", methods=["POST"])
+def set_lead_dead(lead_id):
+    lead = get_lead_or_403(lead_id)
+    if lead.converted_customer_id:
+        flash("Converted leads cannot be marked dead.", "error")
+    else:
+        lead.status = "Dead"
+        db.session.commit()
+        flash("Lead moved to Dead Leads.", "success")
+    return redirect(da_url("leads", view="dead"))
+
+
+@daily_activity_bp.route("/leads/<int:lead_id>/reactivate", methods=["POST"])
+def reactivate_lead(lead_id):
+    lead = get_lead_or_403(lead_id)
+    if lead.status == "Dead":
+        lead.status = "Active"
+        db.session.commit()
+        flash("Lead reactivated.", "success")
+    return redirect(da_url("leads", view="active"))
 
 
 @daily_activity_bp.route(
@@ -2023,10 +2080,7 @@ def update_lead_process(lead_id):
     methods=["POST"],
 )
 def convert_lead_to_customer(lead_id):
-    if not user_is_manager():
-        abort(403)
-
-    lead = SalesLead.query.get_or_404(lead_id)
+    lead = get_lead_or_403(lead_id)
 
     # Prevent the same lead from being converted twice.
     if lead.converted_customer_id:
@@ -2058,7 +2112,7 @@ def convert_lead_to_customer(lead_id):
         .first()
     )
 
-    if existing_customer:
+    if existing_customer and (user_is_manager() or existing_customer.user_id == current_user_id()):
         lead.converted_customer_id = existing_customer.id
 
         db.session.commit()
@@ -2075,6 +2129,10 @@ def convert_lead_to_customer(lead_id):
                 customer_id=existing_customer.id,
             )
         )
+
+    if existing_customer:
+        flash("A customer with this company name already exists. Please contact a manager to resolve the duplicate.", "error")
+        return redirect(da_url("lead_detail", lead_id=lead.id))
 
     process = lead.sales_process
 
@@ -2151,7 +2209,7 @@ def convert_lead_to_customer(lead_id):
         assigned_rep=lead.assigned_rep,
         status="Customer",
         priority_level="Medium",
-        relationship_type="customer",
+        relationship_type="current_customer",
         notes=combined_notes,
     )
 
@@ -2181,7 +2239,20 @@ def convert_lead_to_customer(lead_id):
     methods=["POST"],
 )
 def lead_ai_coach(lead_id):
+
+    # Verify the lead belongs to this rep or the user is a manager.
     lead = get_lead_or_403(lead_id)
+
+    # Check whether OpenAI is configured.
+    if openai_client is None:
+        flash(
+            "AI Sales Coach is unavailable because the OpenAI API key is not configured.",
+            "error",
+        )
+        return redirect(
+            da_url("lead_detail", lead_id=lead.id)
+        )
+
     process = lead.sales_process
 
     if not process:
@@ -2938,17 +3009,47 @@ def delete_customer(customer_id):
 
 @daily_activity_bp.route("/activity")
 def activity():
-    logs = (
-        scoped_activity_query()
-        .order_by(ActivityLog.created_at.desc())
-        .all()
-    )
+    if request.args.get("clear") == "1":
+        session.pop("daily_activity_log_filters", None)
+        return redirect(da_url("activity"))
+
+    filters = dict(session.get("daily_activity_log_filters", {}))
+    if "rep" in request.args or "type" in request.args:
+        filters = {
+            "rep": request.args.get("rep", "").strip() if user_is_manager() else "",
+            "type": request.args.get("type", "").strip(),
+        }
+        session["daily_activity_log_filters"] = filters
+
+    query = scoped_activity_query()
+    valid_types = ["Cold Call", "Phone Call", "Email", "Meeting", "Quote", "Sale"]
+    selected_type = filters.get("type", "")
+    selected_rep = filters.get("rep", "") if user_is_manager() else ""
+    if selected_type in valid_types:
+        query = query.filter(ActivityLog.activity_type == selected_type)
+    else:
+        selected_type = ""
+    if user_is_manager() and selected_rep:
+        try:
+            rep_id = int(selected_rep)
+        except ValueError:
+            selected_rep = ""
+        else:
+            if rep_id in TRACKED_REPS:
+                query = query.filter(ActivityLog.user_id == rep_id)
+            else:
+                selected_rep = ""
+
+    logs = query.order_by(ActivityLog.created_at.desc()).all()
     return render_template(
         "daily_activity/activity.html",
         logs=logs,
         is_manager=user_is_manager(),
+        tracked_reps=TRACKED_REPS,
+        activity_types=valid_types,
+        selected_rep=selected_rep,
+        selected_type=selected_type,
     )
-
 
 
 @daily_activity_bp.route(
@@ -2967,9 +3068,7 @@ def add_activity():
             "customer_id", ""
         ).strip()
 
-        activity_type = request.form.get(
-            "activity_type", ""
-        ).strip()
+        activity_types = list(dict.fromkeys(request.form.getlist("activity_type")))
 
         summary = request.form.get(
             "summary", ""
@@ -3002,9 +3101,7 @@ def add_activity():
         rep_name = current_rep_name()
 
         if not rep_name:
-            rep_name = request.form.get(
-                "rep_name", ""
-            ).strip()
+            rep_name = request.form.get("rep_name", "").strip() or f"User {current_user_id()}"
 
         # ----------------------------------------
         # VALIDATE ACTIVITY TYPE
@@ -3019,7 +3116,7 @@ def add_activity():
             "Sale",
         }
 
-        if activity_type not in valid_activity_types:
+        if not activity_types or any(t not in valid_activity_types for t in activity_types):
             flash(
                 "Please select a valid activity type.",
                 "error",
@@ -3104,26 +3201,26 @@ def add_activity():
         # CREATE ACTIVITY RECORD
         # ----------------------------------------
 
-        log = ActivityLog(
+        logs_to_add = [ActivityLog(
             user_id=current_user_id(),
             customer_id=customer.id,
-            activity_type=activity_type,
+            activity_type=type_name,
             summary=summary,
             next_step=next_step,
             activity_date=activity_date,
             rep_name=rep_name,
-        )
+        ) for type_name in activity_types]
 
         # ----------------------------------------
         # SAVE ACTIVITY AND CUSTOMER UPDATES
         # ----------------------------------------
 
         try:
-            db.session.add(log)
+            db.session.add_all(logs_to_add)
 
             apply_activity_updates_to_customer(
                 customer=customer,
-                activity_type=activity_type,
+                activity_type=activity_types,
                 activity_date=activity_date,
                 follow_up_date=follow_up_date,
                 follow_up_action=follow_up_action,
@@ -3153,7 +3250,7 @@ def add_activity():
 
         flash(
             build_activity_update_message(
-                activity_type,
+                activity_types,
                 activity_date,
                 follow_up_date,
                 follow_up_action,
@@ -3194,10 +3291,8 @@ def add_activity_for_customer(customer_id):
     )
 
     if request.method == "POST":
-        activity_type = request.form.get(
-            "activity_type",
-            "",
-        ).strip()
+        activity_types = list(dict.fromkeys(request.form.getlist("activity_type")))
+        valid_types = {"Cold Call", "Phone Call", "Email", "Meeting", "Quote", "Sale"}
 
         summary = request.form.get(
             "summary",
@@ -3249,7 +3344,7 @@ def add_activity_for_customer(customer_id):
         }:
             customer_outcome = ""
 
-        if not activity_type or not summary:
+        if not activity_types or any(t not in valid_types for t in activity_types) or not summary:
             flash(
                 "Activity type and summary are required.",
                 "error",
@@ -3262,32 +3357,38 @@ def add_activity_for_customer(customer_id):
                 )
             )
 
-        log = ActivityLog(
+        logs_to_add = [ActivityLog(
             user_id=current_user_id(),
             customer_id=customer.id,
-            activity_type=activity_type,
+            activity_type=type_name,
             summary=summary,
             next_step=next_step,
             activity_date=activity_date,
             rep_name=rep_name,
-        )
+        ) for type_name in activity_types]
 
-        db.session.add(log)
+        db.session.add_all(logs_to_add)
 
         apply_activity_updates_to_customer(
             customer=customer,
-            activity_type=activity_type,
+            activity_type=activity_types,
             activity_date=activity_date,
             follow_up_date=follow_up_date,
             follow_up_action=follow_up_action,
             customer_outcome=customer_outcome,
         )
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception("Failed to save customer activity")
+            flash("Unable to save activity.", "error")
+            return redirect(da_url("add_activity_for_customer", customer_id=customer.id))
 
         flash(
             build_activity_update_message(
-                activity_type,
+                activity_types,
                 activity_date,
                 follow_up_date,
                 follow_up_action,
@@ -3309,6 +3410,7 @@ def add_activity_for_customer(customer_id):
         selected_customer_id=customer.id,
         current_rep_name=current_rep_name(),
         is_manager=user_is_manager(),
+        today=date.today().isoformat(),
     )
 
 @daily_activity_bp.route(

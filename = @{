@@ -1,0 +1,450 @@
+[1mdiff --git a/daily_activity/routes.py b/daily_activity/routes.py[m
+[1mindex a41e674..9d53a6d 100644[m
+[1m--- a/daily_activity/routes.py[m
+[1m+++ b/daily_activity/routes.py[m
+[36m@@ -821,0 +822 @@[m [mdef format_phone_number(value):[m
+[32m+[m
+[36m@@ -825,2 +826,2 @@[m [mdef should_update_last_contact(activity_type):[m
+[31m-    customer_contact_types = [[m
+[31m-        "call",[m
+[32m+[m[32m    customer_contact_types = {[m
+[32m+[m[32m        "cold call",[m
+[36m@@ -828,3 +828,0 @@[m [mdef should_update_last_contact(activity_type):[m
+[31m-        "site visit",[m
+[31m-        "visit",[m
+[31m-        "customer visit",[m
+[36m@@ -833,3 +831,3 @@[m [mdef should_update_last_contact(activity_type):[m
+[31m-        "demo",[m
+[31m-        "onsite visit",[m
+[31m-    ][m
+[32m+[m[32m        "quote",[m
+[32m+[m[32m        "sale",[m
+[32m+[m[32m    }[m
+[36m@@ -839,0 +838 @@[m [mdef should_update_last_contact(activity_type):[m
+[32m+[m
+[36m@@ -915,0 +915 @@[m [mdef shift_follow_up_date(customer, days=3):[m
+[32m+[m
+[36m@@ -917,0 +918,4 @@[m [mdef dashboard():[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # OVERALL DASHBOARD COUNTS[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[36m@@ -922,0 +927,35 @@[m [mdef dashboard():[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # INDIVIDUAL SALES ACTIVITY METRICS[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m    activity_types = {[m
+[32m+[m[32m        "Cold Call": 0,[m
+[32m+[m[32m        "Phone Call": 0,[m
+[32m+[m[32m        "Email": 0,[m
+[32m+[m[32m        "Meeting": 0,[m
+[32m+[m[32m        "Quote": 0,[m
+[32m+[m[32m        "Sale": 0,[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    activity_counts = ([m
+[32m+[m[32m        scoped_activity_query()[m
+[32m+[m[32m        .with_entities([m
+[32m+[m[32m            ActivityLog.activity_type,[m
+[32m+[m[32m            db.func.count(ActivityLog.id),[m
+[32m+[m[32m        )[m
+[32m+[m[32m        .group_by(ActivityLog.activity_type)[m
+[32m+[m[32m        .all()[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    for activity_type, count in activity_counts:[m
+[32m+[m[32m        normalized_type = (activity_type or "").strip().lower()[m
+[32m+[m
+[32m+[m[32m        for name in activity_types:[m
+[32m+[m[32m            if normalized_type == name.lower():[m
+[32m+[m[32m                activity_types[name] += count[m
+[32m+[m[32m                break[m
+[32m+[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # RECENT ACTIVITY[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[36m@@ -929,0 +969,4 @@[m [mdef dashboard():[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # RECENT CUSTOMERS[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[36m@@ -936,0 +980,4 @@[m [mdef dashboard():[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # DASHBOARD REMINDERS[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[36m@@ -939,2 +986,4 @@[m [mdef dashboard():[m
+[31m-    # Manager-only list of customers that reps have flagged[m
+[31m-    # because they need additional / updated contacts.[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # MANAGER-ONLY CUSTOMER FLAGS[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[36m@@ -950,0 +1000,4 @@[m [mdef dashboard():[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m[32m    # RENDER DASHBOARD[m
+[32m+[m[32m    # ----------------------------------------[m
+[32m+[m
+[36m@@ -955,0 +1009 @@[m [mdef dashboard():[m
+[32m+[m[32m        activity_types=activity_types,[m
+[36m@@ -963,0 +1018 @@[m [mdef dashboard():[m
+[32m+[m
+[36m@@ -994 +1049,2 @@[m [mdef add_customer():[m
+[31m-        assigned_rep = request.form.get([m
+[32m+[m[32m        # Assign customer to the selected sales rep.[m
+[32m+[m[32m        assigned_rep_raw = request.form.get([m
+[36m@@ -997,0 +1054,16 @@[m [mdef add_customer():[m
+[32m+[m[32m        if user_is_manager():[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                assigned_user_id = int(assigned_rep_raw)[m
+[32m+[m[32m            except (ValueError, TypeError):[m
+[32m+[m[32m                assigned_user_id = None[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            # Regular reps cannot assign customers to other users.[m
+[32m+[m[32m            assigned_user_id = current_user_id()[m
+[32m+[m
+[32m+[m[32m        assigned_rep = TRACKED_REPS.get(assigned_user_id)[m
+[32m+[m
+[32m+[m[32m        if not assigned_rep:[m
+[32m+[m[32m            flash("Please select a valid sales rep.", "error")[m
+[32m+[m[32m            return redirect(da_url("add_customer"))[m
+[32m+[m
+[32m+[m
+[36m@@ -1036,13 +1107,0 @@[m [mdef add_customer():[m
+[31m-        if ([m
+[31m-            not relationship_type[m
+[31m-            or relationship_type == "no_relationship"[m
+[31m-        ):[m
+[31m-            relationship_type = ([m
+[31m-                derive_relationship_from_legacy_fields([m
+[31m-                    status=status,[m
+[31m-                    pin_color=request.form.get([m
+[31m-                        "pin_color", ""[m
+[31m-                    ).strip(),[m
+[31m-                )[m
+[31m-            )[m
+[31m-[m
+[36m@@ -1213 +1272 @@[m [mdef add_customer():[m
+[31m-            user_id=user_id,[m
+[32m+[m[32m            user_id=assigned_user_id,[m
+[36m@@ -1272 +1331 @@[m [mdef add_customer():[m
+[31m-                    user_id=user_id,[m
+[32m+[m[32m                    user_id=assigned_user_id,[m
+[36m@@ -1341 +1400 @@[m [mdef add_customer():[m
+[31m-                    user_id=user_id,[m
+[32m+[m[32m                    user_id=assigned_user_id,[m
+[36m@@ -1362,4 +1421,3 @@[m [mdef add_customer():[m
+[31m-                    current_rep_name()[m
+[31m-                    or assigned_rep[m
+[31m-                    or ""[m
+[31m-                )[m
+[32m+[m[32m                current_rep_name()[m
+[32m+[m[32m                or f"User {user_id}"[m
+[32m+[m[32m            )[m
+[36m@@ -1431 +1489 @@[m [mdef add_customer():[m
+[31m-[m
+[32m+[m[41m [m
+[36m@@ -1433 +1491 @@[m [mdef add_customer():[m
+[31m-        "daily_activity/add_customer.html",[m
+[32m+[m[32m    "daily_activity/add_customer.html",[m
+[36m@@ -1435,0 +1494,2 @@[m [mdef add_customer():[m
+[32m+[m[32m        tracked_reps=TRACKED_REPS,[m
+[32m+[m[32m        current_user_id=current_user_id(),[m
+[36m@@ -1439 +1498,0 @@[m [mdef add_customer():[m
+[31m-[m
+[36m@@ -2274,0 +2334 @@[m [mdef customer_detail(customer_id):[m
+[32m+[m
+[36m@@ -2292,4 +2352 @@[m [mdef edit_customer(customer_id):[m
+[31m-                da_url([m
+[31m-                    "edit_customer",[m
+[31m-                    customer_id=customer.id,[m
+[31m-                )[m
+[32m+[m[32m                da_url("edit_customer", customer_id=customer.id)[m
+[36m@@ -2297,0 +2355,34 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # SALES REP ASSIGNMENT[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        old_user_id = customer.user_id[m
+[32m+[m[32m        assigned_user_id = old_user_id[m
+[32m+[m
+[32m+[m[32m        if user_is_manager():[m
+[32m+[m[32m            assigned_rep_raw = request.form.get([m
+[32m+[m[32m                "assigned_rep", ""[m
+[32m+[m[32m            ).strip()[m
+[32m+[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                assigned_user_id = int(assigned_rep_raw)[m
+[32m+[m[32m            except (ValueError, TypeError):[m
+[32m+[m[32m                flash("Please select a valid sales rep.", "error")[m
+[32m+[m[32m                return redirect([m
+[32m+[m[32m                    da_url("edit_customer", customer_id=customer.id)[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if assigned_user_id not in TRACKED_REPS:[m
+[32m+[m[32m                flash("Invalid sales rep selected.", "error")[m
+[32m+[m[32m                return redirect([m
+[32m+[m[32m                    da_url("edit_customer", customer_id=customer.id)[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m        # Regular reps cannot change account ownership.[m
+[32m+[m[32m        elif customer.user_id != current_user_id():[m
+[32m+[m[32m            abort(403)[m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # CUSTOMER INFORMATION[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[36m@@ -2307,2 +2398 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "priority_level",[m
+[31m-            "",[m
+[32m+[m[32m            "priority_level", ""[m
+[36m@@ -2313,0 +2404 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2315,2 +2406 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "opposing_company",[m
+[31m-            "",[m
+[32m+[m[32m            "opposing_company", ""[m
+[36m@@ -2319,8 +2408,0 @@[m [mdef edit_customer(customer_id):[m
+[31m-        if ([m
+[31m-            not relationship_type[m
+[31m-            or relationship_type == "no_relationship"[m
+[31m-        ):[m
+[31m-            relationship_type = derive_relationship_from_legacy_fields([m
+[31m-                status=status[m
+[31m-            )[m
+[31m-[m
+[36m@@ -2333,4 +2415 @@[m [mdef edit_customer(customer_id):[m
+[31m-        customer.assigned_rep = request.form.get([m
+[31m-            "assigned_rep",[m
+[31m-            "",[m
+[31m-        ).strip()[m
+[32m+[m
+[36m@@ -2339,0 +2419 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2344,0 +2425 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2346,2 +2427 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "last_contact_date",[m
+[31m-            "",[m
+[32m+[m[32m            "last_contact_date", ""[m
+[36m@@ -2348,0 +2429 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2350,2 +2431 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "follow_up_date",[m
+[31m-            "",[m
+[32m+[m[32m            "follow_up_date", ""[m
+[36m@@ -2352,0 +2433 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2354,2 +2435 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "last_touch_date",[m
+[31m-            "",[m
+[32m+[m[32m            "last_touch_date", ""[m
+[36m@@ -2356,0 +2437 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2359,2 +2440 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "quote_notes",[m
+[31m-            "",[m
+[32m+[m[32m            "quote_notes", ""[m
+[36m@@ -2363,2 +2443 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "service_notes",[m
+[31m-            "",[m
+[32m+[m[32m            "service_notes", ""[m
+[36m@@ -2367,2 +2446,4 @@[m [mdef edit_customer(customer_id):[m
+[31m-            "rental_notes",[m
+[31m-            "",[m
+[32m+[m[32m            "rental_notes", ""[m
+[32m+[m[32m        ).strip()[m
+[32m+[m[32m        customer.pm_notes = request.form.get([m
+[32m+[m[32m            "pm_notes", ""[m
+[36m@@ -2370 +2450,0 @@[m [mdef edit_customer(customer_id):[m
+[31m-        customer.pm_notes = request.form.get("pm_notes", "").strip()[m
+[36m@@ -2376 +2456,47 @@[m [mdef edit_customer(customer_id):[m
+[31m-        db.session.commit()[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # UPDATE CUSTOMER OWNERSHIP[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        customer.user_id = assigned_user_id[m
+[32m+[m
+[32m+[m[32m        # Standardize the displayed sales rep name.[m
+[32m+[m[32m        if assigned_user_id in TRACKED_REPS:[m
+[32m+[m[32m            customer.assigned_rep = TRACKED_REPS[assigned_user_id][m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # TRANSFER CONTACTS AND FLEET INFORMATION[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        if old_user_id != assigned_user_id:[m
+[32m+[m
+[32m+[m[32m            for contact in customer.contacts:[m
+[32m+[m[32m                contact.user_id = assigned_user_id[m
+[32m+[m
+[32m+[m[32m            for fleet in customer.fleet_info:[m
+[32m+[m[32m                fleet.user_id = assigned_user_id[m
+[32m+[m
+[32m+[m[32m        # Historical activity records are intentionally[m
+[32m+[m[32m        # not changed. Activity credit stays with[m
+[32m+[m[32m        # the rep who originally performed the activity.[m
+[32m+[m
+[32m+[m[32m        # Document ownership is also preserved so[m
+[32m+[m[32m        # upload attribution is not altered.[m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # SAVE CHANGES[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            db.session.commit()[m
+[32m+[m[32m        except Exception:[m
+[32m+[m[32m            db.session.rollback()[m
+[32m+[m[32m            current_app.logger.exception([m
+[32m+[m[32m                "Failed to update customer %s", customer.id[m
+[32m+[m[32m            )[m
+[32m+[m[32m            flash([m
+[32m+[m[32m                "Unable to update customer. Please try again.",[m
+[32m+[m[32m                "error"[m
+[32m+[m[32m            )[m
+[32m+[m[32m            return redirect([m
+[32m+[m[32m                da_url("edit_customer", customer_id=customer.id)[m
+[32m+[m[32m            )[m
+[36m@@ -2378,0 +2505 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m
+[36m@@ -2380,4 +2507 @@[m [mdef edit_customer(customer_id):[m
+[31m-            da_url([m
+[31m-                "customer_detail",[m
+[31m-                customer_id=customer.id,[m
+[31m-            )[m
+[32m+[m[32m            da_url("customer_detail", customer_id=customer.id)[m
+[36m@@ -2388,0 +2513 @@[m [mdef edit_customer(customer_id):[m
+[32m+[m[32m        tracked_reps=TRACKED_REPS,[m
+[36m@@ -2643,0 +2769 @@[m [mdef activity():[m
+[32m+[m
+[36m@@ -2656 +2782,3 @@[m [mdef add_activity():[m
+[31m-        customer_id = request.form.get("customer_id", "").strip()[m
+[32m+[m[32m        customer_id = request.form.get([m
+[32m+[m[32m            "customer_id", ""[m
+[32m+[m[32m        ).strip()[m
+[36m@@ -2659,2 +2787 @@[m [mdef add_activity():[m
+[31m-            "activity_type",[m
+[31m-            "",[m
+[32m+[m[32m            "activity_type", ""[m
+[36m@@ -2664,2 +2791 @@[m [mdef add_activity():[m
+[31m-            "summary",[m
+[31m-            "",[m
+[32m+[m[32m            "summary", ""[m
+[36m@@ -2669,2 +2795 @@[m [mdef add_activity():[m
+[31m-            "activity_date",[m
+[31m-            "",[m
+[32m+[m[32m            "activity_date", ""[m
+[36m@@ -2674,2 +2799 @@[m [mdef add_activity():[m
+[31m-            "next_step",[m
+[31m-            "",[m
+[32m+[m[32m            "next_step", ""[m
+[36m@@ -2679,2 +2803 @@[m [mdef add_activity():[m
+[31m-            "follow_up_date",[m
+[31m-            "",[m
+[32m+[m[32m            "follow_up_date", ""[m
+[36m@@ -2684,2 +2807 @@[m [mdef add_activity():[m
+[31m-            "follow_up_action",[m
+[31m-            "complete",[m
+[32m+[m[32m            "follow_up_action", "complete"[m
+[36m@@ -2689,2 +2811 @@[m [mdef add_activity():[m
+[31m-            "customer_outcome",[m
+[31m-            "",[m
+[32m+[m[32m            "customer_outcome", ""[m
+[36m@@ -2692,0 +2814,4 @@[m [mdef add_activity():[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # SALES REP ATTRIBUTION[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[36m@@ -2697,2 +2822 @@[m [mdef add_activity():[m
+[31m-                "rep_name",[m
+[31m-                "",[m
+[32m+[m[32m                "rep_name", ""[m
+[36m@@ -2700,0 +2825,74 @@[m [mdef add_activity():[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # VALIDATE ACTIVITY TYPE[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        valid_activity_types = {[m
+[32m+[m[32m            "Cold Call",[m
+[32m+[m[32m            "Phone Call",[m
+[32m+[m[32m            "Email",[m
+[32m+[m[32m            "Meeting",[m
+[32m+[m[32m            "Quote",[m
+[32m+[m[32m            "Sale",[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        if activity_type not in valid_activity_types:[m
+[32m+[m[32m            flash([m
+[32m+[m[32m                "Please select a valid activity type.",[m
+[32m+[m[32m                "error",[m
+[32m+[m[32m            )[m
+[32m+[m[32m            return redirect(da_url("add_activity"))[m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # VALIDATE REQUIRED FIELDS[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        if not customer_id or not summary:[m
+[32m+[m[32m            flash([m
+[32m+[m[32m                "Customer and summary are required.",[m
+[32m+[m[32m                "error",[m
+[32m+[m[32m            )[m
+[32m+[m[32m            return redirect(da_url("add_activity"))[m
+[32m+[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            customer_id = int(customer_id)[m
+[32m+[m[32m        except (ValueError, TypeError):[m
+[32m+[m[32m            flash([m
+[32m+[m[32m                "Please select a valid customer.",[m
+[32m+[m[32m                "error",[m
+[32m+[m[32m            )[m
+[32m+[m[32m            return redirect(da_url("add_activity"))[m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # VALIDATE ACTIVITY DATE[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        if not activity_date:[m
+[32m+[m[32m            activity_date = date.today().isoformat()[m
+[32m+[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            date.fromisoformat(activity_date)[m
+[32m+[m[32m        except ValueError:[m
+[32m+[m[32m            flash([m
+[32m+[m[32m                "Please enter a valid activity date.",[m
+[32m+[m[32m                "error",[m
+[32m+[m[32m            )[m
+[32m+[m[32m            return redirect(da_url("add_activity"))[m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # VALIDATE FOLLOW-UP DATE[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[32m+[m[32m        if follow_up_date:[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                date.fromisoformat(follow_up_date)[m
+[32m+[m[32m            except ValueError:[m
+[32m+[m[32m                flash([m
+[32m+[m[32m                    "Please enter a valid follow-up date.",[m
+[32m+[m[32m                    "error",[m
+[32m+[m[32m                )[m
+[32m+[m[32m                return redirect(da_url("add_activity"))[m
+[32m+[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m[32m        # FOLLOW-UP AND OUTCOME SETTINGS[m
+[32m+[m[32m        # ----------------------------------------[m
+[32m+[m
+[36m@@ -2713,9 +2911,3 @@[m [mdef add_activity():[m
+[31m-        if not customer_id or not activity_type or not summary:[m
+[31m-            flash([m
+[31m-                "Customer, activity type, and summary are required.",[m
+[31m-                "error",[m
+[31m-            )[m
+[31m-[m
+[31m-            return redirect([m
+[31m-               

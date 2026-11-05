@@ -1,8 +1,11 @@
+
 {% extends "daily_activity/base.html" %}
 
 {% block title %}Activity | Daily Activity App{% endblock %}
 {% block page_title %}Activity{% endblock %}
-{% block page_subtitle %}Track calls, emails, meetings, quotes, sales, and follow-up actions in one organized log{% endblock %}
+{% block page_subtitle %}
+Track calls, emails, meetings, quotes, sales, and follow-up actions in one organized log
+{% endblock %}
 
 {% block content %}
 
@@ -13,22 +16,24 @@
         <h3>Review recent customer activity and next actions</h3>
 
         <p>
-            Use the activity log to keep a running record of cold calls,
-            phone calls, emails, meetings, quotes, and sales.
-            This page gives you a clean view of what has happened and
-            what needs to happen next.
+            Use the activity log to keep a running record
+            of cold calls, phone calls, emails, meetings,
+            quotes, and sales.
         </p>
 
         <div class="hero-actions">
-            <a href="{{ url_for('add_activity') }}" class="btn btn-primary">
+            <a href="{{ url_for('add_activity') }}"
+               class="btn btn-primary">
                 Add Activity
             </a>
 
-            <a href="{{ url_for('customers') }}" class="btn btn-secondary">
+            <a href="{{ url_for('customers') }}"
+               class="btn btn-secondary">
                 View Customers
             </a>
 
-            <a href="{{ url_for('planner') }}" class="btn btn-secondary">
+            <a href="{{ url_for('planner') }}"
+               class="btn btn-secondary">
                 Open Planner
             </a>
         </div>
@@ -41,22 +46,104 @@
         </div>
 
         <div class="mini-stat-card">
-            <span>Track</span>
-            <strong>Calls</strong>
+            <span>Cold Calls</span>
+            <strong>
+                {{ logs|selectattr('activity_type', 'equalto', 'Cold Call')|list|length }}
+            </strong>
         </div>
 
         <div class="mini-stat-card">
-            <span>Track</span>
-            <strong>Quotes</strong>
+            <span>Phone Calls</span>
+            <strong>
+                {{ logs|selectattr('activity_type', 'equalto', 'Phone Call')|list|length }}
+            </strong>
         </div>
 
         <div class="mini-stat-card">
-            <span>Track</span>
-            <strong>Sales</strong>
+            <span>Meetings</span>
+            <strong>
+                {{ logs|selectattr('activity_type', 'equalto', 'Meeting')|list|length }}
+            </strong>
         </div>
     </div>
 </div>
 
+<!-- ACTIVITY FILTERS -->
+
+<div class="panel-card">
+    <div class="panel-top">
+        <div>
+            <h3>Activity Filters</h3>
+
+            <p>
+                {% if is_manager %}
+                    Filter by sales representative and activity type.
+                {% else %}
+                    Filter your activity history by activity type.
+                {% endif %}
+                Your filters will remain selected when
+                you return to this page.
+            </p>
+        </div>
+    </div>
+
+    <form method="GET" action="{{ url_for('activity') }}">
+
+        <div style="
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+            gap:14px;
+            align-items:end;
+        ">
+
+            {% if is_manager %}
+            <div class="form-row">
+                <label for="rep">Sales Rep</label>
+
+                <select id="rep" name="rep">
+                    <option value="">All Reps</option>
+
+                    {% for user_id, rep_name in tracked_reps.items() %}
+                        <option value="{{ user_id }}"
+                            {% if selected_rep == user_id|string %}selected{% endif %}>
+                            {{ rep_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            <div class="form-row">
+                <label for="type">Activity Type</label>
+
+                <select id="type" name="type">
+                    <option value="">All Activity Types</option>
+
+                    {% for activity_type in activity_types %}
+                        <option value="{{ activity_type }}"
+                            {% if selected_type == activity_type %}selected{% endif %}>
+                            {{ activity_type }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="hero-actions">
+                <button type="submit" class="btn btn-primary">
+                    Apply Filters
+                </button>
+
+                <a href="{{ url_for('activity', clear=1) }}"
+                   class="btn btn-secondary">
+                    Clear Filters
+                </a>
+            </div>
+
+        </div>
+    </form>
+</div>
+
+<!-- ACTIVITY LOG -->
 
 <div class="panel-card">
     <div class="panel-top">
@@ -64,15 +151,14 @@
             <h3>Activity Log</h3>
 
             <p>
-                Review customer interactions, summaries, contact emails,
-                and next-step planning in one table.
+                Review customer interactions, summaries,
+                contact emails, and next-step planning
+                in one table.
             </p>
         </div>
 
-        <a
-            href="{{ url_for('add_activity') }}"
-            class="btn btn-small btn-primary"
-        >
+        <a href="{{ url_for('add_activity') }}"
+           class="btn btn-primary btn-sm">
             + Add Activity
         </a>
     </div>
@@ -94,47 +180,56 @@
 
                 <tbody>
                     {% for log in logs %}
-                        <tr>
-                            <td>
-                                {{ log.rep_name or "—" }}
-                            </td>
+                    <tr>
+                        <td>
+                            {{ log.rep_name or '—' }}
+                        </td>
 
-                            <td>
-                                {% if log.customer %}
-                                    <a href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
-                                        {{ log.customer.company_name }}
-                                    </a>
+                        <td>
+                            {% if log.customer %}
+                                <a href="{{ url_for('customer_detail', customer_id=log.customer.id) }}">
+                                    {{ log.customer.company_name }}
+                                </a>
 
-                                    {% for contact in log.customer.contacts %}
-                                        {% if contact.email %}
-                                            <div class="list-meta">
-                                                <a href="mailto:{{ contact.email|e }}">
-                                                    {{ contact.email }}
-                                                </a>
-                                            </div>
-                                        {% endif %}
-                                    {% endfor %}
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </td>
+                                {% for contact in log.customer.contacts %}
+                                    {% if contact.email %}
+                                        <div class="list-meta">
+                                            <a href="mailto:{{ contact.email|e }}">
+                                                {{ contact.email }}
+                                            </a>
+                                        </div>
+                                    {% endif %}
+                                {% endfor %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
 
-                            <td>
-                                {{ log.activity_type or "—" }}
-                            </td>
+                        <td>
+                            <span style="
+                                display:inline-block;
+                                padding:5px 10px;
+                                border-radius:999px;
+                                border:1px solid rgba(128,128,128,.25);
+                                font-size:.82rem;
+                                font-weight:700;
+                            ">
+                                {{ log.activity_type or '—' }}
+                            </span>
+                        </td>
 
-                            <td>
-                                {{ log.summary or "—" }}
-                            </td>
+                        <td>
+                            {{ log.summary or '—' }}
+                        </td>
 
-                            <td>
-                                {{ log.next_step or "—" }}
-                            </td>
+                        <td>
+                            {{ log.next_step or '—' }}
+                        </td>
 
-                            <td>
-                                {{ log.activity_date or "—" }}
-                            </td>
-                        </tr>
+                        <td>
+                            {{ log.activity_date or '—' }}
+                        </td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -143,8 +238,19 @@
     {% else %}
 
         <div class="empty-state">
-            No activity found yet. Add your first activity entry to begin
-            tracking calls, emails, meetings, quotes, and sales.
+            No activity records match your current filters.
+
+            <div style="margin-top:14px;">
+                <a href="{{ url_for('activity', clear=1) }}"
+                   class="btn btn-secondary">
+                    Clear Filters
+                </a>
+
+                <a href="{{ url_for('add_activity') }}"
+                   class="btn btn-primary">
+                    Add Activity
+                </a>
+            </div>
         </div>
 
     {% endif %}
