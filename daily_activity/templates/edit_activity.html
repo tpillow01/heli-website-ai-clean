@@ -1,0 +1,198 @@
+
+{% extends "daily_activity/base.html" %}
+
+{% block title %}Edit Activity | Daily Activity App{% endblock %}
+{% block page_title %}Edit Activity{% endblock %}
+{% block page_subtitle %}Correct an existing activity record{% endblock %}
+
+{% block content %}
+
+<style>
+.edit-activity-page {
+    max-width: 850px;
+    margin: 0 auto;
+}
+
+.edit-activity-panel {
+    background: #fffaf4;
+    border: 1px solid #ded0bd;
+    border-radius: 12px;
+    padding: 22px;
+}
+
+.edit-activity-panel h3 {
+    margin: 0 0 6px;
+    font-size: 1.2rem;
+    font-weight: 800;
+}
+
+.edit-activity-description {
+    margin: 0 0 22px;
+    font-size: .84rem;
+    color: #75695e;
+}
+
+.edit-activity-grid {
+    display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 15px;
+}
+
+.edit-activity-field {
+    margin-bottom: 17px;
+}
+
+.edit-activity-field label {
+    display: block;
+    font-size: .81rem;
+    font-weight: 800;
+    margin-bottom: 7px;
+    color: #514236;
+}
+
+.edit-activity-field input,
+.edit-activity-field select,
+.edit-activity-field textarea {
+    width: 100%;
+    background: white;
+    color: #302820;
+    border: 1px solid #d8cbbb;
+    border-radius: 8px;
+    padding: 11px;
+    font-size: .86rem;
+}
+
+.edit-activity-field textarea {
+    resize: vertical;
+    min-height: 105px;
+    line-height: 1.5;
+}
+
+.edit-activity-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-top: 8px;
+}
+
+@media(max-width:600px) {
+    .edit-activity-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .edit-activity-panel {
+        padding: 15px;
+    }
+}
+</style>
+
+<div class="edit-activity-page">
+
+    <div class="edit-activity-panel">
+
+        <h3>Edit Sales Activity</h3>
+
+        <p class="edit-activity-description">
+            Correct an incorrectly logged activity.
+            Changes will be reflected in your activity
+            history and weekly/monthly metrics.
+        </p>
+
+        <form method="POST">
+
+            <div class="edit-activity-field">
+
+                <label>Customer</label>
+
+                <input type="text"
+                       value="{{ log.customer.company_name if log.customer else 'Unknown Customer' }}"
+                       disabled>
+
+            </div>
+
+            <div class="edit-activity-grid">
+
+                <div class="edit-activity-field">
+
+                    <label for="activity_type">
+                        Activity Type
+                    </label>
+
+                    <select id="activity_type"
+                            name="activity_type"
+                            required>
+
+                        {% for type_name in activity_types %}
+
+                            <option value="{{ type_name }}"
+                                {% if log.activity_type == type_name %}selected{% endif %}>
+                                {{ type_name }}
+                            </option>
+
+                        {% endfor %}
+
+                    </select>
+                </div>
+
+                <div class="edit-activity-field">
+
+                    <label for="activity_date">
+                        Activity Date
+                    </label>
+
+                    <input type="date"
+                           id="activity_date"
+                           name="activity_date"
+                           value="{{ log.activity_date }}"
+                           required>
+
+                </div>
+
+            </div>
+
+            <div class="edit-activity-field">
+
+                <label for="summary">
+                    Activity Summary
+                </label>
+
+                <textarea id="summary"
+                          name="summary"
+                          rows="5"
+                          required>{{ log.summary or '' }}</textarea>
+
+            </div>
+
+            <div class="edit-activity-field">
+
+                <label for="next_step">
+                    Next Steps
+                </label>
+
+                <textarea id="next_step"
+                          name="next_step"
+                          rows="4">{{ log.next_step or '' }}</textarea>
+
+            </div>
+
+            <div class="edit-activity-actions">
+
+                <button type="submit"
+                        class="btn btn-primary">
+                    Save Changes
+                </button>
+
+                <a href="{{ url_for('activity') }}"
+                   class="btn btn-secondary">
+                    Cancel
+                </a>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

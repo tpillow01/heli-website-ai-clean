@@ -118,6 +118,7 @@ DA_ENDPOINTS = {
     "reactivate_lead",
     "lead_ai_coach",
     "update_weekly_goals",
+    "edit_activity",
 }
 
 
@@ -1034,6 +1035,7 @@ def dashboard():
             reviewed_contact_requests
         ),
         is_manager=user_is_manager(),
+        current_user_id=current_user_id(),
     )
 
 @daily_activity_bp.route("/customers")
@@ -3120,8 +3122,96 @@ def activity():
         activity_types=valid_types,
         selected_rep=selected_rep,
         selected_type=selected_type,
+        current_user_id=current_user_id(),
     )
 
+
+@daily_activity_bp.route(
+    "/activity/<int:activity_id>/edit",
+    methods=["GET", "POST"],
+)
+def edit_activity(activity_id):
+
+    log = ActivityLog.query.get_or_404(activity_id)
+
+    # Managers can edit team activity.
+    # Reps can only edit activity they created.
+    if (
+        not user_is_manager()
+        and log.user_id != current_user_id()
+    ):
+        abort(403)
+
+    valid_types = {
+        "Cold Call",
+        "Phone Call",
+        "Email",
+        "Meeting",
+        "Quote",
+        "Sale",
+    }
+
+    if request.method == "POST":
+
+        activity_type = request.form.get(
+            "activity_type", ""
+        ).strip()
+
+        activity_date = request.form.get(
+            "activity_date", ""
+        ).strip()
+
+        summary = request.form.get(
+            "summary", ""
+        ).strip()
+
+        next_step = request.form.get(
+            "next_step", ""
+        ).strip()
+
+        if activity_type not in valid_types:
+            flash("Select a valid activity type.", "error")
+            return redirect(
+                da_url("edit_activity", activity_id=log.id)
+            )
+
+        try:
+            date.fromisoformat(activity_date)
+        except (ValueError, TypeError):
+            flash("Enter a valid activity date.", "error")
+            return redirect(
+                da_url("edit_activity", activity_id=log.id)
+            )
+
+        if not summary:
+            flash("An activity summary is required.", "error")
+            return redirect(
+                da_url("edit_activity", activity_id=log.id)
+            )
+
+        log.activity_type = activity_type
+        log.activity_date = activity_date
+        log.summary = summary
+        log.next_step = next_step
+
+        db.session.commit()
+
+        flash("Activity updated successfully.", "success")
+        return redirect(da_url("activity"))
+
+    return render_template(
+        "daily_activity/edit_activity.html",
+        log=log,
+        activity_types=[
+            "Cold Call",
+            "Phone Call",
+            "Email",
+            "Meeting",
+            "Quote",
+            "Sale",
+        ],
+        is_manager=user_is_manager(),
+    )
 
 @daily_activity_bp.route(
     "/activity/add",

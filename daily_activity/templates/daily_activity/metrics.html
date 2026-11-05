@@ -3,22 +3,15 @@
 
 {% block title %}Sales Metrics | Daily Activity App{% endblock %}
 {% block page_title %}Sales Performance{% endblock %}
-{% block page_subtitle %}
-Weekly goals, daily targets, and activity reporting
-{% endblock %}
+{% block page_subtitle %}Weekly goals, daily targets, and activity reports{% endblock %}
 
 {% block content %}
 
 <style>
-/* ==========================================
-   TYNAN SALES PERFORMANCE DASHBOARD
-   ========================================== */
-
 .metrics-page {
     display: flex;
     flex-direction: column;
-    gap: 18px;
-    width: 100%;
+    gap: 16px;
     min-width: 0;
     color: #302820;
 }
@@ -29,56 +22,45 @@ Weekly goals, daily targets, and activity reporting
     box-sizing: border-box;
 }
 
-/* PANELS */
-
 .metrics-panel {
     background: #fffaf3;
     border: 1px solid #ded0bd;
     border-radius: 12px;
     padding: 20px;
     min-width: 0;
-    box-shadow: 0 2px 6px rgba(50, 35, 20, 0.04);
+    box-shadow: 0 2px 7px rgba(50,35,20,.04);
 }
 
-.metrics-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-}
-
-.metrics-header h2 {
-    margin: 0 0 5px;
-    font-size: 1.4rem;
-    font-weight: 800;
-}
-
-.metrics-header p {
-    margin: 0;
-    font-size: 0.85rem;
-    color: #75695e;
-}
-
+.metrics-header,
 .metrics-section-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
+}
+
+.metrics-section-head {
     margin-bottom: 17px;
 }
 
+.metrics-header h2 {
+    margin: 0 0 5px;
+    font-size: 1.3rem;
+    font-weight: 800;
+}
+
+.metrics-header h3,
 .metrics-section-head h3 {
     margin: 0 0 5px;
-    font-size: 1.1rem;
+    font-size: 1.08rem;
     font-weight: 800;
 }
 
 .metrics-subtitle {
-    font-size: 0.82rem;
-    color: #75695e;
     margin: 0;
+    color: #75695e;
+    font-size: .81rem;
 }
 
 .metrics-actions {
@@ -87,47 +69,46 @@ Weekly goals, daily targets, and activity reporting
     flex-wrap: wrap;
 }
 
-/* MANAGEMENT TEAM SUMMARY */
+/* TEAM SUMMARY */
 
 .team-goal-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(4,minmax(0,1fr));
     gap: 12px;
 }
 
 .team-goal-card {
-    background: #ffffff;
     border: 1px solid #e3d7c8;
     border-radius: 10px;
-    padding: 16px;
-    min-width: 0;
+    padding: 15px;
+    background: #fff;
 }
 
 .team-goal-name {
     font-weight: 800;
-    font-size: 0.92rem;
-    margin-bottom: 9px;
+    font-size: .89rem;
+    margin-bottom: 8px;
 }
 
 .team-goal-percent {
-    font-size: 1.7rem;
+    font-size: 1.55rem;
     font-weight: 800;
     margin-bottom: 10px;
 }
 
 .team-goal-status {
-    font-size: 0.78rem;
-    color: #75695e;
-    margin-top: 10px;
+    font-size: .77rem;
+    color: #77695d;
+    margin-top: 9px;
 }
 
-/* PROGRESS BARS */
+/* PROGRESS */
 
 .goal-progress {
     display: block;
     width: 100%;
     height: 10px;
-    border: 0;
+    border: none;
     border-radius: 20px;
     overflow: hidden;
     appearance: none;
@@ -158,59 +139,51 @@ Weekly goals, daily targets, and activity reporting
     background: #328259;
 }
 
-/* INDIVIDUAL REP PROGRESS */
+/* INDIVIDUAL GOAL PAGES */
 
 .rep-goal-section {
-    padding: 18px 0;
-    border-bottom: 1px solid #e3d8ca;
+    min-width: 0;
 }
 
-.rep-goal-section:first-of-type {
-    padding-top: 0;
-}
-
-.rep-goal-section:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
+.rep-goal-section[hidden] {
+    display: none !important;
 }
 
 .rep-goal-heading {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 14px;
 }
 
 .rep-goal-heading h4 {
+    margin: 0;
     font-size: 1rem;
     font-weight: 800;
-    margin: 0;
 }
 
 .rep-goal-heading span {
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #716255;
+    color: #775d4c;
+    font-size: .83rem;
+    font-weight: 800;
 }
 
 .goal-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(4,minmax(0,1fr));
     gap: 12px;
 }
 
 .goal-card {
-    background: #ffffff;
+    background: white;
     border: 1px solid #e5d9cb;
     border-radius: 10px;
     padding: 15px;
-    min-width: 0;
 }
 
 .goal-card-label {
-    font-size: 0.78rem;
+    font-size: .78rem;
     font-weight: 750;
     color: #75695e;
     margin-bottom: 10px;
@@ -220,7 +193,7 @@ Weekly goals, daily targets, and activity reporting
     display: flex;
     align-items: baseline;
     gap: 5px;
-    margin-bottom: 13px;
+    margin-bottom: 12px;
 }
 
 .goal-card-actual {
@@ -229,160 +202,182 @@ Weekly goals, daily targets, and activity reporting
 }
 
 .goal-card-target {
-    font-size: 0.91rem;
     color: #85776a;
+    font-size: .9rem;
 }
 
 .goal-card-footer {
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    margin-top: 9px;
-    font-size: 0.73rem;
+    font-size: .73rem;
     color: #786a5c;
+    margin-top: 9px;
 }
 
-/* DAILY ACTION PLAN */
+/* DAILY PLAN */
 
 .daily-plan {
-    margin-top: 17px;
-    padding: 17px;
     background: #f4e9dc;
     border: 1px solid #e3d3c0;
     border-radius: 10px;
+    padding: 17px;
+    margin-top: 17px;
 }
 
 .daily-plan h4 {
     margin: 0 0 5px;
-    font-size: 1rem;
+    font-size: .99rem;
     font-weight: 800;
 }
 
 .daily-plan-subtitle {
-    font-size: 0.8rem;
+    font-size: .8rem;
     color: #766859;
-    margin: 0 0 15px;
+    margin: 0 0 14px;
 }
 
 .daily-plan-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(4,minmax(0,1fr));
     gap: 10px;
 }
 
 .daily-target {
-    background: #ffffff;
+    background: white;
     border: 1px solid #e5d7c5;
     border-radius: 9px;
-    padding: 16px 8px;
     text-align: center;
+    padding: 15px 8px;
 }
 
 .daily-target-number {
-    font-size: 1.85rem;
-    line-height: 1.15;
-    font-weight: 800;
     color: #a62b22;
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1.2;
 }
 
 .daily-target-label {
-    font-size: 0.76rem;
+    margin-top: 5px;
+    font-size: .76rem;
     color: #65574b;
-    margin-top: 7px;
     font-weight: 600;
 }
 
 .daily-plan-note {
-    font-size: 0.79rem;
+    font-size: .78rem;
     color: #716356;
     line-height: 1.5;
     margin: 14px 0 0;
 }
 
-/* MANAGER GOAL EDITOR */
+/* MANAGER EDIT GOALS */
 
 .goal-editor {
     margin-top: 16px;
-    border-top: 1px solid #e3d8ca;
     padding-top: 14px;
+    border-top: 1px solid #e3d8ca;
 }
 
 .goal-editor summary {
     cursor: pointer;
-    color: #9c2b23;
-    font-size: 0.85rem;
+    color: #98291f;
+    font-size: .84rem;
     font-weight: 800;
 }
 
 .goal-edit-form {
-    background: #ffffff;
+    margin-top: 14px;
+    background: white;
     border: 1px solid #e4d8cb;
     border-radius: 10px;
-    padding: 17px;
-    margin-top: 14px;
+    padding: 16px;
 }
 
 .goal-edit-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(4,minmax(0,1fr));
     gap: 12px;
 }
 
 .goal-edit-field label {
     display: block;
-    font-size: 0.77rem;
+    font-size: .75rem;
     font-weight: 750;
-    margin-bottom: 7px;
+    margin-bottom: 6px;
 }
 
 .goal-edit-field input {
-    display: block;
     width: 100%;
-    height: 42px;
-    padding: 9px;
-    background: #ffffff;
+    height: 40px;
+    padding: 8px;
+    background: white;
     color: #302820;
     border: 1px solid #d9cabb;
-    border-radius: 8px;
+    border-radius: 7px;
 }
 
 .goal-save {
-    margin-top: 15px;
+    margin-top: 14px;
 }
 
-/* WEEKLY AND MONTHLY REPORTS */
+/* PREVIOUS / NEXT REP */
+
+.rep-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+    padding-top: 17px;
+    border-top: 1px solid #e3d8ca;
+}
+
+.rep-navigation-label {
+    color: #66584c;
+    font-size: .82rem;
+    font-weight: 800;
+}
+
+.rep-navigation button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+}
+
+/* REPORT TABLES */
 
 .metrics-table-wrap {
     overflow-x: auto;
-    width: 100%;
+    background: white;
     border: 1px solid #e3d6c7;
     border-radius: 10px;
-    background: #ffffff;
 }
 
 .metrics-table {
     width: 100%;
     border-collapse: collapse;
-    background: #ffffff;
+    background: white;
     margin: 0;
 }
 
 .metrics-table th {
-    background: #f1e5d4;
     text-align: left;
-    font-size: 0.73rem;
-    font-weight: 800;
-    color: #514437;
-    padding: 13px 12px;
-    white-space: nowrap;
+    padding: 12px;
+    background: #f1e5d4;
     border-bottom: 1px solid #e0d3c3;
+    color: #514437;
+    font-size: .73rem;
+    font-weight: 800;
+    white-space: nowrap;
 }
 
 .metrics-table td {
-    padding: 13px 12px;
-    font-size: 0.84rem;
-    color: #302820;
+    padding: 12px;
     border-bottom: 1px solid #e9ded0;
+    font-size: .83rem;
+    color: #302820;
 }
 
 .metrics-table tbody tr:nth-child(even) {
@@ -397,24 +392,18 @@ Weekly goals, daily targets, and activity reporting
     font-weight: 800;
 }
 
-/* RESPONSIVE */
-
 @media (max-width: 1050px) {
     .team-goal-grid,
     .goal-grid,
     .daily-plan-grid,
     .goal-edit-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(2,minmax(0,1fr));
     }
 }
 
 @media (max-width: 600px) {
     .metrics-panel {
         padding: 14px;
-    }
-
-    .metrics-header h2 {
-        font-size: 1.2rem;
     }
 
     .team-goal-grid,
@@ -424,7 +413,7 @@ Weekly goals, daily targets, and activity reporting
     }
 
     .goal-card {
-        padding: 12px;
+        padding: 11px;
     }
 
     .goal-card-actual {
@@ -436,24 +425,22 @@ Weekly goals, daily targets, and activity reporting
     }
 
     .goal-edit-grid {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2,minmax(0,1fr));
     }
 
-    .metrics-actions .btn {
-        font-size: 0.74rem;
+    .rep-navigation {
+        justify-content: center;
     }
 }
 </style>
 
 <div class="metrics-page">
 
-    <!-- ======================================
-         PAGE HEADER
-         ====================================== -->
+    <!-- HEADER -->
 
     <div class="metrics-panel">
-
         <div class="metrics-header">
+
             <div>
                 <h2>
                     {% if is_manager %}
@@ -463,7 +450,7 @@ Weekly goals, daily targets, and activity reporting
                     {% endif %}
                 </h2>
 
-                <p>
+                <p class="metrics-subtitle">
                     Weekly goals, daily planning,
                     and automatic activity tracking.
                 </p>
@@ -473,13 +460,11 @@ Weekly goals, daily targets, and activity reporting
                class="btn btn-primary">
                 + Log Activity
             </a>
-        </div>
 
+        </div>
     </div>
 
-    <!-- ======================================
-         TEAM PERFORMANCE - MANAGER ONLY
-         ====================================== -->
+    <!-- MANAGER TEAM GOALS -->
 
     {% if is_manager %}
 
@@ -488,10 +473,8 @@ Weekly goals, daily targets, and activity reporting
         <div class="metrics-section-head">
             <div>
                 <h3>Team Goal Performance</h3>
-
                 <p class="metrics-subtitle">
-                    Current week - Each representative
-                    compared to their own weekly goals.
+                    Current week — Performance against individual goals.
                 </p>
             </div>
         </div>
@@ -499,14 +482,10 @@ Weekly goals, daily targets, and activity reporting
         <div class="team-goal-grid">
 
             {% for rep in visible_reps %}
-
                 {% set progress = goal_progress[rep] %}
 
                 <div class="team-goal-card">
-
-                    <div class="team-goal-name">
-                        {{ rep }}
-                    </div>
+                    <div class="team-goal-name">{{ rep }}</div>
 
                     <div class="team-goal-percent">
                         {{ progress.overall_percent }}%
@@ -521,7 +500,6 @@ Weekly goals, daily targets, and activity reporting
                     <div class="team-goal-status">
                         {{ progress.pace_status }}
                     </div>
-
                 </div>
 
             {% endfor %}
@@ -532,9 +510,7 @@ Weekly goals, daily targets, and activity reporting
 
     {% endif %}
 
-    <!-- ======================================
-         INDIVIDUAL WEEKLY GOALS
-         ====================================== -->
+    <!-- ONE REPRESENTATIVE AT A TIME -->
 
     <div class="metrics-panel">
 
@@ -559,10 +535,11 @@ Weekly goals, daily targets, and activity reporting
         {% if visible_reps %}
 
             {% for rep in visible_reps %}
-
                 {% set progress = goal_progress[rep] %}
 
-                <div class="rep-goal-section">
+                <div class="rep-goal-section"
+                     data-rep-goals="{{ rep }}"
+                     {% if is_manager and not loop.first %}hidden{% endif %}>
 
                     <div class="rep-goal-heading">
                         <h4>{{ rep }}</h4>
@@ -572,7 +549,7 @@ Weekly goals, daily targets, and activity reporting
                         </span>
                     </div>
 
-                    <!-- GOAL PROGRESS CARDS -->
+                    <!-- PROGRESS CARDS -->
 
                     <div class="goal-grid">
 
@@ -601,10 +578,7 @@ Weekly goals, daily targets, and activity reporting
                                 </progress>
 
                                 <div class="goal-card-footer">
-                                    <span>
-                                        {{ item.percent }}%
-                                    </span>
-
+                                    <span>{{ item.percent }}%</span>
                                     <span>
                                         {{ item.remaining }} remaining
                                     </span>
@@ -616,7 +590,7 @@ Weekly goals, daily targets, and activity reporting
 
                     </div>
 
-                    <!-- DAILY GAME PLAN -->
+                    <!-- DAILY PLAN -->
 
                     <div class="daily-plan">
 
@@ -633,7 +607,6 @@ Weekly goals, daily targets, and activity reporting
                                 {% for item in progress.rows %}
 
                                     <div class="daily-target">
-
                                         <div class="daily-target-number">
                                             {{ item.daily_needed }}
                                         </div>
@@ -641,7 +614,6 @@ Weekly goals, daily targets, and activity reporting
                                         <div class="daily-target-label">
                                             {{ item.label }}
                                         </div>
-
                                     </div>
 
                                 {% endfor %}
@@ -649,51 +621,48 @@ Weekly goals, daily targets, and activity reporting
                             </div>
 
                             <p class="daily-plan-note">
-                                You have
-                                <strong>{{ remaining_workdays }}</strong>
-                                workday(s) remaining, including today.
+                                <strong>
+                                    {{ remaining_workdays }}
+                                </strong>
+                                workday(s) remain, including today.
 
-                                These targets automatically adjust
-                                as activities are logged.
+                                Targets adjust automatically as
+                                activity is logged.
 
                                 Meetings and quotes are planning
-                                targets and depend on customer opportunities.
+                                targets that depend on customer opportunities.
                             </p>
 
                         {% else %}
 
                             <p class="daily-plan-note">
-                                The Monday-Friday workweek is complete.
-
-                                Review your weekly results and prepare
-                                for next week's activity goals.
+                                The Monday–Friday workweek is complete.
+                                Review this week's results and prepare
+                                for the upcoming week.
                             </p>
 
                         {% endif %}
 
                     </div>
 
-                    <!-- MANAGER GOAL EDITOR -->
+                    <!-- MANAGER-ONLY GOAL EDITOR -->
 
                     {% if is_manager %}
 
                         <div class="goal-editor">
 
                             <details>
-
                                 <summary>
                                     Edit {{ rep }}'s Weekly Goals
                                 </summary>
 
-                                <form
-                                    method="POST"
-                                    action="{{ url_for('update_weekly_goals') }}"
-                                    class="goal-edit-form">
+                                <form method="POST"
+                                      action="{{ url_for('update_weekly_goals') }}"
+                                      class="goal-edit-form">
 
-                                    <input
-                                        type="hidden"
-                                        name="user_id"
-                                        value="{{ progress.user_id }}">
+                                    <input type="hidden"
+                                           name="user_id"
+                                           value="{{ progress.user_id }}">
 
                                     <div class="goal-edit-grid">
 
@@ -702,29 +671,27 @@ Weekly goals, daily targets, and activity reporting
                                                 Cold Calls
                                             </label>
 
-                                            <input
-                                                type="number"
-                                                id="cold_{{ progress.user_id }}"
-                                                name="cold_calls"
-                                                min="0"
-                                                max="10000"
-                                                required
-                                                value="{{ progress.record.cold_calls }}">
+                                            <input type="number"
+                                                   id="cold_{{ progress.user_id }}"
+                                                   name="cold_calls"
+                                                   min="0"
+                                                   max="10000"
+                                                   required
+                                                   value="{{ progress.record.cold_calls }}">
                                         </div>
 
                                         <div class="goal-edit-field">
                                             <label for="calls_{{ progress.user_id }}">
-                                                Phone Calls + Emails
+                                                Calls + Emails
                                             </label>
 
-                                            <input
-                                                type="number"
-                                                id="calls_{{ progress.user_id }}"
-                                                name="calls_emails"
-                                                min="0"
-                                                max="10000"
-                                                required
-                                                value="{{ progress.record.calls_emails }}">
+                                            <input type="number"
+                                                   id="calls_{{ progress.user_id }}"
+                                                   name="calls_emails"
+                                                   min="0"
+                                                   max="10000"
+                                                   required
+                                                   value="{{ progress.record.calls_emails }}">
                                         </div>
 
                                         <div class="goal-edit-field">
@@ -732,14 +699,13 @@ Weekly goals, daily targets, and activity reporting
                                                 Meetings
                                             </label>
 
-                                            <input
-                                                type="number"
-                                                id="meetings_{{ progress.user_id }}"
-                                                name="meetings"
-                                                min="0"
-                                                max="10000"
-                                                required
-                                                value="{{ progress.record.meetings }}">
+                                            <input type="number"
+                                                   id="meetings_{{ progress.user_id }}"
+                                                   name="meetings"
+                                                   min="0"
+                                                   max="10000"
+                                                   required
+                                                   value="{{ progress.record.meetings }}">
                                         </div>
 
                                         <div class="goal-edit-field">
@@ -747,22 +713,20 @@ Weekly goals, daily targets, and activity reporting
                                                 Quotes
                                             </label>
 
-                                            <input
-                                                type="number"
-                                                id="quotes_{{ progress.user_id }}"
-                                                name="quotes"
-                                                min="0"
-                                                max="10000"
-                                                required
-                                                value="{{ progress.record.quotes }}">
+                                            <input type="number"
+                                                   id="quotes_{{ progress.user_id }}"
+                                                   name="quotes"
+                                                   min="0"
+                                                   max="10000"
+                                                   required
+                                                   value="{{ progress.record.quotes }}">
                                         </div>
 
                                     </div>
 
                                     <div class="goal-save">
-                                        <button
-                                            type="submit"
-                                            class="btn btn-primary">
+                                        <button type="submit"
+                                                class="btn btn-primary">
                                             Save Goals
                                         </button>
                                     </div>
@@ -779,20 +743,45 @@ Weekly goals, daily targets, and activity reporting
 
             {% endfor %}
 
+            <!-- PREVIOUS / NEXT REP -->
+
+            {% if is_manager and visible_reps|length > 1 %}
+
+                <div class="rep-navigation">
+
+                    <button type="button"
+                            class="btn btn-secondary"
+                            id="previous-rep">
+                        &larr; Previous Rep
+                    </button>
+
+                    <span class="rep-navigation-label"
+                          id="rep-navigation-label">
+                        1 of {{ visible_reps|length }}
+                    </span>
+
+                    <button type="button"
+                            class="btn btn-secondary"
+                            id="next-rep">
+                        Next Rep &rarr;
+                    </button>
+
+                </div>
+
+            {% endif %}
+
         {% else %}
 
             <div class="empty-state">
-                No tracked representative is associated
-                with this account.
+                This account is not included in
+                individual activity tracking.
             </div>
 
         {% endif %}
 
     </div>
 
-    <!-- ======================================
-         WEEKLY ACTIVITY REPORT
-         ====================================== -->
+    <!-- WEEKLY REPORT -->
 
     <div class="metrics-panel">
 
@@ -800,7 +789,6 @@ Weekly goals, daily targets, and activity reporting
 
             <div>
                 <h3>Weekly Activity</h3>
-
                 <p class="metrics-subtitle">
                     {{ week_start.strftime("%B %d, %Y") }}
                     through
@@ -810,48 +798,41 @@ Weekly goals, daily targets, and activity reporting
 
             <div class="metrics-actions">
 
-                <a
-                    href="{{ url_for(
-                        'metrics',
-                        week_offset=week_offset - 1,
-                        month_offset=month_offset
-                    ) }}"
-                    class="btn btn-secondary btn-small">
+                <a href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset - 1,
+                    month_offset=month_offset
+                ) }}"
+                   class="btn btn-secondary btn-small">
                     &larr; Previous Week
                 </a>
 
                 {% if week_offset != 0 %}
-
-                    <a
-                        href="{{ url_for(
-                            'metrics',
-                            week_offset=0,
-                            month_offset=month_offset
-                        ) }}"
-                        class="btn btn-secondary btn-small">
-                        Current Week
-                    </a>
-
-                {% endif %}
-
-                <a
-                    href="{{ url_for(
+                    <a href="{{ url_for(
                         'metrics',
-                        week_offset=week_offset + 1,
+                        week_offset=0,
                         month_offset=month_offset
                     ) }}"
-                    class="btn btn-secondary btn-small">
+                       class="btn btn-secondary btn-small">
+                        Current Week
+                    </a>
+                {% endif %}
+
+                <a href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset + 1,
+                    month_offset=month_offset
+                ) }}"
+                   class="btn btn-secondary btn-small">
                     Next Week &rarr;
                 </a>
 
             </div>
-
         </div>
 
         {% if visible_reps %}
 
             <div class="metrics-table-wrap">
-
                 <table class="metrics-table">
 
                     <thead>
@@ -868,49 +849,38 @@ Weekly goals, daily targets, and activity reporting
                     </thead>
 
                     <tbody>
-
                         {% for rep in visible_reps %}
-
                             {% set data = rep_metrics[rep]["weekly"] %}
 
                             <tr>
-                                <td>
-                                    <strong>{{ rep }}</strong>
-                                </td>
-
+                                <td><strong>{{ rep }}</strong></td>
                                 <td>{{ data["Cold Call"] }}</td>
                                 <td>{{ data["Phone Call"] }}</td>
                                 <td>{{ data["Email"] }}</td>
                                 <td>{{ data["Meeting"] }}</td>
                                 <td>{{ data["Quote"] }}</td>
                                 <td>{{ data["Sale"] }}</td>
-
                                 <td class="metrics-total">
                                     {{ data["Total"] }}
                                 </td>
                             </tr>
-
                         {% endfor %}
-
                     </tbody>
 
                 </table>
-
             </div>
 
         {% else %}
 
             <div class="empty-state">
-                No tracked sales representatives found.
+                No tracked sales activity available.
             </div>
 
         {% endif %}
 
     </div>
 
-    <!-- ======================================
-         MONTHLY ACTIVITY REPORT
-         ====================================== -->
+    <!-- MONTHLY REPORT -->
 
     <div class="metrics-panel">
 
@@ -918,7 +888,6 @@ Weekly goals, daily targets, and activity reporting
 
             <div>
                 <h3>Monthly Activity</h3>
-
                 <p class="metrics-subtitle">
                     {{ month_start.strftime("%B %Y") }}
                 </p>
@@ -926,48 +895,41 @@ Weekly goals, daily targets, and activity reporting
 
             <div class="metrics-actions">
 
-                <a
-                    href="{{ url_for(
-                        'metrics',
-                        week_offset=week_offset,
-                        month_offset=month_offset - 1
-                    ) }}"
-                    class="btn btn-secondary btn-small">
+                <a href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset,
+                    month_offset=month_offset - 1
+                ) }}"
+                   class="btn btn-secondary btn-small">
                     &larr; Previous Month
                 </a>
 
                 {% if month_offset != 0 %}
-
-                    <a
-                        href="{{ url_for(
-                            'metrics',
-                            week_offset=week_offset,
-                            month_offset=0
-                        ) }}"
-                        class="btn btn-secondary btn-small">
-                        Current Month
-                    </a>
-
-                {% endif %}
-
-                <a
-                    href="{{ url_for(
+                    <a href="{{ url_for(
                         'metrics',
                         week_offset=week_offset,
-                        month_offset=month_offset + 1
+                        month_offset=0
                     ) }}"
-                    class="btn btn-secondary btn-small">
+                       class="btn btn-secondary btn-small">
+                        Current Month
+                    </a>
+                {% endif %}
+
+                <a href="{{ url_for(
+                    'metrics',
+                    week_offset=week_offset,
+                    month_offset=month_offset + 1
+                ) }}"
+                   class="btn btn-secondary btn-small">
                     Next Month &rarr;
                 </a>
 
             </div>
-
         </div>
 
         {% if visible_reps %}
 
             <div class="metrics-table-wrap">
-
                 <table class="metrics-table">
 
                     <thead>
@@ -984,40 +946,32 @@ Weekly goals, daily targets, and activity reporting
                     </thead>
 
                     <tbody>
-
                         {% for rep in visible_reps %}
-
                             {% set data = rep_metrics[rep]["monthly"] %}
 
                             <tr>
-                                <td>
-                                    <strong>{{ rep }}</strong>
-                                </td>
-
+                                <td><strong>{{ rep }}</strong></td>
                                 <td>{{ data["Cold Call"] }}</td>
                                 <td>{{ data["Phone Call"] }}</td>
                                 <td>{{ data["Email"] }}</td>
                                 <td>{{ data["Meeting"] }}</td>
                                 <td>{{ data["Quote"] }}</td>
                                 <td>{{ data["Sale"] }}</td>
-
                                 <td class="metrics-total">
                                     {{ data["Total"] }}
                                 </td>
                             </tr>
 
                         {% endfor %}
-
                     </tbody>
 
                 </table>
-
             </div>
 
         {% else %}
 
             <div class="empty-state">
-                No tracked sales representatives found.
+                No monthly activity available.
             </div>
 
         {% endif %}
@@ -1025,5 +979,95 @@ Weekly goals, daily targets, and activity reporting
     </div>
 
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const sections = Array.from(
+        document.querySelectorAll("[data-rep-goals]")
+    );
+
+    const previousButton =
+        document.getElementById("previous-rep");
+
+    const nextButton =
+        document.getElementById("next-rep");
+
+    const label =
+        document.getElementById("rep-navigation-label");
+
+    if (sections.length === 0) {
+        return;
+    }
+
+    const storageKey = "metrics_selected_rep";
+
+    let selectedIndex = 0;
+
+    try {
+        const savedRep = sessionStorage.getItem(storageKey);
+
+        const savedIndex = sections.findIndex(function (section) {
+            return section.dataset.repGoals === savedRep;
+        });
+
+        if (savedIndex >= 0) {
+            selectedIndex = savedIndex;
+        }
+    } catch (error) {
+        // Ignore storage restrictions.
+    }
+
+    function showRep(index) {
+
+        selectedIndex = Math.max(
+            0,
+            Math.min(index, sections.length - 1)
+        );
+
+        sections.forEach(function (section, i) {
+            section.hidden = i !== selectedIndex;
+        });
+
+        const selectedName =
+            sections[selectedIndex].dataset.repGoals;
+
+        if (label) {
+            label.textContent =
+                `${selectedIndex + 1} of ${sections.length} — ${selectedName}`;
+        }
+
+        if (previousButton) {
+            previousButton.disabled = selectedIndex === 0;
+        }
+
+        if (nextButton) {
+            nextButton.disabled =
+                selectedIndex === sections.length - 1;
+        }
+
+        try {
+            sessionStorage.setItem(storageKey, selectedName);
+        } catch (error) {
+            // Ignore storage restrictions.
+        }
+    }
+
+    if (previousButton) {
+        previousButton.addEventListener("click", function () {
+            showRep(selectedIndex - 1);
+        });
+    }
+
+    if (nextButton) {
+        nextButton.addEventListener("click", function () {
+            showRep(selectedIndex + 1);
+        });
+    }
+
+    showRep(selectedIndex);
+
+});
+</script>
 
 {% endblock %}
